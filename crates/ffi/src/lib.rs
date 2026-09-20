@@ -300,6 +300,18 @@ fn composition_json(session: &Session) -> String {
     out
 }
 
+/// 本地 AI 增强：模型目录 JSON（静态信息，前端用于渲染选择列表）。
+#[unsafe(no_mangle)]
+pub extern "C" fn inputflow_ai_catalog_json() -> *mut c_char {
+    guard_ptr(|| into_c(inputflow_ai::catalog_json()))
+}
+
+/// 本地 AI 增强：按系统总内存给出每个用途的推荐模型 JSON。
+#[unsafe(no_mangle)]
+pub extern "C" fn inputflow_ai_recommend_json(total_ram_mb: u64) -> *mut c_char {
+    guard_ptr(|| into_c(inputflow_ai::recommend_json(total_ram_mb)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -365,5 +377,15 @@ mod tests {
         assert!(!p.is_null());
         let v = unsafe { CStr::from_ptr(p) }.to_str().unwrap();
         assert!(!v.is_empty());
+    }
+
+    #[test]
+    fn ai_catalog_and_recommend_json() {
+        let cat = unsafe { call_str(|| inputflow_ai_catalog_json()) }.unwrap();
+        assert!(cat.contains("\"id\":\"whisper-base\""), "{cat}");
+
+        let rec = unsafe { call_str(|| inputflow_ai_recommend_json(16 * 1024)) }.unwrap();
+        assert!(rec.contains("\"kind\":\"speech\""), "{rec}");
+        assert!(rec.contains("\"level\":\"suggested\""), "{rec}");
     }
 }

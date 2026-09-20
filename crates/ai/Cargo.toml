@@ -1,0 +1,9 @@
+[package]
+name = "inputflow-ai"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "InputFlow 本地 AI 增强：模型目录、内存预算与推荐（零依赖、无网络）"
+
+[dependencies]

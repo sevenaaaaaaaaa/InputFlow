@@ -42,6 +42,16 @@ BIN="$HOME/Library/Input Methods/InputFlow.app/Contents/MacOS/InputFlow"
 | 单按左 Shift | 中/英切换（不影响正常大写输入） |
 | 标点（未组合时） | 中文模式自动转全角：`，。？！；：、（）【】《》“”‘’` 等 |
 | 输入法菜单 | 切换 拼音 / 小鹤双拼 / 微软双拼 / 自然码 / English / 日本語 |
+| 输入法菜单 | AI 增强…（内置统计模型状态、小模型下载/校验/启停） |
+
+## 本地 AI 增强
+
+- **L0 统计模型**（默认开启）：用户词频 + 历史二元组重排，内存 < 1 MB，零下载；
+- **L2 小模型**（默认关闭）：Gemma 3 / Qwen2.5 / Qwen3 / Whisper，按本机内存推荐；
+  下载仅在你点击后发生，完成后做 sha256 校验，存放于
+  `~/Library/Application Support/InputFlow/models/`，可一键删除；
+- 神经模型推理运行时（llama.cpp / whisper.cpp）将在 M2 接入；
+- 设计约束见 `docs/adr/0004-local-ai-optional-models.md`。
 
 ## 词典
 

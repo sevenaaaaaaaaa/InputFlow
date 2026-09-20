@@ -31,6 +31,8 @@ swiftc -O -wmo \
     "$HERE/Sources/main.swift" \
     "$HERE/Sources/Engine.swift" \
     "$HERE/Sources/CandidateWindow.swift" \
+    "$HERE/Sources/AIModelStore.swift" \
+    "$HERE/Sources/SettingsWindow.swift" \
     "$HERE/Sources/InputController.swift"
 
 cp "$HERE/Info.plist" "$CONTENTS/Info.plist"

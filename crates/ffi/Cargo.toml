@@ -14,3 +14,4 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 inputflow-core = { workspace = true }
 inputflow-dict = { workspace = true }
 inputflow-engine = { workspace = true }
+inputflow-ai = { workspace = true }

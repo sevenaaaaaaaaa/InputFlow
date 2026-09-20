@@ -100,6 +100,32 @@ final class InputFlowEngine {
         guard let h = handle else { return -1 }
         return Int(tsv.withCString { inputflow_user_import(h, $0) })
     }
+
+    // MARK: - 本地 AI 增强（目录与推荐；下载由 AIModelStore 负责）
+
+    private static func takeStatic(_ ptr: UnsafeMutablePointer<CChar>?) -> String? {
+        guard let ptr else { return nil }
+        defer { inputflow_free_string(ptr) }
+        return String(cString: ptr)
+    }
+
+    static func aiCatalog() -> [AIModelInfo] {
+        guard let json = takeStatic(inputflow_ai_catalog_json()),
+              let data = json.data(using: .utf8),
+              let models = try? JSONDecoder().decode([AIModelInfo].self, from: data)
+        else { return [] }
+        return models
+    }
+
+    static func aiRecommend(totalRamMb: Int) -> AIRecommendationSet {
+        guard let json = takeStatic(inputflow_ai_recommend_json(UInt64(totalRamMb))),
+              let data = json.data(using: .utf8),
+              let set = try? JSONDecoder().decode(AIRecommendationSet.self, from: data)
+        else {
+            return AIRecommendationSet(totalRamMb: totalRamMb, recommendations: [])
+        }
+        return set
+    }
 }
 
 enum InputFlowMode: String, CaseIterable {

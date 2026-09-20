@@ -19,6 +19,8 @@ pub struct Session {
     en: Arc<EnDecoder>,
     ja: JaDecoder,
     user: UserModel,
+    /// 上一个上屏内容，用于二元组预测（只在内存、进程退出即消失）。
+    last_committed: Option<String>,
 }
 
 impl Session {
@@ -35,7 +37,18 @@ impl Session {
             en: EnDecoder::embedded_shared(),
             ja: JaDecoder,
             user: UserModel::new(),
+            last_committed: None,
         }
+    }
+
+    /// 上一个上屏内容（候选预测上下文）。
+    pub fn last_committed(&self) -> Option<&str> {
+        self.last_committed.as_deref()
+    }
+
+    /// 清空预测上下文（例如前端切换焦点、退出输入状态时调用）。
+    pub fn reset_context(&mut self) {
+        self.last_committed = None;
     }
 
     pub fn mode(&self) -> Mode {
@@ -98,6 +111,7 @@ impl Session {
         let cand = self.comp.candidates.get(index)?.clone();
         self.consume(cand.consumed);
         self.user.record(&cand.text);
+        self.learn_context(&cand.text);
         Some(cand.text)
     }
 
@@ -107,8 +121,16 @@ impl Session {
             return None;
         }
         let s = std::mem::take(&mut self.buffer);
+        self.learn_context(&s);
         self.refresh();
         Some(s)
+    }
+
+    fn learn_context(&mut self, text: &str) {
+        if let Some(prev) = self.last_committed.take() {
+            self.user.record_pair(&prev, text);
+        }
+        self.last_committed = Some(text.to_string());
     }
 
     fn consume(&mut self, n: usize) {
@@ -148,6 +170,9 @@ impl Session {
         };
         for c in &mut cands {
             c.score += self.user.bonus(&c.text);
+            if let Some(prev) = &self.last_committed {
+                c.score += self.user.pair_bonus(prev, &c.text);
+            }
         }
         // 分层排序：literal 垫底、覆盖输入多的优先，用户词只在同层内重排。
         cands.sort_by(inputflow_core::Candidate::rank_cmp);
@@ -279,6 +304,69 @@ mod tests {
             c.last().map(|x| x.kind),
             Some(inputflow_core::CandidateKind::Literal),
             "原样上屏永远垫底"
+        );
+    }
+
+    #[test]
+    fn bigram_context_boosts_next_word() {
+        let mut s = session(Mode::Pinyin);
+
+        // 训练「北京 → 世界」：两次上屏形成二元组
+        for _ in 0..3 {
+            type_str(&mut s, "beijing");
+            let idx = s
+                .composition()
+                .candidates
+                .iter()
+                .position(|c| c.text == "北京")
+                .expect("应有「北京」");
+            s.select(idx);
+            type_str(&mut s, "shijie");
+            let idx = s
+                .composition()
+                .candidates
+                .iter()
+                .position(|c| c.text == "世界")
+                .expect("应有「世界」");
+            s.select(idx);
+        }
+        assert!(s.user_model().pair_count("北京", "世界") > 0);
+
+        // 上下文是「北京」时，世界应得到加分
+        type_str(&mut s, "beijing");
+        let idx = s
+            .composition()
+            .candidates
+            .iter()
+            .position(|c| c.text == "北京")
+            .expect("应有「北京」");
+        s.select(idx);
+        assert_eq!(s.last_committed(), Some("北京"));
+        type_str(&mut s, "shijie");
+        let with_ctx = s
+            .composition()
+            .candidates
+            .iter()
+            .find(|c| c.text == "世界")
+            .expect("应有「世界」")
+            .score;
+
+        // 上下文换成别的词后，同一候选分数应更低
+        s.reset_context();
+        s.clear();
+        type_str(&mut s, "nihao");
+        s.select(0);
+        type_str(&mut s, "shijie");
+        let without_ctx = s
+            .composition()
+            .candidates
+            .iter()
+            .find(|c| c.text == "世界")
+            .expect("应有「世界」")
+            .score;
+        assert!(
+            with_ctx > without_ctx,
+            "有上下文 {with_ctx} 应高于无上下文 {without_ctx}"
         );
     }
 

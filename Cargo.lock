@@ -3,6 +3,10 @@
 version = 4
 
 [[package]]
+name = "inputflow-ai"
+version = "0.1.0"
+
+[[package]]
 name = "inputflow-core"
 version = "0.1.0"
 
@@ -35,6 +39,7 @@ dependencies = [
 name = "inputflow-ffi"
 version = "0.1.0"
 dependencies = [
+ "inputflow-ai",
  "inputflow-core",
  "inputflow-dict",
  "inputflow-engine",

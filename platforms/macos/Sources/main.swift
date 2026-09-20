@@ -95,6 +95,25 @@ if installArgs.count > 1 {
         print("\(inputSourceID()) \(describe(source))")
         exit(0)
 
+    case "--ai-dump":
+        for model in InputFlowEngine.aiCatalog() {
+            print(
+                "\(model.id)\t\(model.sizeBytes)\t\(model.ramMb)MB\t\(model.kinds.joined(separator: ","))\t\(model.license)"
+            )
+        }
+        let ramMb = Int(ProcessInfo.processInfo.physicalMemory / (1024 * 1024))
+        let rec = InputFlowEngine.aiRecommend(totalRamMb: ramMb)
+        print("totalRamMb=\(rec.totalRamMb)")
+        for r in rec.recommendations {
+            print("\(r.kind)\t\(r.modelId ?? "-")\t\(r.levelLabel)")
+        }
+        exit(0)
+
+    case "--ai-settings":
+        AISettingsWindowController.shared.show()
+        NSApplication.shared.run()
+        exit(0)
+
     default:
         break
     }

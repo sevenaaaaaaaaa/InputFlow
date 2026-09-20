@@ -8,6 +8,7 @@ members = [
     "crates/ja",
     "crates/sync",
     "crates/engine",
+    "crates/ai",
     "crates/ffi",
     "xtask",
 ]
@@ -29,6 +30,7 @@ inputflow-en = { path = "crates/en" }
 inputflow-ja = { path = "crates/ja" }
 inputflow-sync = { path = "crates/sync" }
 inputflow-engine = { path = "crates/engine" }
+inputflow-ai = { path = "crates/ai" }
 
 [profile.release]
 lto = "thin"

@@ -43,10 +43,17 @@ final class InputFlowInputController: IMKInputController {
             menu.addItem(item)
         }
         menu.addItem(.separator())
+        let ai = NSMenuItem(title: "AI 增强…", action: #selector(openAISettings(_:)), keyEquivalent: "")
+        ai.target = self
+        menu.addItem(ai)
         let prefs = NSMenuItem(title: "打开词典目录…", action: #selector(openDictionaryFolder(_:)), keyEquivalent: "")
         prefs.target = self
         menu.addItem(prefs)
         return menu
+    }
+
+    @objc private func openAISettings(_ sender: Any) {
+        AISettingsWindowController.shared.show()
     }
 
     @objc private func selectMode(_ sender: NSMenuItem) {

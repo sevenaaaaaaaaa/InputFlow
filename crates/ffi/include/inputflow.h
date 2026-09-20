@@ -57,6 +57,10 @@ int32_t inputflow_user_import(InputFlowSession *session, const char *tsv);
 
 void inputflow_free_string(char *s);
 
+/* 本地 AI 增强（零云 API）：模型目录与内存推荐，JSON 由调用方释放。 */
+char *inputflow_ai_catalog_json(void);
+char *inputflow_ai_recommend_json(uint64_t total_ram_mb);
+
 /* 版本字符串（静态，勿释放）。 */
 const char *inputflow_version(void);
 
