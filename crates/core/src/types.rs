@@ -106,6 +106,10 @@ pub enum CandidateKind {
     Kana,
     /// 表情符号
     Emoji,
+    /// Unicode 符号（`u` 前缀输入）
+    Symbol,
+    /// 自动学到的常用短语
+    Phrase,
     /// 原样上屏
     Literal,
 }
@@ -118,6 +122,8 @@ impl CandidateKind {
             CandidateKind::Char => "char",
             CandidateKind::Kana => "kana",
             CandidateKind::Emoji => "emoji",
+            CandidateKind::Symbol => "symbol",
+            CandidateKind::Phrase => "phrase",
             CandidateKind::Literal => "literal",
         }
     }

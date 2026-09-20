@@ -167,6 +167,31 @@ pub unsafe extern "C" fn inputflow_mode(session: *mut InputFlowSession) -> *mut 
     })
 }
 
+/// 简繁显示开关：非 0 表示候选转成繁体。返回 1 表示设置成功。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_set_traditional(session: *mut InputFlowSession, on: i32) -> i32 {
+    if session.is_null() {
+        return 0;
+    }
+    guard_int(|| {
+        let session = unsafe { &mut *session };
+        session.inner.set_traditional(on != 0);
+        1
+    })
+}
+
+/// 当前是否繁体显示。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_traditional(session: *mut InputFlowSession) -> i32 {
+    if session.is_null() {
+        return 0;
+    }
+    guard_int(|| {
+        let session = unsafe { &*session };
+        i32::from(session.inner.traditional())
+    })
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn inputflow_composition_json(session: *mut InputFlowSession) -> *mut c_char {
     if session.is_null() {
@@ -233,6 +258,39 @@ pub unsafe extern "C" fn inputflow_user_import(
         let Some(tsv) = tsv else { return -1 };
         let session = unsafe { &mut *session };
         session.inner.user_model_mut().import_tsv(&tsv) as i32
+    })
+}
+
+/// 导出用户数据备份包（明文 TSV + 版本头 + CRC32）。前端负责加密落盘。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_backup_export(session: *mut InputFlowSession) -> *mut c_char {
+    if session.is_null() {
+        return std::ptr::null_mut();
+    }
+    guard_ptr(|| {
+        let session = unsafe { &*session };
+        into_c(session.inner.export_backup())
+    })
+}
+
+/// 导入备份包。`merge` 非 0 时同名条目取较大次数；返回条目数，失败返回 -1。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_backup_import(
+    session: *mut InputFlowSession,
+    text: *const c_char,
+    merge: i32,
+) -> i32 {
+    if session.is_null() {
+        return -1;
+    }
+    let text = unsafe { cstr(text) };
+    guard_int(|| {
+        let Some(text) = text else { return -1 };
+        let session = unsafe { &mut *session };
+        match session.inner.import_backup(&text, merge != 0) {
+            Ok(n) => n as i32,
+            Err(_) => -1,
+        }
     })
 }
 
@@ -368,6 +426,46 @@ mod tests {
             let tsv = call_str(|| inputflow_user_export(session)).unwrap();
             assert_eq!(tsv, "你好\t3\n");
             inputflow_free(session);
+        }
+    }
+
+    #[test]
+    fn traditional_toggle_via_c_abi() {
+        let session = unsafe { inputflow_new(c"pinyin".as_ptr()) };
+        unsafe {
+            assert_eq!(inputflow_traditional(session), 0);
+            assert_eq!(inputflow_set_traditional(session, 1), 1);
+            assert_eq!(inputflow_traditional(session), 1);
+            for ch in ["x", "u", "e", "x", "i"] {
+                let c = CString::new(ch).unwrap();
+                inputflow_feed(session, c.as_ptr());
+            }
+            let json = call_str(|| inputflow_composition_json(session)).unwrap();
+            assert!(json.contains("學習"), "{json}");
+            inputflow_free(session);
+        }
+    }
+
+    #[test]
+    fn backup_roundtrip_via_c_abi() {
+        let a = unsafe { inputflow_new(c"pinyin".as_ptr()) };
+        let b = unsafe { inputflow_new(c"pinyin".as_ptr()) };
+        unsafe {
+            assert_eq!(inputflow_user_import(a, c"你好\t3\n".as_ptr()), 1);
+            let pack = call_str(|| inputflow_backup_export(a)).unwrap();
+            assert!(pack.starts_with("#IFBAK1"), "{pack}");
+
+            let c_pack = CString::new(pack).unwrap();
+            assert_eq!(inputflow_backup_import(b, c_pack.as_ptr(), 0), 1);
+            assert_eq!(call_str(|| inputflow_user_export(b)).unwrap(), "你好\t3\n");
+
+            assert_eq!(inputflow_backup_import(b, c"坏包".as_ptr(), 0), -1);
+            assert_eq!(
+                inputflow_backup_import(std::ptr::null_mut(), c_pack.as_ptr(), 0),
+                -1
+            );
+            inputflow_free(a);
+            inputflow_free(b);
         }
     }
 

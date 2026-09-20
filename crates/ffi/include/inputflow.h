@@ -38,6 +38,10 @@ int32_t inputflow_set_mode(InputFlowSession *session, const char *mode);
 /* 当前模式 id。 */
 char *inputflow_mode(InputFlowSession *session);
 
+/* 简繁显示：on 非 0 时候选转成繁体（学习与重排仍以简体为准）。 */
+int32_t inputflow_set_traditional(InputFlowSession *session, int32_t on);
+int32_t inputflow_traditional(InputFlowSession *session);
+
 /* 组合态 JSON：
  * {"raw":"nihao","preedit":"ni hao","candidates":[
  *    {"text":"你好","consumed":5,"kind":"sentence","comment":"ni hao"}]}
@@ -54,6 +58,11 @@ char *inputflow_commit_raw(InputFlowSession *session);
 char *inputflow_user_export(InputFlowSession *session);
 
 int32_t inputflow_user_import(InputFlowSession *session, const char *tsv);
+
+/* 备份与恢复：导出带版本头与 CRC32 的明文包（前端负责加密落盘、明文导出二次确认）；
+ * 导入时 merge 非 0 表示同名条目取较大次数，返回条目数，失败返回 -1。 */
+char *inputflow_backup_export(InputFlowSession *session);
+int32_t inputflow_backup_import(InputFlowSession *session, const char *text, int32_t merge);
 
 void inputflow_free_string(char *s);
 

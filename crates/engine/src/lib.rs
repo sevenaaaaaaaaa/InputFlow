@@ -2,12 +2,14 @@
 
 use std::sync::Arc;
 
+use inputflow_core::backup::{self, BackupError};
 use inputflow_core::{Composition, Decoder, Mode, UserModel};
 use inputflow_dict::Dictionary;
 use inputflow_emoji::EmojiDecoder;
 use inputflow_en::EnDecoder;
 use inputflow_ja::JaDecoder;
 use inputflow_pinyin::{Layout, PinyinDecoder};
+use inputflow_symbol::SymbolDecoder;
 
 /// 单次组合态最多返回的候选数（前端分页展示）。
 pub const MAX_CANDIDATES: usize = 30;
@@ -15,6 +17,23 @@ pub const MAX_CANDIDATES: usize = 30;
 const MAX_MIXED_ENGLISH: usize = 5;
 /// 中英混输里「精确英文词」判定的最短长度（避免 `he`/`can` 这类拼音噪声）。
 const MIN_EXACT_ENGLISH: usize = 4;
+
+// ——— AI 辅助短语（不做手动短语表，全部自动学习）———
+/// 参与合并的最近上屏段数：窗口内的所有后缀组合都会被记一次。
+const PHRASE_WINDOW: usize = 3;
+/// 短语的按键序列上限，超出不再学（太长的句子复用率低）。
+const MAX_PHRASE_KEYS: usize = 14;
+/// 短语的字数上限。
+const MAX_PHRASE_CHARS: usize = 8;
+/// 触发短语补全的最短按键数。
+const MIN_PHRASE_QUERY: usize = 3;
+/// 按键完全命中时的最低学习次数。
+const MIN_PHRASE_EXACT: u32 = 2;
+/// 按键只是前缀（补全）时的最低学习次数——门槛更高，避免打一半就被抢。
+const MIN_PHRASE_PREFIX: u32 = 3;
+/// 短语候选的基础分（对齐整句候选的量级，见 `inputflow_pinyin` 的打分）。
+const PHRASE_SCORE_EXACT: f64 = 18.0;
+const PHRASE_SCORE_PREFIX: f64 = 12.0;
 
 pub struct Session {
     mode: Mode,
@@ -24,9 +43,16 @@ pub struct Session {
     en: Arc<EnDecoder>,
     ja: JaDecoder,
     emoji: EmojiDecoder,
+    symbol: SymbolDecoder,
     user: UserModel,
     /// 上一个上屏内容，用于二元组预测（只在内存、进程退出即消失）。
     last_committed: Option<String>,
+    /// 最近几段上屏的 `(按键, 文本)`，用于自动合成短语。
+    recent: Vec<(String, String)>,
+    /// 候选是否转成繁体显示（学习与重排始终用简体原文）。
+    traditional: bool,
+    /// 与 `comp.candidates` 同下标的简体原文，仅在繁体显示时非空。
+    origins: Vec<String>,
 }
 
 impl Session {
@@ -43,8 +69,12 @@ impl Session {
             en: EnDecoder::embedded_shared(),
             ja: JaDecoder,
             emoji: EmojiDecoder,
+            symbol: SymbolDecoder,
             user: UserModel::new(),
             last_committed: None,
+            recent: Vec::new(),
+            traditional: false,
+            origins: Vec::new(),
         };
         session.refresh();
         session
@@ -58,10 +88,24 @@ impl Session {
     /// 清空预测上下文（例如前端切换焦点、退出输入状态时调用）。
     pub fn reset_context(&mut self) {
         self.last_committed = None;
+        self.recent.clear();
     }
 
     pub fn mode(&self) -> Mode {
         self.mode
+    }
+
+    /// 候选是否以繁体呈现。
+    pub fn traditional(&self) -> bool {
+        self.traditional
+    }
+
+    /// 切换简/繁显示。只影响呈现与上屏文本，用户词与重排仍以简体为准。
+    pub fn set_traditional(&mut self, on: bool) {
+        if self.traditional != on {
+            self.traditional = on;
+            self.refresh();
+        }
     }
 
     pub fn buffer(&self) -> &str {
@@ -78,6 +122,30 @@ impl Session {
 
     pub fn user_model_mut(&mut self) -> &mut UserModel {
         &mut self.user
+    }
+
+    /// 导出用户数据备份包（带版本头与 CRC32，见 `inputflow_core::backup`）。
+    ///
+    /// 包内是明文 TSV：写盘时由前端用本机密钥加密，导出明文须用户二次确认。
+    pub fn export_backup(&self) -> String {
+        let body = self.user.export_tsv();
+        let items = body.lines().filter(|l| !l.is_empty()).count();
+        backup::pack(backup::KIND_USERDATA, items, &body)
+    }
+
+    /// 导入备份包。`merge` 为真时同名条目取较大次数（重复导入不翻倍），
+    /// 否则以备份为准覆盖。校验失败时**不改动**任何现有数据。
+    pub fn import_backup(&mut self, text: &str, merge: bool) -> Result<usize, BackupError> {
+        let b = backup::unpack(text)?;
+        if b.kind != backup::KIND_USERDATA {
+            return Err(BackupError::NotBackup);
+        }
+        let n = if merge {
+            self.user.merge_tsv(&b.body)
+        } else {
+            self.user.import_tsv(&b.body)
+        };
+        Ok(n)
     }
 
     /// 前端按键入口。只接受字母与 `'`、`;`（微软双拼 ing 键）。
@@ -119,10 +187,19 @@ impl Session {
     /// 选择候选词上屏；返回提交文本，剩余缓冲继续解码。
     pub fn select(&mut self, index: usize) -> Option<String> {
         let cand = self.comp.candidates.get(index)?.clone();
+        let keys: String = self.buffer.chars().take(cand.consumed).collect();
+        // 学习始终记简体原文：繁体只是呈现层，换回简体显示时重排仍然生效。
+        let learned = self
+            .origins
+            .get(index)
+            .cloned()
+            .unwrap_or_else(|| cand.text.clone());
         self.consume(cand.consumed);
         if self.mode != Mode::Emoji {
-            self.user.record(&cand.text);
-            self.learn_context(&cand.text);
+            self.user.record(&learned);
+            // 短语要用「上一段」的按键，必须排在 learn_context 之前
+            self.learn_phrase(&keys, &learned);
+            self.learn_context(&learned);
         }
         Some(cand.text)
     }
@@ -136,6 +213,43 @@ impl Session {
         self.learn_context(&s);
         self.refresh();
         Some(s)
+    }
+
+    /// 自动学习短语：把最近几段上屏与本次拼接，窗口内的每个后缀组合各记一次。
+    ///
+    /// 这就是「AI 辅助短语」——没有手动短语表，用户重复打出来的搭配自己沉淀下来。
+    fn learn_phrase(&mut self, keys: &str, text: &str) {
+        if !matches!(self.mode, Mode::Pinyin | Mode::Shuangpin(_)) {
+            self.recent.clear();
+            return;
+        }
+        let keys: String = keys
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .map(|c| c.to_ascii_lowercase())
+            .collect();
+        // 英文、符号、表情不进短语库：它们不是「打出来的词」。
+        if keys.is_empty() || !text.chars().all(is_phrase_char) {
+            self.recent.clear();
+            return;
+        }
+        for start in (0..self.recent.len()).rev() {
+            let mut k = String::new();
+            let mut t = String::new();
+            for (pk, pt) in &self.recent[start..] {
+                k.push_str(pk);
+                t.push_str(pt);
+            }
+            k.push_str(&keys);
+            t.push_str(text);
+            if k.chars().count() <= MAX_PHRASE_KEYS && t.chars().count() <= MAX_PHRASE_CHARS {
+                self.user.record_phrase(&k, &t);
+            }
+        }
+        self.recent.push((keys, text.to_string()));
+        if self.recent.len() > PHRASE_WINDOW {
+            self.recent.remove(0);
+        }
     }
 
     fn learn_context(&mut self, text: &str) {
@@ -160,8 +274,21 @@ impl Session {
     }
 
     fn refresh(&mut self) {
+        self.origins.clear();
         if self.buffer.is_empty() && self.mode != Mode::Emoji {
             self.comp = Composition::default();
+            return;
+        }
+        // `u` 前缀进符号模式：普通话没有以 u 开头的音节，不会和拼音抢输入。
+        let symbol_hit =
+            if self.mode == Mode::Pinyin && self.buffer.starts_with(inputflow_symbol::TRIGGER) {
+                let c = self.symbol.decode_buffer(&self.buffer);
+                (!c.is_empty()).then_some(c)
+            } else {
+                None
+            };
+        if let Some(cands) = symbol_hit {
+            self.finish(cands, self.buffer.clone());
             return;
         }
         let (mut cands, preedit) = match self.mode {
@@ -189,17 +316,80 @@ impl Session {
                 }
             }
             if matches!(self.mode, Mode::Pinyin | Mode::Shuangpin(_)) {
+                self.push_phrase_candidates(&mut cands);
                 self.push_english_candidates(&mut cands);
             }
         }
+        self.finish(cands, preedit);
+    }
+
+    /// 候选收尾：分层排序 → 截断 → 简繁转换 → 落到组合态。
+    fn finish(&mut self, mut cands: Vec<inputflow_core::Candidate>, preedit: String) {
         // 分层排序：literal 垫底、覆盖输入多的优先，用户词只在同层内重排。
         cands.sort_by(inputflow_core::Candidate::rank_cmp);
         cands.truncate(MAX_CANDIDATES);
+        if self.traditional {
+            self.origins.clear();
+            self.origins.reserve(cands.len());
+            for c in &mut cands {
+                let converted = inputflow_zhconv::s2t(&c.text);
+                if converted == c.text {
+                    self.origins.push(c.text.clone());
+                } else {
+                    self.origins.push(std::mem::replace(&mut c.text, converted));
+                }
+            }
+        }
         self.comp = Composition {
             raw: self.buffer.clone(),
             preedit,
             candidates: cands,
         };
+    }
+
+    /// 短语补全：把学到的短语按当前按键前缀召回。
+    ///
+    /// 按键完全命中（学过 2 次）时按整句量级给分；只是前缀（学过 3 次）时给较低分，
+    /// 让它出现在前几位但不抢正常整句的首位。
+    fn push_phrase_candidates(&self, cands: &mut Vec<inputflow_core::Candidate>) {
+        use inputflow_core::{Candidate, CandidateKind};
+        let raw: String = self
+            .buffer
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .map(|c| c.to_ascii_lowercase())
+            .collect();
+        let consumed = self.buffer.chars().count();
+        if raw.chars().count() < MIN_PHRASE_QUERY {
+            return;
+        }
+        for (keys, text, count) in self.user.phrase_matches(&raw, 5) {
+            let exact = keys.len() == raw.len();
+            let min = if exact {
+                MIN_PHRASE_EXACT
+            } else {
+                MIN_PHRASE_PREFIX
+            };
+            if count < min {
+                continue;
+            }
+            let score = if exact {
+                PHRASE_SCORE_EXACT
+            } else {
+                PHRASE_SCORE_PREFIX
+            } + (count as f64).ln();
+            // 解码器已经给出同样的词时只提分，不塞重复候选
+            if let Some(existing) = cands
+                .iter_mut()
+                .find(|c| c.text == text && c.consumed == consumed)
+            {
+                existing.score = existing.score.max(score);
+                continue;
+            }
+            cands.push(
+                Candidate::new(text, consumed, CandidateKind::Phrase, score).with_comment("短语"),
+            );
+        }
     }
 
     /// 中英混输：中文模式里掺入英文候选。
@@ -229,6 +419,11 @@ impl Session {
             cands.push(c);
         }
     }
+}
+
+/// 能进短语库的字符：中日韩文字。英文、数字、符号、表情都排除在外。
+fn is_phrase_char(c: char) -> bool {
+    matches!(c, '\u{3400}'..='\u{9fff}' | '\u{f900}'..='\u{faff}')
 }
 
 #[cfg(test)]
@@ -506,6 +701,212 @@ mod tests {
             "重复选择后应被重排到首位（当前首位: {}）",
             s.composition().candidates[0].text
         );
+    }
+
+    #[test]
+    fn traditional_converts_candidates_but_learns_simplified() {
+        let mut s = session(Mode::Pinyin);
+        type_str(&mut s, "xuexi");
+        let simplified = s.composition().candidates[0].text.clone();
+        assert_eq!(simplified, "学习");
+        s.clear();
+
+        s.set_traditional(true);
+        assert!(s.traditional());
+        type_str(&mut s, "xuexi");
+        assert_eq!(s.composition().candidates[0].text, "學習");
+        assert_eq!(s.select(0).as_deref(), Some("學習"));
+        assert_eq!(s.user_model().count("学习"), 1, "学习应记在简体词条上");
+        assert_eq!(s.user_model().count("學習"), 0);
+
+        // 关掉开关后回到简体，之前的学习仍然生效
+        s.set_traditional(false);
+        type_str(&mut s, "xuexi");
+        assert_eq!(s.composition().candidates[0].text, "学习");
+    }
+
+    #[test]
+    fn traditional_keeps_english_and_emoji_untouched() {
+        let mut s = session(Mode::Pinyin);
+        s.set_traditional(true);
+        type_str(&mut s, "hello");
+        assert_eq!(s.composition().candidates[0].text, "hello");
+
+        s.set_mode(Mode::Emoji);
+        type_str(&mut s, "daku");
+        assert_eq!(s.composition().candidates[0].text, "😭");
+    }
+
+    #[test]
+    fn symbol_mode_triggers_on_u_prefix() {
+        let mut s = session(Mode::Pinyin);
+        type_str(&mut s, "u");
+        let c = &s.composition().candidates;
+        assert!(!c.is_empty());
+        assert!(
+            c.iter()
+                .all(|x| x.kind == inputflow_core::CandidateKind::Symbol),
+            "{c:?}"
+        );
+
+        s.clear();
+        type_str(&mut s, "uduihao");
+        assert_eq!(s.composition().candidates[0].text, "✓");
+        assert_eq!(s.select(0).as_deref(), Some("✓"));
+        assert!(s.buffer().is_empty(), "符号上屏后应吃掉整个缓冲");
+    }
+
+    #[test]
+    fn symbol_prefix_falls_back_to_pinyin_when_no_match() {
+        let mut s = session(Mode::Pinyin);
+        type_str(&mut s, "uzzzz");
+        let c = &s.composition().candidates;
+        assert!(
+            c.iter()
+                .all(|x| x.kind != inputflow_core::CandidateKind::Symbol),
+            "无命中应退回普通管线: {c:?}"
+        );
+        assert!(!c.is_empty());
+    }
+
+    #[test]
+    fn symbol_prefix_does_not_break_normal_pinyin() {
+        let mut s = session(Mode::Pinyin);
+        // wu / nu 等以 u 结尾或含 u 的音节不受影响
+        type_str(&mut s, "wu");
+        assert!(
+            s.composition()
+                .candidates
+                .iter()
+                .any(|c| c.kind == inputflow_core::CandidateKind::Char
+                    || c.kind == inputflow_core::CandidateKind::Word),
+            "{:?}",
+            s.composition().candidates
+        );
+    }
+
+    #[test]
+    fn phrase_is_learned_from_consecutive_commits() {
+        let mut s = session(Mode::Pinyin);
+        let sequence = [("beijing", "北京"), ("shijie", "世界")];
+        for _ in 0..2 {
+            s.reset_context();
+            for (keys, text) in sequence {
+                type_str(&mut s, keys);
+                let idx = s
+                    .composition()
+                    .candidates
+                    .iter()
+                    .position(|c| c.text == text)
+                    .unwrap_or_else(|| panic!("应有「{text}」"));
+                s.select(idx);
+            }
+        }
+        assert_eq!(
+            s.user_model().phrase_count("beijingshijie", "北京世界"),
+            2,
+            "连续上屏应沉淀成短语"
+        );
+
+        // 窗口是最近 3 段：第三段进来后，两段与三段组合都要记上
+        s.reset_context();
+        for (keys, text) in [("nihao", "你好"), ("beijing", "北京"), ("shijie", "世界")] {
+            type_str(&mut s, keys);
+            let idx = s
+                .composition()
+                .candidates
+                .iter()
+                .position(|c| c.text == text)
+                .unwrap_or_else(|| panic!("应有「{text}」"));
+            s.select(idx);
+        }
+        assert_eq!(s.user_model().phrase_count("nihaobeijing", "你好北京"), 1);
+        assert_eq!(
+            s.user_model()
+                .phrase_count("nihaobeijingshijie", "你好北京世界"),
+            0,
+            "超过字数/按键上限的组合不学"
+        );
+    }
+
+    #[test]
+    fn learned_phrase_completes_on_prefix() {
+        let mut s = session(Mode::Pinyin);
+        // 手工灌入一个学过 4 次的短语，避免依赖具体词库候选
+        for _ in 0..4 {
+            s.user_model_mut().record_phrase("zaoshanghao", "早上好");
+        }
+        type_str(&mut s, "zaosh");
+        let c = &s.composition().candidates;
+        let hit = c
+            .iter()
+            .find(|x| x.text == "早上好")
+            .expect("前缀应补全出短语");
+        assert_eq!(hit.kind, inputflow_core::CandidateKind::Phrase);
+        assert_eq!(hit.comment.as_deref(), Some("短语"));
+        assert_eq!(hit.consumed, 5, "短语候选吃掉当前全部按键");
+    }
+
+    #[test]
+    fn rare_phrase_does_not_surface() {
+        let mut s = session(Mode::Pinyin);
+        s.user_model_mut().record_phrase("zaoshanghao", "早上好");
+        type_str(&mut s, "zaosh");
+        assert!(
+            !s.composition()
+                .candidates
+                .iter()
+                .any(|x| x.kind == inputflow_core::CandidateKind::Phrase),
+            "只学过一次不应冒出来: {:?}",
+            s.composition().candidates
+        );
+    }
+
+    #[test]
+    fn english_and_symbol_commits_do_not_pollute_phrases() {
+        let mut s = session(Mode::Pinyin);
+        type_str(&mut s, "hello");
+        s.select(0);
+        type_str(&mut s, "uduihao");
+        s.select(0);
+        type_str(&mut s, "nihao");
+        let idx = s
+            .composition()
+            .candidates
+            .iter()
+            .position(|c| c.text == "你好")
+            .expect("应有「你好」");
+        s.select(idx);
+        assert_eq!(s.user_model().phrase_len(), 0, "非中文上屏不该进短语库");
+    }
+
+    #[test]
+    fn backup_roundtrip_and_rejects_damaged_package() {
+        let mut s = session(Mode::Pinyin);
+        type_str(&mut s, "nihao");
+        s.select(0);
+        s.user_model_mut().record_phrase("nihaoshijie", "你好世界");
+        let pack = s.export_backup();
+        assert!(pack.contains("#kind: userdata"), "{pack}");
+
+        let mut fresh = session(Mode::Pinyin);
+        let n = fresh.import_backup(&pack, false).expect("应能导入");
+        assert!(n >= 2, "导入条目数: {n}");
+        assert_eq!(fresh.user_model().count("你好"), 1);
+        assert_eq!(
+            fresh.user_model().phrase_count("nihaoshijie", "你好世界"),
+            1
+        );
+
+        // 重复合并不翻倍
+        fresh.import_backup(&pack, true).unwrap();
+        assert_eq!(fresh.user_model().count("你好"), 1);
+
+        // 损坏的包一律拒绝，且不动现有数据
+        let broken = pack.replace("你好\t1", "你好\t999");
+        assert!(fresh.import_backup(&broken, false).is_err());
+        assert!(fresh.import_backup("随便一段文本", false).is_err());
+        assert_eq!(fresh.user_model().count("你好"), 1);
     }
 
     #[test]

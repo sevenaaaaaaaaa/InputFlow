@@ -87,25 +87,22 @@ final class EncryptedStore {
     }
 
     /// 合并另一份用户词 TSV（多控制器同时使用时避免互相覆盖），按计数取大合并。
+    ///
+    /// 行类型无关：词（`词\t次数`）、二元组（`@pair\t…`）、短语（`@phrase\t…`）
+    /// 一律按「除最后一列以外的全部字段」当键，所以内核以后加新行类型也不会在这里丢数据。
     func mergeUserModel(tsv: String) {
         guard !tsv.isEmpty else { return }
-        var words: [String: Int] = [:]
-        var pairs: [String: Int] = [:]
-        parseTsv(userModelTsv, words: &words, pairs: &pairs)
-        var incomingWords: [String: Int] = [:]
-        var incomingPairs: [String: Int] = [:]
-        parseTsv(tsv, words: &incomingWords, pairs: &incomingPairs)
+        var records: [String: Int] = [:]
+        Self.parseTsv(userModelTsv, into: &records)
+        var incoming: [String: Int] = [:]
+        Self.parseTsv(tsv, into: &incoming)
         var changed = false
-        for (w, c) in incomingWords where c > (words[w] ?? 0) {
-            words[w] = c
-            changed = true
-        }
-        for (p, c) in incomingPairs where c > (pairs[p] ?? 0) {
-            pairs[p] = c
+        for (key, c) in incoming where c > (records[key] ?? 0) {
+            records[key] = c
             changed = true
         }
         guard changed else { return }
-        userModelTsv = Self.renderTsv(words: words, pairs: pairs)
+        userModelTsv = Self.renderTsv(records)
         markDirty()
     }
 
@@ -181,24 +178,21 @@ final class EncryptedStore {
 
     // MARK: - TSV 工具
 
-    private func parseTsv(_ tsv: String, words: inout [String: Int], pairs: inout [String: Int]) {
+    /// 键 = 除次数外的全部字段（用制表符连接），值 = 次数。
+    private static func parseTsv(_ tsv: String, into records: inout [String: Int]) {
         for line in tsv.split(separator: "\n") {
-            let fields = line.split(separator: "\t", omittingEmptySubsequences: false)
-            if fields.count == 4, fields[0] == "@pair", let c = Int(fields[3]) {
-                pairs["\(fields[1])\t\(fields[2])"] = c
-            } else if fields.count == 2, let c = Int(fields[1]) {
-                words[String(fields[0])] = c
-            }
+            var fields = line.split(separator: "\t", omittingEmptySubsequences: false)
+            guard fields.count >= 2, let c = Int(fields.removeLast()) else { continue }
+            let key = fields.joined(separator: "\t")
+            guard !key.isEmpty else { continue }
+            records[key] = c
         }
     }
 
-    private static func renderTsv(words: [String: Int], pairs: [String: Int]) -> String {
+    private static func renderTsv(_ records: [String: Int]) -> String {
         var out = ""
-        for (w, c) in words.sorted(by: { $0.key < $1.key }) {
-            out += "\(w)\t\(c)\n"
-        }
-        for (p, c) in pairs.sorted(by: { $0.key < $1.key }) {
-            out += "@pair\t\(p)\t\(c)\n"
+        for (key, c) in records.sorted(by: { $0.key < $1.key }) {
+            out += "\(key)\t\(c)\n"
         }
         return out
     }
@@ -283,11 +277,14 @@ extension EncryptedStore {
         // 合并：按计数取大，不覆盖对方独有的条目
         let merged = EncryptedStore(fileURL: dir.appendingPathComponent("merge.enc"), key: key)
         merged.setUserModel("你好\t3\n@pair\t你好\t世界\t2\n")
-        merged.mergeUserModel(tsv: "你好\t1\n世界\t5\n@pair\t你好\t世界\t4\n@pair\t世界\t你好\t1\n")
+        merged.mergeUserModel(
+            tsv: "你好\t1\n世界\t5\n@pair\t你好\t世界\t4\n@pair\t世界\t你好\t1\n"
+                + "@phrase\tnihaoshijie\t你好世界\t3\n")
         ok = ok && merged.userModelTsv.contains("你好\t3")
         ok = ok && merged.userModelTsv.contains("世界\t5")
         ok = ok && merged.userModelTsv.contains("@pair\t你好\t世界\t4")
         ok = ok && merged.userModelTsv.contains("@pair\t世界\t你好\t1")
+        ok = ok && merged.userModelTsv.contains("@phrase\tnihaoshijie\t你好世界\t3")
 
         // 损坏文件应被隔离为 .corrupt
         try? Data("garbage".utf8).write(to: url)

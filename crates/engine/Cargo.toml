@@ -13,3 +13,5 @@ inputflow-pinyin = { workspace = true }
 inputflow-en = { workspace = true }
 inputflow-ja = { workspace = true }
 inputflow-emoji = { workspace = true }
+inputflow-symbol = { workspace = true }
+inputflow-zhconv = { workspace = true }

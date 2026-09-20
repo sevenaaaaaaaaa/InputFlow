@@ -76,6 +76,16 @@ final class InputFlowEngine {
         if let h = handle { inputflow_clear(h) }
     }
 
+    /// 候选是否以繁体呈现（学习与重排仍以简体为准）。
+    var isTraditional: Bool {
+        guard let h = handle else { return false }
+        return inputflow_traditional(h) == 1
+    }
+
+    func setTraditional(_ on: Bool) {
+        if let h = handle { _ = inputflow_set_traditional(h, on ? 1 : 0) }
+    }
+
     func setMode(_ id: String) {
         if let h = handle { _ = id.withCString { inputflow_set_mode(h, $0) } }
     }
@@ -99,6 +109,19 @@ final class InputFlowEngine {
     func importUserModel(_ tsv: String) -> Int {
         guard let h = handle else { return -1 }
         return Int(tsv.withCString { inputflow_user_import(h, $0) })
+    }
+
+    /// 导出备份包（明文 TSV + 版本头 + CRC32）；加密由 `BackupManager` 负责。
+    func exportBackup() -> String {
+        guard let h = handle, let s = takeString(inputflow_backup_export(h)) else { return "" }
+        return s
+    }
+
+    /// 导入备份包，返回条目数；格式或校验失败返回 -1（不会改动现有数据）。
+    @discardableResult
+    func importBackup(_ text: String, merge: Bool) -> Int {
+        guard let h = handle else { return -1 }
+        return Int(text.withCString { inputflow_backup_import(h, $0, merge ? 1 : 0) })
     }
 
     // MARK: - 本地 AI 增强（目录与推荐；下载由 AIModelStore 负责）

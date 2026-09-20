@@ -41,6 +41,8 @@ dependencies = [
  "inputflow-en",
  "inputflow-ja",
  "inputflow-pinyin",
+ "inputflow-symbol",
+ "inputflow-zhconv",
 ]
 
 [[package]]
@@ -69,7 +71,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "inputflow-symbol"
+version = "0.1.0"
+dependencies = [
+ "inputflow-core",
+]
+
+[[package]]
 name = "inputflow-sync"
+version = "0.1.0"
+
+[[package]]
+name = "inputflow-zhconv"
 version = "0.1.0"
 
 [[package]]

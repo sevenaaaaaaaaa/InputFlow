@@ -34,7 +34,11 @@ final class InputFlowInputController: IMKInputController {
         if !store.userModelTsv.isEmpty {
             _ = engine.importUserModel(store.userModelTsv)
         }
+        engine.setTraditional(UserDefaults.standard.bool(forKey: Self.traditionalKey))
     }
+
+    /// 繁体输出开关（跨会话记住）。
+    static let traditionalKey = "InputFlowTraditional"
 
     required init?(coder: NSCoder) { nil }
 
@@ -62,6 +66,13 @@ final class InputFlowInputController: IMKInputController {
         let clipItem = NSMenuItem(title: "剪切板历史", action: nil, keyEquivalent: "")
         clipItem.submenu = clipboardSubmenu()
         menu.addItem(clipItem)
+        let trad = NSMenuItem(title: "繁体输出", action: #selector(toggleTraditional(_:)), keyEquivalent: "")
+        trad.target = self
+        trad.state = engine.isTraditional ? .on : .off
+        menu.addItem(trad)
+        let backup = NSMenuItem(title: "备份与恢复", action: nil, keyEquivalent: "")
+        backup.submenu = backupSubmenu()
+        menu.addItem(backup)
         let ai = NSMenuItem(title: "AI 增强…", action: #selector(openAISettings(_:)), keyEquivalent: "")
         ai.target = self
         menu.addItem(ai)
@@ -69,6 +80,24 @@ final class InputFlowInputController: IMKInputController {
         prefs.target = self
         menu.addItem(prefs)
         return menu
+    }
+
+    private func backupSubmenu() -> NSMenu {
+        let submenu = NSMenu(title: "备份与恢复")
+        for (title, action) in [
+            ("导出加密备份…", #selector(exportEncryptedBackup(_:))),
+            ("导出明文备份…", #selector(exportPlainBackup(_:))),
+            ("从备份恢复…", #selector(restoreBackup(_:))),
+        ] {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            submenu.addItem(item)
+        }
+        let note = NSMenuItem(title: "（只含用户词与短语，不含剪切板）", action: nil, keyEquivalent: "")
+        note.isEnabled = false
+        submenu.addItem(.separator())
+        submenu.addItem(note)
+        return submenu
     }
 
     private func clipboardSubmenu() -> NSMenu {
@@ -129,6 +158,39 @@ final class InputFlowInputController: IMKInputController {
 
     @objc private func openAISettings(_ sender: Any) {
         AISettingsWindowController.shared.show()
+    }
+
+    @objc private func toggleTraditional(_ sender: NSMenuItem) {
+        let on = !engine.isTraditional
+        engine.setTraditional(on)
+        UserDefaults.standard.set(on, forKey: Self.traditionalKey)
+        sender.state = on ? .on : .off
+        if let client = currentClient {
+            update(client)
+        }
+    }
+
+    @objc private func exportEncryptedBackup(_ sender: Any) {
+        syncUserModel()
+        BackupManager.exportEncrypted(engine: engine)
+    }
+
+    @objc private func exportPlainBackup(_ sender: Any) {
+        syncUserModel()
+        BackupManager.exportPlain(engine: engine)
+    }
+
+    @objc private func restoreBackup(_ sender: Any) {
+        BackupManager.restore(engine: engine, store: store)
+    }
+
+    /// 导出前把两边对齐：先把本会话的学习结果并进落盘数据，再整份读回会话，
+    /// 免得导出的备份缺了别的窗口刚学到的词。
+    private func syncUserModel() {
+        persistUserModel()
+        if !store.userModelTsv.isEmpty {
+            _ = engine.importUserModel(store.userModelTsv)
+        }
     }
 
     @objc private func togglePetMode(_ sender: NSMenuItem) {

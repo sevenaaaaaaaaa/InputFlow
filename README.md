@@ -18,13 +18,15 @@
 | 英文（2 万词前缀补全 + 词频） | ✅ M0 |
 | 日语（罗马字 → 假名） | ✅ M0（假名） |
 | 表情模式（连按 `aa`，拼音关键词过滤） | ✅ M1 |
+| 符号输入（`u` 前缀，拼音/英文检索符号、序号、货币、数学） | ✅ M1 |
+| 简繁转换（OpenCC 词表，候选一键「繁」） | ✅ M1 |
 | 日语（假名 → 汉字，Viterbi + JMdict） | ⏳ M2 |
 
 ## 本地 AI 增强（可选，零云 API）
 
 | 层级 | 内容 | 默认 |
 |---|---|---|
-| L0 统计模型 | 用户词频 + 历史二元组重排（< 1 MB，零下载、随输入学习） | 开启 |
+| L0 统计模型 | 用户词频 + 历史二元组重排 + 自动短语学习（< 1 MB，零下载、随输入学习） | 开启 |
 | L1 端上语音 | 系统本地语音识别（强制端上；不支持则禁用，绝不回退云端） | 关闭 |
 | L2 小模型 | Gemma 3 / Qwen2.5 / Qwen3 / Whisper 一键下载（sha256 校验，本地运行） | 关闭 |
 
@@ -51,6 +53,8 @@ crates/pinyin   全拼/双拼解码（切分 + Viterbi + 前缀补全）与测�
 crates/en       英文补全（2 万词）
 crates/ja       日语罗马字 → 假名
 crates/emoji    表情模式（拼音关键词过滤，零依赖）
+crates/symbol   符号输入（`u` 前缀，符号/序号/货币/数学表，零依赖）
+crates/zhconv   简繁转换（OpenCC 词表，最长匹配，零依赖）
 crates/ai       本地 AI 模型目录与内存推荐（零依赖）
 crates/sync     同步合并内核（LWW/CRDT 纯逻辑，无网络）
 crates/engine   会话编排：模式切换、翻页、学习重排
@@ -78,9 +82,12 @@ cargo run -p xtask -- dict build crates/dict/data/base-large.tsv -o base.ifd
 1. 内核不发任何网络请求，代码可审计；前端仅提供可选的局域网同步开关（默认关闭）。
 2. 按键缓存只在内存，提交后即清；用户词与剪切板历史加密落盘（ChaCha20-Poly1305），密钥在系统钥匙串；剪切板历史默认关闭。
 3. 不申请 iOS Full Access 即可完整输入（同步功能除外）。
-4. 详见 `docs/threat-model.md`：明确能防什么、不能防什么。
+4. 备份可导出、可搬走：加密包用你设的密码派生密钥（PBKDF2 + ChaCha20-Poly1305），
+   导出明文需二次确认；备份只含用户词与短语，不含剪切板历史。
+5. 详见 `docs/threat-model.md`：明确能防什么、不能防什么。
 
 ## 许可
 
 AGPL-3.0-only，见 `LICENSE`。内置词库数据来源与许可见
-`crates/dict/data/SOURCES.md`、`crates/en/data/SOURCES.md`（含 GPL-3.0 / MIT 数据）。
+`crates/dict/data/SOURCES.md`、`crates/en/data/SOURCES.md`、`crates/zhconv/data/SOURCES.md`
+（含 GPL-3.0 / MIT / Apache-2.0 数据）。

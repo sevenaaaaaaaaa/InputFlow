@@ -109,6 +109,9 @@ if installArgs.count > 1 {
         }
         exit(0)
 
+    case "--backup-smoke":
+        exit(BackupManager.smokeTest() ? 0 : 1)
+
     case "--store-smoke":
         exit(EncryptedStore.smokeTest() ? 0 : 1)
 

@@ -1,0 +1,9 @@
+[package]
+name = "inputflow-zhconv"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "InputFlow 简繁转换：OpenCC 词表离线内置，最长匹配（零依赖）"
+
+[dependencies]

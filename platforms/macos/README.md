@@ -44,11 +44,14 @@ BIN="$HOME/Library/Input Methods/InputFlow.app/Contents/MacOS/InputFlow"
 | 标点（未组合时） | 中文模式自动转全角；代码编辑器/终端按应用画像保持半角 |
 | 中英混输 | 拼音里直接混英文：`hello`→直接出 `hello`；大写开头按英文意图处理 |
 | 简拼 / 混拼 | 全拼模式只打几个字母：`nh`→你好、`bj`→北京、`wm`→我们、`nhao`→你好 |
+| `u` 开头（全拼） | 符号输入：`u` 列出常用符号，`ujiantou`→→ ← ↑ ↓，`uduihao`→✓，`ueuro`→€ |
 | 连按两下 `a`（浏览器） | 进入网址模式：按键直通系统，Esc / 回车退出 |
 | 连按两下 `a`（聊天工具） | 进入表情模式（斗图）：空格选表情，拼音可过滤，Esc 退出 |
 | 输入法菜单 | 切换 拼音 / 小鹤双拼 / 微软双拼 / 自然码 / English / 日本語 |
 | 输入法菜单 | 桌宠模式（可拖动玻璃小猫，随输入状态切换表情） |
 | 输入法菜单 | 剪切板历史（最近 8 条直接上屏；开启/关闭记录） |
+| 输入法菜单 | 繁体输出（候选转繁体；学习与重排仍按简体，跨会话记住） |
+| 输入法菜单 | 备份与恢复（加密包 / 明文包导出、合并或覆盖恢复） |
 | 输入法菜单 | AI 增强…（内置统计模型状态、小模型下载/校验/启停） |
 
 ## 智能交互（无需配置）
@@ -57,7 +60,8 @@ BIN="$HOME/Library/Input Methods/InputFlow.app/Contents/MacOS/InputFlow"
 - **双 `a` 手势**：浏览器进入网址模式（字母、标点全部直通，不经过输入法），
   聊天工具进入表情模式（内置精选表情，`daku`→😭、`zan`→👍，空格上屏）；
 - **桌宠模式**：菜单一键开关，位置记忆；输入时表情联动（发呆 🐱 / 思考 🙀 / 开心 😻）；
-- **光标跟随**：候选窗优先用 `firstRect` 定位，屏幕边缘自动翻转，多屏跟随光标所在屏。
+- **光标跟随**：候选窗优先用 `firstRect` 定位，屏幕边缘自动翻转，多屏跟随光标所在屏；
+- **AI 辅助短语**：连续上屏自动沉淀成短语（无需手动短语表），下次打前几个字母即可整条补全。
 
 ## 用户数据（加密持久化）
 
@@ -80,6 +84,7 @@ BIN="$HOME/Library/Input Methods/InputFlow.app/Contents/MacOS/InputFlow"
 ```bash
 BIN="$HOME/Library/Input Methods/InputFlow.app/Contents/MacOS/InputFlow"
 "$BIN" --store-smoke       # 加密存储自检（临时文件，不触碰真实数据）
+"$BIN" --backup-smoke      # 备份包自检（导出→加密→解密→导回，不弹窗）
 "$BIN" --store-info        # 钥匙串可用性 + 已加载数据量
 "$BIN" --clipboard-smoke   # 剪切板监控自检（真实路径，写入一条测试数据）
 "$BIN" --ai-dump           # 模型目录 + 按内存推荐
@@ -121,6 +126,7 @@ cp /tmp/base.ifd ~/Library/Application\ Support/InputFlow/base.ifd
 - `Sources/EncryptedStore.swift`：`userdata.enc` 容器（钥匙串密钥、ChaCha20-Poly1305、原子写）；
 - `Sources/ClipboardMonitor.swift` / `ClipboardWindow.swift`：剪切板监控与历史窗；
 - `Sources/AIModelStore.swift` / `SettingsWindow.swift`：模型下载/校验与 AI 增强窗；
+- `Sources/BackupManager.swift`：备份导出/恢复（PBKDF2 派生密钥、ChaCha20-Poly1305 加密包）；
 - 目标版本默认 `arm64-apple-macos13.0`，可用 `MACOSX_DEPLOYMENT_TARGET=14.0 ./build.sh` 覆盖；
   Intel 机器上脚本自动使用 `x86_64`（暂不产出 universal 包）。
 

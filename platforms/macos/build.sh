@@ -37,6 +37,7 @@ swiftc -O -wmo \
     "$HERE/Sources/ClipboardMonitor.swift" \
     "$HERE/Sources/ClipboardWindow.swift" \
     "$HERE/Sources/AIModelStore.swift" \
+    "$HERE/Sources/BackupManager.swift" \
     "$HERE/Sources/SettingsWindow.swift" \
     "$HERE/Sources/InputController.swift"
 
