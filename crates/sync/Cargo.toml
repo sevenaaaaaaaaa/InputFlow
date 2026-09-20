@@ -1,0 +1,9 @@
+[package]
+name = "inputflow-sync"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "InputFlow 同步合并内核：HLC + LWW/G-Counter，纯逻辑无网络"
+
+[dependencies]

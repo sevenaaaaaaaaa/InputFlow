@@ -1,0 +1,12 @@
+[package]
+name = "inputflow-dict"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "InputFlow 词典：内存索引、IFD1 二进制格式、TSV/Rime 导入器"
+
+[dependencies]
+inputflow-core = { workspace = true }
+
+[dev-dependencies]

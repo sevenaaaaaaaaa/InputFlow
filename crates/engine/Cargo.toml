@@ -1,0 +1,14 @@
+[package]
+name = "inputflow-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "InputFlow 会话编排：模式切换、选词提交、学习重排"
+
+[dependencies]
+inputflow-core = { workspace = true }
+inputflow-dict = { workspace = true }
+inputflow-pinyin = { workspace = true }
+inputflow-en = { workspace = true }
+inputflow-ja = { workspace = true }

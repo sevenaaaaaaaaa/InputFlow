@@ -1,0 +1,11 @@
+[package]
+name = "inputflow-pinyin"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "InputFlow 拼音/双拼解码：切分 + Viterbi 整句"
+
+[dependencies]
+inputflow-core = { workspace = true }
+inputflow-dict = { workspace = true }

@@ -1,0 +1,11 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "InputFlow 构建工具：词典构建/导入/统计"
+publish = false
+
+[dependencies]
+inputflow-dict = { workspace = true }

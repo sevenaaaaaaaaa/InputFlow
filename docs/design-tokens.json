@@ -1,0 +1,63 @@
+{
+  "$comment": "InputFlow 设计令牌单一来源。继承 OpenFlow/ThirdC 契约：全 oklch、零 hex、圆角三档、弹簧动效。生成器见 xtask tokens（M1）。",
+  "version": 1,
+  "color": {
+    "light": {
+      "--bg": "oklch(97.4% 0.008 85)",
+      "--bg-deep": "oklch(94% 0.01 85)",
+      "--surface": "oklch(99% 0.004 85 / 0.72)",
+      "--surface-strong": "oklch(100% 0 0 / 0.86)",
+      "--text": "oklch(24% 0.012 75)",
+      "--text-soft": "oklch(38% 0.012 75)",
+      "--faint": "oklch(51% 0.01 75)",
+      "--line": "oklch(85% 0.008 85)",
+      "--accent": "oklch(62% 0.14 250)",
+      "--accent-soft": "oklch(92% 0.03 250)",
+      "--danger": "oklch(62% 0.18 25)"
+    },
+    "dark": {
+      "--bg": "oklch(26% 0.012 75)",
+      "--bg-deep": "oklch(21% 0.012 75)",
+      "--surface": "oklch(35% 0.012 75 / 0.68)",
+      "--surface-strong": "oklch(40% 0.012 75 / 0.84)",
+      "--text": "oklch(96% 0.006 85)",
+      "--text-soft": "oklch(88% 0.008 85)",
+      "--faint": "oklch(64% 0.01 75)",
+      "--line": "oklch(46% 0.012 75)",
+      "--accent": "oklch(72% 0.12 250)",
+      "--accent-soft": "oklch(38% 0.05 250)",
+      "--danger": "oklch(70% 0.16 25)"
+    }
+  },
+  "radius": {
+    "--r-lg": 26,
+    "--r-md": 18,
+    "--r-sm": 12
+  },
+  "motion": {
+    "--ease-spring": "cubic-bezier(.32,.72,0,1)",
+    "--dur-fast": 120,
+    "--dur-base": 180,
+    "--dur-slow": 260
+  },
+  "glass": {
+    "$comment": "苹果平台优先原生材质；其余平台用以下参数近似",
+    "blur_px": 28,
+    "saturate": 1.6,
+    "highlight_alpha": 0.14,
+    "noise_alpha": 0.035,
+    "refraction_px": 6,
+    "border_alpha": 0.18
+  },
+  "type": {
+    "--font-ui": "Space Grotesk, -apple-system, 'PingFang SC', 'Noto Sans CJK SC', sans-serif",
+    "--font-mono": "JetBrains Mono, ui-monospace, 'SF Mono', monospace",
+    "--cand-size": 15
+  },
+  "icon": {
+    "size": 24,
+    "stroke_width": 1.8,
+    "linecap": "round",
+    "linejoin": "round"
+  }
+}

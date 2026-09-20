@@ -1,0 +1,10 @@
+[package]
+name = "inputflow-ja"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "InputFlow 日语输入阶段一：罗马字 → 假名（纯本地，M2 加假名→汉字）"
+
+[dependencies]
+inputflow-core = { workspace = true }

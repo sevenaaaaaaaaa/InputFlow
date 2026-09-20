@@ -1,0 +1,19 @@
+# Rust
+/target
+**/*.rs.bk
+
+# Build outputs
+/dist
+/build
+build/
+target/
+*.app/
+*.ifd
+*.xpi
+*.dmg
+*.apk
+*.hap
+
+# macOS
+.DS_Store
+._*

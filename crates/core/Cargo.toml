@@ -1,0 +1,9 @@
+[package]
+name = "inputflow-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "InputFlow 内核契约：候选、组合态、音节表、用户模型（零依赖）"
+
+[dependencies]

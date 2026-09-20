@@ -1,0 +1,36 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/core",
+    "crates/dict",
+    "crates/pinyin",
+    "crates/en",
+    "crates/ja",
+    "crates/sync",
+    "crates/engine",
+    "crates/ffi",
+    "xtask",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "AGPL-3.0-only"
+authors = ["InputFlow contributors"]
+repository = "https://github.com/inputflow/inputflow"
+description = "Privacy-first cross-platform input method: local engine, no server, LAN-only E2EE sync"
+
+[workspace.dependencies]
+inputflow-core = { path = "crates/core" }
+inputflow-dict = { path = "crates/dict" }
+inputflow-pinyin = { path = "crates/pinyin" }
+inputflow-en = { path = "crates/en" }
+inputflow-ja = { path = "crates/ja" }
+inputflow-sync = { path = "crates/sync" }
+inputflow-engine = { path = "crates/engine" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

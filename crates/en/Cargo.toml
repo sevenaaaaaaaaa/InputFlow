@@ -1,0 +1,10 @@
+[package]
+name = "inputflow-en"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "InputFlow 英文补全（词频排序，纯本地词表）"
+
+[dependencies]
+inputflow-core = { workspace = true }

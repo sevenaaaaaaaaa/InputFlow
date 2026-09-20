@@ -1,0 +1,115 @@
+import AppKit
+import Carbon
+import InputMethodKit
+
+// MARK: - 安装辅助命令（注册 / 启用 / 选择 / 状态）
+// 与 Squirrel 相同的做法：由输入法自身调用 TIS API，安装后无需注销即可被系统发现。
+
+private func inputSourceID() -> String {
+    Bundle.main.bundleIdentifier ?? "dev.inputflow.inputmethod"
+}
+
+private func findInputSource() -> TISInputSource? {
+    guard let list = TISCreateInputSourceList(nil, true)?.takeRetainedValue() as? [TISInputSource] else {
+        return nil
+    }
+    let prefix = inputSourceID()
+    var fallback: TISInputSource?
+    for source in list {
+        let idRef = TISGetInputSourceProperty(source, kTISPropertyInputSourceID)
+        guard let id = unsafeBitCast(idRef, to: CFString?.self) as String?, id.hasPrefix(prefix) else {
+            continue
+        }
+        if boolProperty(source, kTISPropertyInputSourceIsSelectCapable) == true {
+            return source
+        }
+        if fallback == nil { fallback = source }
+    }
+    return fallback
+}
+
+private func sourceIdentifier(_ source: TISInputSource) -> String {
+    let idRef = TISGetInputSourceProperty(source, kTISPropertyInputSourceID)
+    return (unsafeBitCast(idRef, to: CFString?.self) as String?) ?? inputSourceID()
+}
+
+private func boolProperty(_ source: TISInputSource, _ key: CFString) -> Bool? {
+    guard let ref = TISGetInputSourceProperty(source, key) else { return nil }
+    return unsafeBitCast(ref, to: CFBoolean?.self).map(CFBooleanGetValue)
+}
+
+private func describe(_ source: TISInputSource) -> String {
+    let enabled = boolProperty(source, kTISPropertyInputSourceIsEnabled) ?? false
+    let selectable = boolProperty(source, kTISPropertyInputSourceIsSelectCapable) ?? false
+    let selected = boolProperty(source, kTISPropertyInputSourceIsSelected) ?? false
+    return "\(sourceIdentifier(source)) enabled=\(enabled) selectable=\(selectable) selected=\(selected)"
+}
+
+let installArgs = CommandLine.arguments
+if installArgs.count > 1 {
+    switch installArgs[1] {
+    case "--register-input-source":
+        if let source = findInputSource() {
+            print("已注册: \(inputSourceID()) (\(describe(source)))")
+            exit(0)
+        }
+        let status = TISRegisterInputSource(Bundle.main.bundleURL as CFURL)
+        if status == noErr, let source = findInputSource() {
+            print("注册成功: \(inputSourceID()) (\(describe(source)))")
+            exit(0)
+        }
+        print("注册失败 (status=\(status))")
+        exit(1)
+
+    case "--enable-input-source":
+        guard let source = findInputSource() else {
+            print("未找到输入源，请先 --register-input-source")
+            exit(1)
+        }
+        if boolProperty(source, kTISPropertyInputSourceIsEnabled) == true {
+            print("已启用: \(inputSourceID()) (\(describe(source)))")
+            exit(0)
+        }
+        let status = TISEnableInputSource(source)
+        print(status == noErr ? "启用成功: \(describe(source))" : "启用失败 (status=\(status))")
+        exit(status == noErr ? 0 : 1)
+
+    case "--select-input-source":
+        guard let source = findInputSource(), boolProperty(source, kTISPropertyInputSourceIsEnabled) == true else {
+            print("输入源未启用，请先 --enable-input-source")
+            exit(1)
+        }
+        if boolProperty(source, kTISPropertyInputSourceIsSelected) == true {
+            print("已选中")
+            exit(0)
+        }
+        let status = TISSelectInputSource(source)
+        print(status == noErr ? "已切换到 InputFlow" : "切换失败 (status=\(status))")
+        exit(status == noErr ? 0 : 1)
+
+    case "--input-source-status":
+        guard let source = findInputSource() else {
+            print("未注册")
+            exit(1)
+        }
+        print("\(inputSourceID()) \(describe(source))")
+        exit(0)
+
+    default:
+        break
+    }
+}
+
+// MARK: - 输入法主进程
+
+let connectionName = Bundle.main.infoDictionary?["InputMethodConnectionName"] as? String
+    ?? "InputFlow_Connection"
+
+guard let server = IMKServer(name: connectionName, bundleIdentifier: inputSourceID()) else {
+    NSLog("InputFlow: 创建 IMKServer 失败（检查 Info.plist 的 InputMethodConnectionName）")
+    exit(1)
+}
+
+// 保留 server 到进程结束
+_ = server
+NSApplication.shared.run()

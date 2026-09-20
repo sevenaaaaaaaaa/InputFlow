@@ -1,0 +1,202 @@
+import AppKit
+
+/// 候选窗：无激活面板 + Liquid Glass 背景（macOS 26+），旧系统回退 NSVisualEffectView。
+final class CandidateWindowController {
+    static let pageSize = 9
+
+    private let panel: NSPanel
+    private let background: NSView
+    private let row = NSStackView()
+    private let pageLabel = NSTextField(labelWithString: "")
+    private var onPick: ((Int) -> Void)?
+
+    private(set) var page = 0
+
+    init() {
+        panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 240, height: 40),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isFloatingPanel = true
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.level = .popUpMenu
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.isMovable = false
+        panel.hidesOnDeactivate = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        panel.ignoresMouseEvents = false
+
+        background = Self.makeGlassBackground()
+        background.autoresizingMask = [.width, .height]
+        panel.contentView = background
+
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 4
+        row.edgeInsets = NSEdgeInsets(top: 7, left: 10, bottom: 7, right: 10)
+        row.autoresizingMask = [.width, .height]
+        if #available(macOS 26.0, *), let glass = background as? NSGlassEffectView {
+            glass.contentView = row
+        } else {
+            background.addSubview(row)
+        }
+    }
+
+    private static func makeGlassBackground() -> NSView {
+        if #available(macOS 26.0, *) {
+            let glass = NSGlassEffectView()
+            glass.cornerRadius = 18
+            glass.style = .regular
+            glass.tintColor = NSColor.windowBackgroundColor.withAlphaComponent(0.25)
+            return glass
+        }
+        let effect = NSVisualEffectView()
+        effect.material = .hudWindow
+        effect.blendingMode = .behindWindow
+        effect.state = .active
+        effect.wantsLayer = true
+        effect.layer?.cornerRadius = 18
+        effect.layer?.masksToBounds = true
+        return effect
+    }
+
+    var isVisible: Bool { panel.isVisible }
+
+    /// 更新内容并定位在光标下方；没有候选时自动隐藏。
+    func present(candidates: [Candidate], page newPage: Int, near lineRect: NSRect?, onPick: @escaping (Int) -> Void) {
+        self.onPick = onPick
+        let total = candidates.count
+        guard total > 0 else {
+            hide()
+            return
+        }
+        let pageCount = max(1, Int(ceil(Double(total) / Double(Self.pageSize))))
+        page = min(max(0, newPage), pageCount - 1)
+        let start = page * Self.pageSize
+        let slice = Array(candidates[start..<min(start + Self.pageSize, total)])
+
+        row.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        for (offset, candidate) in slice.enumerated() {
+            let cell = CandidateCell(index: offset + 1)
+            cell.configure(candidate)
+            cell.onClick = { [weak self] in
+                self?.onPick?(start + offset)
+            }
+            row.addArrangedSubview(cell)
+        }
+
+        if pageCount > 1 {
+            pageLabel.stringValue = "\(page + 1)/\(pageCount)"
+            pageLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+            pageLabel.textColor = .tertiaryLabelColor
+            row.addArrangedSubview(pageLabel)
+        }
+
+        let size = row.fittingSize
+        panel.setContentSize(NSSize(width: max(80, size.width), height: max(34, size.height)))
+        if let lineRect {
+            position(near: lineRect)
+        }
+        panel.orderFrontRegardless()
+    }
+
+    func hide() {
+        if panel.isVisible {
+            panel.orderOut(nil)
+        }
+    }
+
+    private func position(near lineRect: NSRect) {
+        let size = panel.frame.size
+        let gap: CGFloat = 4
+        var origin = NSPoint(x: lineRect.minX, y: lineRect.minY - size.height - gap)
+        if let screen = NSScreen.screens.first(where: { $0.frame.contains(NSPoint(x: lineRect.minX, y: lineRect.minY)) }) ?? NSScreen.main {
+            let visible = screen.visibleFrame
+            if origin.y < visible.minY + gap {
+                origin.y = lineRect.maxY + gap
+            }
+            origin.x = min(max(origin.x, visible.minX + gap), visible.maxX - size.width - gap)
+        }
+        panel.setFrameOrigin(origin)
+    }
+}
+
+/// 单个候选格：序号 + 文本 +（可选）拼音注释。
+private final class CandidateCell: NSView {
+    var onClick: (() -> Void)?
+    private let indexLabel = NSTextField(labelWithString: "")
+    private let textLabel = NSTextField(labelWithString: "")
+    private let commentLabel = NSTextField(labelWithString: "")
+
+    init(index: Int) {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 12
+
+        indexLabel.stringValue = "\(index)"
+        indexLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
+        indexLabel.textColor = .tertiaryLabelColor
+        textLabel.font = .systemFont(ofSize: 16, weight: .regular)
+        textLabel.textColor = .labelColor
+        commentLabel.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
+        commentLabel.textColor = .secondaryLabelColor
+        commentLabel.lineBreakMode = .byTruncatingTail
+
+        for label in [indexLabel, textLabel, commentLabel] {
+            label.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(label)
+        }
+        NSLayoutConstraint.activate([
+            indexLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7),
+            indexLabel.topAnchor.constraint(equalTo: topAnchor, constant: 2),
+            textLabel.leadingAnchor.constraint(equalTo: indexLabel.trailingAnchor, constant: 5),
+            textLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            textLabel.topAnchor.constraint(equalTo: topAnchor),
+            commentLabel.leadingAnchor.constraint(equalTo: textLabel.leadingAnchor),
+            commentLabel.trailingAnchor.constraint(equalTo: textLabel.trailingAnchor),
+            commentLabel.topAnchor.constraint(equalTo: textLabel.bottomAnchor, constant: 1),
+            commentLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
+        ])
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    func configure(_ candidate: Candidate) {
+        textLabel.stringValue = candidate.text
+        if let comment = candidate.comment, !comment.isEmpty {
+            commentLabel.stringValue = comment
+            commentLabel.isHidden = false
+        } else {
+            commentLabel.stringValue = ""
+            commentLabel.isHidden = true
+        }
+        layer?.backgroundColor = candidate.kind == "literal"
+            ? NSColor.quaternaryLabelColor.withAlphaComponent(0.12).cgColor
+            : NSColor.clear.cgColor
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.22).cgColor
+        onClick?()
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override var intrinsicContentSize: NSSize {
+        let textWidth = max(
+            textLabel.intrinsicContentSize.width,
+            commentLabel.isHidden ? 0 : commentLabel.intrinsicContentSize.width
+        )
+        let height = textLabel.intrinsicContentSize.height
+            + (commentLabel.isHidden ? 0 : commentLabel.intrinsicContentSize.height + 1)
+        return NSSize(width: 7 + indexLabel.intrinsicContentSize.width + 5 + textWidth + 8, height: height + 4)
+    }
+}

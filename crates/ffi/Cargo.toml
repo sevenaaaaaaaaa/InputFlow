@@ -1,0 +1,16 @@
+[package]
+name = "inputflow-ffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "InputFlow C ABI：供 macOS/Windows/Linux/Android/iOS/HarmonyOS 前端调用"
+
+[lib]
+name = "inputflow_ffi"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+inputflow-core = { workspace = true }
+inputflow-dict = { workspace = true }
+inputflow-engine = { workspace = true }

@@ -1,0 +1,372 @@
+# InputFlow 内置基础词典（约 200 条）
+# 格式：词<TAB>拼音（空格或单引号分隔，可带声调）<TAB>词频（可选，默认 1）
+# 正式词库请用：cargo run -p xtask -- dict import-rime <dict.yaml> -o base.ifd
+# 单字
+的	de	900000
+一	yi	500000
+是	shi	480000
+不	bu	450000
+了	le	420000
+在	zai	400000
+人	ren	380000
+有	you	370000
+我	wo	360000
+他	ta	350000
+这	zhe	340000
+个	ge	330000
+们	men	320000
+中	zhong	310000
+来	lai	300000
+上	shang	290000
+大	da	280000
+为	wei	270000
+和	he	260000
+国	guo	250000
+地	di	240000
+到	dao	230000
+以	yi	220000
+说	shuo	210000
+时	shi	200000
+要	yao	195000
+就	jiu	190000
+出	chu	185000
+会	hui	180000
+可	ke	175000
+也	ye	170000
+你	ni	165000
+对	dui	160000
+生	sheng	155000
+能	neng	150000
+而	er	145000
+子	zi	140000
+那	na	135000
+得	de	130000
+于	yu	125000
+着	zhe	120000
+下	xia	118000
+自	zi	116000
+之	zhi	114000
+年	nian	112000
+过	guo	110000
+发	fa	108000
+后	hou	106000
+作	zuo	104000
+里	li	102000
+用	yong	100000
+道	dao	98000
+行	xing	96000
+所	suo	94000
+然	ran	92000
+家	jia	90000
+种	zhong	88000
+事	shi	86000
+成	cheng	84000
+方	fang	82000
+多	duo	80000
+经	jing	78000
+么	me	76000
+去	qu	74000
+法	fa	72000
+学	xue	70000
+如	ru	68000
+都	dou	66000
+同	tong	64000
+现	xian	62000
+当	dang	60000
+没	mei	58000
+动	dong	56000
+面	mian	54000
+起	qi	52000
+看	kan	50000
+定	ding	48000
+天	tian	46000
+分	fen	44000
+还	hai	42000
+进	jin	40000
+好	hao	39000
+小	xiao	38000
+部	bu	37000
+其	qi	36000
+些	xie	35000
+主	zhu	34000
+样	yang	33000
+理	li	32000
+心	xin	31000
+她	ta	30000
+本	ben	29000
+前	qian	28000
+开	kai	27000
+但	dan	26000
+因	yin	25000
+只	zhi	24000
+从	cong	23000
+想	xiang	22000
+实	shi	21000
+日	ri	20000
+者	zhe	19000
+意	yi	18500
+无	wu	18000
+力	li	17500
+它	ta	17000
+与	yu	16500
+长	chang	16000
+把	ba	15500
+机	ji	15000
+十	shi	14500
+民	min	14000
+第	di	13500
+公	gong	13000
+此	ci	12500
+已	yi	12000
+工	gong	11500
+使	shi	11000
+情	qing	10500
+明	ming	10000
+性	xing	9800
+知	zhi	9600
+全	quan	9400
+三	san	9200
+又	you	9000
+关	guan	8800
+点	dian	8600
+正	zheng	8400
+业	ye	8200
+外	wai	8000
+将	jiang	7800
+两	liang	7600
+高	gao	7400
+间	jian	7200
+由	you	7000
+问	wen	6800
+很	hen	6600
+最	zui	6400
+重	zhong	6200
+并	bing	6000
+物	wu	5800
+手	shou	5600
+应	ying	5400
+向	xiang	5000
+头	tou	4800
+文	wen	4600
+体	ti	4400
+美	mei	4000
+相	xiang	3900
+见	jian	3800
+被	bei	3700
+利	li	3600
+什	shen	3500
+二	er	3400
+等	deng	3300
+产	chan	3200
+或	huo	3100
+新	xin	3000
+己	ji	2900
+制	zhi	2800
+身	shen	2700
+果	guo	2600
+加	jia	2500
+西	xi	2400
+斯	si	2300
+月	yue	2200
+话	hua	2100
+合	he	2000
+回	hui	1900
+特	te	1800
+代	dai	1700
+内	nei	1600
+信	xin	1500
+表	biao	1400
+化	hua	1300
+老	lao	1200
+给	gei	1100
+世	shi	1000
+位	wei	950
+次	ci	900
+度	du	850
+门	men	800
+任	ren	750
+常	chang	700
+先	xian	650
+海	hai	600
+通	tong	550
+教	jiao	500
+儿	er	450
+原	yuan	400
+东	dong	350
+声	sheng	300
+提	ti	250
+立	li	200
+及	ji	150
+比	bi	100
+员	yuan	90
+解	jie	80
+水	shui	70
+名	ming	60
+真	zhen	50
+论	lun	40
+处	chu	30
+走	zou	20
+义	yi	10
+# 常用词
+你好	ni hao	90000
+我们	wo men	120000
+什么	shen me	110000
+时候	shi hou	95000
+可以	ke yi	88000
+这个	zhe ge	85000
+他们	ta men	80000
+自己	zi ji	75000
+现在	xian zai	70000
+知道	zhi dao	65000
+因为	yin wei	63000
+所以	suo yi	61000
+但是	dan shi	59000
+如果	ru guo	57000
+已经	yi jing	55000
+没有	mei you	53000
+一个	yi ge	51000
+不是	bu shi	49000
+就是	jiu shi	47000
+还是	hai shi	45000
+这样	zhe yang	43000
+怎么	zen me	41000
+为什么	wei shen me	39000
+中国	zhong guo	38000
+北京	bei jing	36000
+上海	shang hai	34000
+广州	guang zhou	32000
+深圳	shen zhen	30000
+香港	xiang gang	28000
+台湾	tai wan	26000
+世界	shi jie	25000
+朋友	peng you	24000
+老师	lao shi	23000
+学生	xue sheng	22000
+工作	gong zuo	21000
+学习	xue xi	20000
+生活	sheng huo	19000
+时间	shi jian	18500
+问题	wen ti	18000
+东西	dong xi	17500
+地方	di fang	17000
+今天	jin tian	16500
+明天	ming tian	16000
+昨天	zuo tian	15500
+早上	zao shang	15000
+晚上	wan shang	14500
+中午	zhong wu	14000
+谢谢	xie xie	13500
+对不起	dui bu qi	13000
+没关系	mei guan xi	12500
+不客气	bu ke qi	12200
+再见	zai jian	12000
+请问	qing wen	11500
+一下	yi xia	11000
+一起	yi qi	10500
+一点	yi dian	10000
+多少	duo shao	9500
+哪里	na li	9000
+这里	zhe li	8800
+那里	na li	8600
+电脑	dian nao	8400
+手机	shou ji	8200
+网络	wang luo	8000
+软件	ruan jian	7800
+硬件	ying jian	7600
+系统	xi tong	7400
+输入法	shu ru fa	7200
+拼音	pin yin	7000
+双拼	shuang pin	6800
+键盘	jian pan	6600
+鼠标	shu biao	6400
+屏幕	ping mu	6200
+文件	wen jian	6000
+数据	shu ju	5800
+密码	mi ma	5600
+安全	an quan	5400
+隐私	yin si	5200
+加密	jia mi	5000
+服务器	fu wu qi	4800
+剪切板	jian qie ban	4600
+中文	zhong wen	4400
+英文	ying wen	4200
+日语	ri yu	4000
+苹果	ping guo	3900
+华为	hua wei	3800
+小米	xiao mi	3700
+微软	wei ruan	3600
+谷歌	gu ge	3500
+喜欢	xi huan	3400
+需要	xu yao	3300
+应该	ying gai	3200
+可能	ke neng	3100
+开始	kai shi	3000
+发现	fa xian	2900
+觉得	jue de	2800
+当然	dang ran	2700
+真的	zhen de	2600
+一直	yi zhi	2500
+一定	yi ding	2400
+一样	yi yang	2300
+一些	yi xie	2200
+大家	da jia	2100
+希望	xi wang	2000
+公司	gong si	1950
+产品	chan pin	1900
+设计	she ji	1850
+开发	kai fa	1800
+代码	dai ma	1750
+测试	ce shi	1700
+发布	fa bu	1650
+版本	ban ben	1600
+用户	yong hu	1550
+体验	ti yan	1500
+功能	gong neng	1450
+性能	xing neng	1400
+国家	guo jia	1350
+城市	cheng shi	1300
+天气	tian qi	1250
+汽车	qi che	1200
+火车	huo che	1150
+飞机	fei ji	1100
+学校	xue xiao	1050
+医院	yi yuan	1000
+医生	yi sheng	950
+家庭	jia ting	900
+妈妈	ma ma	850
+爸爸	ba ba	800
+孩子	hai zi	750
+生命	sheng ming	700
+健康	jian kang	650
+运动	yun dong	600
+音乐	yin yue	550
+电影	dian ying	500
+游戏	you xi	450
+阅读	yue du	400
+旅行	lv xing	350
+美食	mei shi	300
+咖啡	ka fei	250
+啤酒	pi jiu	150
+未来	wei lai	100
+过去	guo qu	90
+局域网	ju yu wang	3000
+端到端	duan dao duan	2800
+开源	kai yuan	2600
+跨平台	kua ping tai	2400
+输入框	shu ru kuang	2200
+候选词	hou xuan ci	2000
+词库	ci ku	1800
+打字	da zi	1600
+聊天	liao tian	1400
+搜索	sou suo	1200
+浏览器	liu lan qi	1000
+编辑器	bian ji qi	800
+命令行	ming ling hang	600
+终端	zhong duan	400
+加密存储	jia mi cun chu	200
+安	an	6000
+西安	xi an	3500
+北	bei	20000
+京	jing	15000
+爱	ai	55000
+我爱你	wo ai ni	30000
