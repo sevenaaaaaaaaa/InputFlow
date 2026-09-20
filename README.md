@@ -57,7 +57,7 @@ crates/engine   会话编排：模式切换、翻页、学习重排
 crates/ffi      C ABI + JSON（供各平台前端调用）
 platforms/macos 输入法 App（Swift + IMKit + Liquid Glass 候选窗）
 xtask           词典构建/导入 CLI
-docs/           产品、架构、威胁模型、同步协议、ADR
+docs/           产品、架构、威胁模型、同步协议、开源功能调研、ADR
 ```
 
 ## 快速开始
