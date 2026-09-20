@@ -1,0 +1,10 @@
+[package]
+name = "inputflow-emoji"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "InputFlow 表情模式：常用表情与拼音关键词检索（零依赖）"
+
+[dependencies]
+inputflow-core = { workspace = true }

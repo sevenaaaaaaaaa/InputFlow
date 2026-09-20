@@ -18,6 +18,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "inputflow-emoji"
+version = "0.1.0"
+dependencies = [
+ "inputflow-core",
+]
+
+[[package]]
 name = "inputflow-en"
 version = "0.1.0"
 dependencies = [
@@ -30,6 +37,7 @@ version = "0.1.0"
 dependencies = [
  "inputflow-core",
  "inputflow-dict",
+ "inputflow-emoji",
  "inputflow-en",
  "inputflow-ja",
  "inputflow-pinyin",

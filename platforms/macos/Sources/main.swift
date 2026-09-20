@@ -141,6 +141,12 @@ if installArgs.count > 1 {
         NSApplication.shared.run()
         exit(0)
 
+    case "--pet-window":
+        PetWindowController.setEnabled(true)
+        PetWindowController.shared.react(.commit)
+        NSApplication.shared.run()
+        exit(0)
+
     default:
         break
     }
@@ -149,8 +155,10 @@ if installArgs.count > 1 {
 // MARK: - 输入法主进程
 
 // M1：加密用户数据（钥匙串密钥；不可用则本次仅内存）+ 剪切板监控（默认关闭）
+_ = NSApplication.shared
 _ = EncryptedStore.shared.load()
 ClipboardMonitor.shared.startIfEnabled()
+PetWindowController.restoreIfEnabled()
 NotificationCenter.default.addObserver(
     forName: NSApplication.willTerminateNotification,
     object: nil,

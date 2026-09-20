@@ -17,6 +17,12 @@ final class InputFlowInputController: IMKInputController {
     private var shiftUsed = false
     private var openDoubleQuote = true
     private var openSingleQuote = true
+    /// 连按两下 `a` 的手势：上一次按 a 的时间（系统 uptime）。
+    private var lastAAt: TimeInterval = 0
+    /// 网址模式：所有按键直通系统，Esc 退出。
+    private var urlMode = false
+    /// 表情模式（斗图）之前的中文模式，Esc 时恢复。
+    private var modeBeforeEmoji: String?
     private var lastChineseMode: InputFlowMode = {
         UserDefaults.standard.string(forKey: "InputFlowLastChineseMode")
             .flatMap(InputFlowMode.init(rawValue:))
@@ -49,6 +55,10 @@ final class InputFlowInputController: IMKInputController {
             menu.addItem(item)
         }
         menu.addItem(.separator())
+        let pet = NSMenuItem(title: "桌宠模式", action: #selector(togglePetMode(_:)), keyEquivalent: "")
+        pet.target = self
+        pet.state = PetWindowController.isEnabled ? .on : .off
+        menu.addItem(pet)
         let clipItem = NSMenuItem(title: "剪切板历史", action: nil, keyEquivalent: "")
         clipItem.submenu = clipboardSubmenu()
         menu.addItem(clipItem)
@@ -121,11 +131,23 @@ final class InputFlowInputController: IMKInputController {
         AISettingsWindowController.shared.show()
     }
 
+    @objc private func togglePetMode(_ sender: NSMenuItem) {
+        PetWindowController.setEnabled(!PetWindowController.isEnabled)
+        sender.state = PetWindowController.isEnabled ? .on : .off
+    }
+
+    /// 当前前台应用画像（代码/浏览器/聊天），决定标点与手势能力。
+    private var profile: AppProfile {
+        let bundleId = currentClient?.bundleIdentifier() ?? NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        return AppProfile.make(bundleId: bundleId)
+    }
+
     @objc private func selectMode(_ sender: NSMenuItem) {
         guard
             let id = sender.representedObject as? String,
             let mode = InputFlowMode(rawValue: id)
         else { return }
+        modeBeforeEmoji = nil
         engine.setMode(id)
         if mode.isChinese { lastChineseMode = mode }
         persist(mode: mode)
@@ -168,6 +190,20 @@ final class InputFlowInputController: IMKInputController {
     override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
         guard let event, let client = sender as? IMKTextInput else { return false }
 
+        // 网址模式：按键全部直通系统（浏览器自己处理），Esc / 回车退出。
+        if urlMode, event.type == .keyDown, !event.modifierFlags.contains(.command) {
+            switch event.keyCode {
+            case 53:
+                exitURLMode()
+                return true
+            case 36, 76:
+                exitURLMode()
+                return false
+            default:
+                return false
+            }
+        }
+
         if event.type == .flagsChanged {
             return handleFlagsChanged(event)
         }
@@ -183,6 +219,10 @@ final class InputFlowInputController: IMKInputController {
 
         switch keyCode {
         case 53: // Esc
+            if engine.mode == "emoji" {
+                exitEmojiMode(client: client)
+                return true
+            }
             guard engine.hasComposition else { return false }
             engine.clear()
             window.hide()
@@ -198,14 +238,14 @@ final class InputFlowInputController: IMKInputController {
             update(client)
             return true
         case 49: // Space
-            guard engine.hasComposition else { return false }
+            guard engine.hasComposition || engine.mode == "emoji" else { return false }
             select(index: page * CandidateWindowController.pageSize, client: client)
             return true
         default:
             break
         }
 
-        if engine.hasComposition {
+        if engine.hasComposition || engine.mode == "emoji" {
             let pageCount = max(1, Int(ceil(Double(currentCandidateCount()) / Double(CandidateWindowController.pageSize))))
             switch keyCode {
             case 123, 116: // ← / PageUp
@@ -235,9 +275,35 @@ final class InputFlowInputController: IMKInputController {
 
         guard let chars = event.charactersIgnoringModifiers else { return false }
 
+        // 连按两下 a：浏览器 → 网址模式；聊天工具 → 表情模式（斗图）。
+        if chars == "a", !event.isARepeat, !flags.contains(.shift) {
+            let now = ProcessInfo.processInfo.systemUptime
+            if engine.composition.raw == "a", now - lastAAt < 0.3 {
+                lastAAt = 0
+                engine.clear()
+                if profile.urlGesture {
+                    enterURLMode(client: client)
+                    return true
+                }
+                if profile.memeGesture {
+                    enterEmojiMode(client: client)
+                    return true
+                }
+                // 当前应用没有手势动作：还原为正常的 aa 输入
+                _ = engine.feed("a")
+                _ = engine.feed("a")
+                page = 0
+                update(client)
+                return true
+            }
+            lastAAt = now
+        }
+
         // 中文模式下的标点映射（未组合时）：`,。？！；：、（）【】《》“”‘’…
+        // 代码编辑器/终端保持半角（按应用画像自动判断，无需用户配置）。
         let mode = InputFlowMode(rawValue: engine.mode) ?? .pinyin
-        if !engine.hasComposition, mode.usesChinesePunctuation, let punct = chinesePunctuation(chars) {
+        if !engine.hasComposition, mode.usesChinesePunctuation, !profile.asciiPunctuation,
+           let punct = chinesePunctuation(chars) {
             client.insertText(punct, replacementRange: NSRange(location: NSNotFound, length: 0))
             window.hide()
             return true
@@ -268,6 +334,12 @@ final class InputFlowInputController: IMKInputController {
 
     override func deactivateServer(_ sender: Any!) {
         engine.clear()
+        urlMode = false
+        if let previous = modeBeforeEmoji {
+            engine.setMode(previous)
+            modeBeforeEmoji = nil
+        }
+        PetWindowController.shared.react(.idle)
         if let client = sender as? IMKTextInput {
             clearMarkedText(client)
         }
@@ -347,6 +419,7 @@ final class InputFlowInputController: IMKInputController {
     private func commit(_ text: String, client: IMKTextInput) {
         client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
         persistUserModel()
+        PetWindowController.shared.react(.commit)
         page = 0
         update(client)
     }
@@ -356,25 +429,65 @@ final class InputFlowInputController: IMKInputController {
         store.mergeUserModel(tsv: engine.exportUserModel())
     }
 
+    // MARK: - 网址模式 / 表情模式
+
+    private func enterURLMode(client: IMKTextInput) {
+        urlMode = true
+        window.presentHint("网址模式 · 输入完成后按 Esc 退出", near: caretRect(client))
+        PetWindowController.shared.react(.idle)
+    }
+
+    private func exitURLMode() {
+        urlMode = false
+        window.hide()
+    }
+
+    private func enterEmojiMode(client: IMKTextInput) {
+        let current = engine.mode
+        if current != "emoji" {
+            modeBeforeEmoji = current
+            engine.setMode("emoji")
+        }
+        page = 0
+        update(client)
+    }
+
+    private func exitEmojiMode(client: IMKTextInput) {
+        if let previous = modeBeforeEmoji {
+            engine.setMode(previous)
+            modeBeforeEmoji = nil
+        }
+        page = 0
+        update(client)
+        window.hide()
+    }
+
     private func update(_ client: IMKTextInput) {
         let comp = engine.composition
-        guard !comp.raw.isEmpty else {
+        guard !comp.raw.isEmpty || !comp.candidates.isEmpty else {
             clearMarkedText(client)
             window.hide()
+            PetWindowController.shared.react(.idle)
             return
         }
+        PetWindowController.shared.react(comp.raw.isEmpty ? .idle : .composing)
         let display = comp.preedit.isEmpty ? comp.raw : comp.preedit
-        let attributes: [NSAttributedString.Key: Any] = [
-            .underlineStyle: NSUnderlineStyle.single.rawValue,
-            .underlineColor: NSColor.secondaryLabelColor,
-            .foregroundColor: NSColor.labelColor,
-        ]
-        let marked = NSAttributedString(string: display, attributes: attributes)
-        client.setMarkedText(
-            marked,
-            selectionRange: NSRange(location: marked.length, length: 0),
-            replacementRange: NSRange(location: NSNotFound, length: 0)
-        )
+        if display.isEmpty {
+            // 表情模式的精选列表：不产生预编辑串，只展示候选窗
+            clearMarkedText(client)
+        } else {
+            let attributes: [NSAttributedString.Key: Any] = [
+                .underlineStyle: NSUnderlineStyle.single.rawValue,
+                .underlineColor: NSColor.secondaryLabelColor,
+                .foregroundColor: NSColor.labelColor,
+            ]
+            let marked = NSAttributedString(string: display, attributes: attributes)
+            client.setMarkedText(
+                marked,
+                selectionRange: NSRange(location: marked.length, length: 0),
+                replacementRange: NSRange(location: NSNotFound, length: 0)
+            )
+        }
         let caret = caretRect(client)
         window.present(candidates: comp.candidates, page: page, near: caret) { [weak self, weak client] index in
             guard let self, let client else { return }
@@ -392,6 +505,15 @@ final class InputFlowInputController: IMKInputController {
     }
 
     private func caretRect(_ client: IMKTextInput) -> NSRect? {
+        // 首选 firstRect（更标准），失败再退回 attributes 行高矩形。
+        var actual = NSRange()
+        let first = client.firstRect(
+            forCharacterRange: NSRange(location: NSNotFound, length: 0),
+            actualRange: &actual
+        )
+        if first.height > 0 {
+            return first
+        }
         var rect: NSRect = .zero
         _ = client.attributes(forCharacterIndex: 0, lineHeightRectangle: &rect)
         return rect.height > 0 ? rect : nil

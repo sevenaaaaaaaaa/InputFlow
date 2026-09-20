@@ -12,3 +12,4 @@ inputflow-dict = { workspace = true }
 inputflow-pinyin = { workspace = true }
 inputflow-en = { workspace = true }
 inputflow-ja = { workspace = true }
+inputflow-emoji = { workspace = true }

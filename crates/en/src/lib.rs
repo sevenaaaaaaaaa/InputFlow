@@ -1,6 +1,6 @@
 //! 英文输入：前缀补全 + 词频排序。词表全部在本地，不做联网纠错。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock};
 
 use inputflow_core::{Candidate, CandidateKind, Decoder};
@@ -11,6 +11,7 @@ const EMBEDDED: &str = include_str!("../data/words.txt");
 pub struct EnDecoder {
     words: Vec<(String, u32)>,
     index: HashMap<char, Vec<usize>>,
+    exact: HashSet<String>,
     limit: usize,
 }
 
@@ -57,16 +58,24 @@ impl EnDecoder {
         let mut words: Vec<(String, u32)> = dedup.into_iter().collect();
         words.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         let mut index: HashMap<char, Vec<usize>> = HashMap::new();
+        let mut exact: HashSet<String> = HashSet::with_capacity(words.len());
         for (i, (w, _)) in words.iter().enumerate() {
             if let Some(c) = w.chars().next() {
                 index.entry(c).or_default().push(i);
             }
+            exact.insert(w.clone());
         }
         Self {
             words,
             index,
+            exact,
             limit: 20,
         }
+    }
+
+    /// 词表里是否存在该词（大小写不敏感）。
+    pub fn contains(&self, word: &str) -> bool {
+        self.exact.contains(&word.to_lowercase())
     }
 
     pub fn len(&self) -> usize {
@@ -99,6 +108,17 @@ impl EnDecoder {
 
 impl Decoder for EnDecoder {
     fn decode(&self, input: &str) -> Vec<Candidate> {
+        self.decode_inner(input, true)
+    }
+}
+
+impl EnDecoder {
+    /// 中英混输用：保留与输入完全相同的英文词（普通补全模式会略过它）。
+    pub fn decode_for_mix(&self, input: &str) -> Vec<Candidate> {
+        self.decode_inner(input, false)
+    }
+
+    fn decode_inner(&self, input: &str, skip_exact: bool) -> Vec<Candidate> {
         let lower = input.to_lowercase();
         let Some(first) = lower.chars().next() else {
             return Vec::new();
@@ -115,7 +135,7 @@ impl Decoder for EnDecoder {
                 let exact = w.len() == lower.len();
                 let score = (f64::from(*freq)).ln() + if exact { 0.5 } else { 0.0 };
                 let text = self.case_like(input, w);
-                if text == input {
+                if skip_exact && text == input {
                     continue;
                 }
                 out.push(Candidate::new(text, consumed, CandidateKind::Word, score));
@@ -163,6 +183,18 @@ mod tests {
     fn exact_word_not_duplicated() {
         let d = EnDecoder::embedded();
         assert!(d.decode("hello").iter().all(|c| c.text != "hello"));
+    }
+
+    #[test]
+    fn mix_mode_keeps_exact_word_with_case() {
+        let d = EnDecoder::embedded();
+        let c = d.decode_for_mix("hello");
+        assert_eq!(c[0].text, "hello");
+        let c = d.decode_for_mix("Hello");
+        assert_eq!(c[0].text, "Hello");
+        assert!(d.contains("hello"));
+        assert!(d.contains("HELLO"));
+        assert!(!d.contains("hellozzz"));
     }
 
     #[test]

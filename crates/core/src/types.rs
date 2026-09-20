@@ -40,16 +40,19 @@ pub enum Mode {
     Shuangpin(Scheme),
     English,
     Japanese,
+    /// 表情模式（由前端手势临时进入，不出现在常规模式菜单里）。
+    Emoji,
 }
 
 impl Mode {
-    pub const ALL: [Mode; 6] = [
+    pub const ALL: [Mode; 7] = [
         Mode::Pinyin,
         Mode::Shuangpin(Scheme::Flypy),
         Mode::Shuangpin(Scheme::Mspy),
         Mode::Shuangpin(Scheme::Zrm),
         Mode::English,
         Mode::Japanese,
+        Mode::Emoji,
     ];
 
     pub fn id(self) -> &'static str {
@@ -58,6 +61,7 @@ impl Mode {
             Mode::Shuangpin(s) => s.id(),
             Mode::English => "en",
             Mode::Japanese => "ja",
+            Mode::Emoji => "emoji",
         }
     }
 
@@ -67,6 +71,7 @@ impl Mode {
             Mode::Shuangpin(s) => s.label(),
             Mode::English => "English",
             Mode::Japanese => "日本語",
+            Mode::Emoji => "表情",
         }
     }
 
@@ -79,6 +84,9 @@ impl Mode {
         }
         if s == "ja" {
             return Some(Mode::Japanese);
+        }
+        if s == "emoji" {
+            return Some(Mode::Emoji);
         }
         Scheme::from_id(s).map(Mode::Shuangpin)
     }
@@ -96,6 +104,8 @@ pub enum CandidateKind {
     Word,
     Char,
     Kana,
+    /// 表情符号
+    Emoji,
     /// 原样上屏
     Literal,
 }
@@ -107,6 +117,7 @@ impl CandidateKind {
             CandidateKind::Word => "word",
             CandidateKind::Char => "char",
             CandidateKind::Kana => "kana",
+            CandidateKind::Emoji => "emoji",
             CandidateKind::Literal => "literal",
         }
     }

@@ -41,10 +41,22 @@ BIN="$HOME/Library/Input Methods/InputFlow.app/Contents/MacOS/InputFlow"
 | 回车 | 原样上屏当前编码 |
 | Esc | 取消当前组合 |
 | 单按左 Shift | 中/英切换（不影响正常大写输入） |
-| 标点（未组合时） | 中文模式自动转全角：`，。？！；：、（）【】《》“”‘’` 等 |
+| 标点（未组合时） | 中文模式自动转全角；代码编辑器/终端按应用画像保持半角 |
+| 中英混输 | 拼音里直接混英文：`hello`→直接出 `hello`；大写开头按英文意图处理 |
+| 连按两下 `a`（浏览器） | 进入网址模式：按键直通系统，Esc / 回车退出 |
+| 连按两下 `a`（聊天工具） | 进入表情模式（斗图）：空格选表情，拼音可过滤，Esc 退出 |
 | 输入法菜单 | 切换 拼音 / 小鹤双拼 / 微软双拼 / 自然码 / English / 日本語 |
+| 输入法菜单 | 桌宠模式（可拖动玻璃小猫，随输入状态切换表情） |
 | 输入法菜单 | 剪切板历史（最近 8 条直接上屏；开启/关闭记录） |
 | 输入法菜单 | AI 增强…（内置统计模型状态、小模型下载/校验/启停） |
+
+## 智能交互（无需配置）
+
+- **应用感知**：前台 App 自动识别，代码编辑器/终端标点保持半角，聊天/浏览器用中文标点；
+- **双 `a` 手势**：浏览器进入网址模式（字母、标点全部直通，不经过输入法），
+  聊天工具进入表情模式（内置精选表情，`daku`→😭、`zan`→👍，空格上屏）；
+- **桌宠模式**：菜单一键开关，位置记忆；输入时表情联动（发呆 🐱 / 思考 🙀 / 开心 😻）；
+- **光标跟随**：候选窗优先用 `firstRect` 定位，屏幕边缘自动翻转，多屏跟随光标所在屏。
 
 ## 用户数据（加密持久化）
 
@@ -71,6 +83,7 @@ BIN="$HOME/Library/Input Methods/InputFlow.app/Contents/MacOS/InputFlow"
 "$BIN" --clipboard-smoke   # 剪切板监控自检（真实路径，写入一条测试数据）
 "$BIN" --ai-dump           # 模型目录 + 按内存推荐
 "$BIN" --clipboard-window  # 直接打开剪切板历史窗
+"$BIN" --pet-window        # 直接显示桌宠（并做一次开心动画）
 "$BIN" --ai-settings       # 直接打开 AI 增强窗
 ```
 
@@ -100,7 +113,9 @@ cp /tmp/base.ifd ~/Library/Application\ Support/InputFlow/base.ifd
 ## 开发说明
 
 - `Sources/Engine.swift`：C ABI 封装 + JSON 解码（组合态、候选、AI 目录）；
-- `Sources/InputController.swift`：按键翻译、预编辑串、模式菜单、Shift 切换、剪切板上屏；
+- `Sources/InputController.swift`：按键翻译、预编辑串、模式菜单、Shift 切换、剪切板上屏、双 `a` 手势；
+- `Sources/AppProfile.swift`：应用画像（代码/浏览器/聊天）与标点策略；
+- `Sources/PetWindow.swift`：桌宠（状态表情、拖动、位置记忆）；
 - `Sources/CandidateWindow.swift`：候选窗（NSGlassEffectView / NSVisualEffectView 回退）；
 - `Sources/EncryptedStore.swift`：`userdata.enc` 容器（钥匙串密钥、ChaCha20-Poly1305、原子写）；
 - `Sources/ClipboardMonitor.swift` / `ClipboardWindow.swift`：剪切板监控与历史窗；

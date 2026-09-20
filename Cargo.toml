@@ -6,6 +6,7 @@ members = [
     "crates/pinyin",
     "crates/en",
     "crates/ja",
+    "crates/emoji",
     "crates/sync",
     "crates/engine",
     "crates/ai",
@@ -28,6 +29,7 @@ inputflow-dict = { path = "crates/dict" }
 inputflow-pinyin = { path = "crates/pinyin" }
 inputflow-en = { path = "crates/en" }
 inputflow-ja = { path = "crates/ja" }
+inputflow-emoji = { path = "crates/emoji" }
 inputflow-sync = { path = "crates/sync" }
 inputflow-engine = { path = "crates/engine" }
 inputflow-ai = { path = "crates/ai" }

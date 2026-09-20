@@ -4,12 +4,17 @@ use std::sync::Arc;
 
 use inputflow_core::{Composition, Decoder, Mode, UserModel};
 use inputflow_dict::Dictionary;
+use inputflow_emoji::EmojiDecoder;
 use inputflow_en::EnDecoder;
 use inputflow_ja::JaDecoder;
 use inputflow_pinyin::{Layout, PinyinDecoder};
 
 /// 单次组合态最多返回的候选数（前端分页展示）。
 pub const MAX_CANDIDATES: usize = 30;
+/// 中英混输时最多掺入的英文候选数。
+const MAX_MIXED_ENGLISH: usize = 5;
+/// 中英混输里「精确英文词」判定的最短长度（避免 `he`/`can` 这类拼音噪声）。
+const MIN_EXACT_ENGLISH: usize = 4;
 
 pub struct Session {
     mode: Mode,
@@ -18,6 +23,7 @@ pub struct Session {
     dict: Arc<Dictionary>,
     en: Arc<EnDecoder>,
     ja: JaDecoder,
+    emoji: EmojiDecoder,
     user: UserModel,
     /// 上一个上屏内容，用于二元组预测（只在内存、进程退出即消失）。
     last_committed: Option<String>,
@@ -29,16 +35,19 @@ impl Session {
     }
 
     pub fn with_mode(dict: Arc<Dictionary>, mode: Mode) -> Self {
-        Self {
+        let mut session = Self {
             mode,
             buffer: String::new(),
             comp: Composition::default(),
             dict,
             en: EnDecoder::embedded_shared(),
             ja: JaDecoder,
+            emoji: EmojiDecoder,
             user: UserModel::new(),
             last_committed: None,
-        }
+        };
+        session.refresh();
+        session
     }
 
     /// 上一个上屏内容（候选预测上下文）。
@@ -78,7 +87,8 @@ impl Session {
             return false;
         }
         match self.mode {
-            Mode::English => self.buffer.push(ch),
+            // 中文模式保留大小写：大写是「英文意图」信号，继续由解码器小写归一化
+            Mode::Pinyin | Mode::Shuangpin(_) | Mode::English => self.buffer.push(ch),
             _ => self.buffer.push(ch.to_ascii_lowercase()),
         }
         self.refresh();
@@ -110,8 +120,10 @@ impl Session {
     pub fn select(&mut self, index: usize) -> Option<String> {
         let cand = self.comp.candidates.get(index)?.clone();
         self.consume(cand.consumed);
-        self.user.record(&cand.text);
-        self.learn_context(&cand.text);
+        if self.mode != Mode::Emoji {
+            self.user.record(&cand.text);
+            self.learn_context(&cand.text);
+        }
         Some(cand.text)
     }
 
@@ -148,7 +160,7 @@ impl Session {
     }
 
     fn refresh(&mut self) {
-        if self.buffer.is_empty() {
+        if self.buffer.is_empty() && self.mode != Mode::Emoji {
             self.comp = Composition::default();
             return;
         }
@@ -167,11 +179,17 @@ impl Session {
                     inputflow_ja::to_hiragana(&self.buffer).unwrap_or_else(|| self.buffer.clone());
                 (self.ja.decode(&self.buffer), preedit)
             }
+            Mode::Emoji => (self.emoji.decode(&self.buffer), self.buffer.clone()),
         };
-        for c in &mut cands {
-            c.score += self.user.bonus(&c.text);
-            if let Some(prev) = &self.last_committed {
-                c.score += self.user.pair_bonus(prev, &c.text);
+        if self.mode != Mode::Emoji {
+            for c in &mut cands {
+                c.score += self.user.bonus(&c.text);
+                if let Some(prev) = &self.last_committed {
+                    c.score += self.user.pair_bonus(prev, &c.text);
+                }
+            }
+            if matches!(self.mode, Mode::Pinyin | Mode::Shuangpin(_)) {
+                self.push_english_candidates(&mut cands);
             }
         }
         // 分层排序：literal 垫底、覆盖输入多的优先，用户词只在同层内重排。
@@ -182,6 +200,34 @@ impl Session {
             preedit,
             candidates: cands,
         };
+    }
+
+    /// 中英混输：中文模式里掺入英文候选。
+    ///
+    /// 触发条件：输入无法完整解成中文（有残余）、或本身是长度 ≥4 的英文词、
+    /// 或用户按了 Shift（大写意图）。短词（如 `he`）不触发，避免拼音噪声。
+    fn push_english_candidates(&self, cands: &mut Vec<inputflow_core::Candidate>) {
+        use inputflow_core::CandidateKind;
+        let raw = self.buffer.as_str();
+        let has_real_zh = cands.iter().any(|c| c.kind != CandidateKind::Literal);
+        let lower = raw.to_ascii_lowercase();
+        let upper_intent = raw.chars().any(|c| c.is_ascii_uppercase());
+        let exact_word = lower.chars().count() >= MIN_EXACT_ENGLISH && self.en.contains(&lower);
+        if has_real_zh && !exact_word && !upper_intent {
+            return;
+        }
+        let consumed = raw.chars().count();
+        for mut c in self
+            .en
+            .decode_for_mix(raw)
+            .into_iter()
+            .take(MAX_MIXED_ENGLISH)
+        {
+            c.consumed = consumed;
+            // 高于 literal（-1000），但不抢中文整句的层级。
+            c.score = c.score.max(-100.0);
+            cands.push(c);
+        }
     }
 }
 
@@ -368,6 +414,56 @@ mod tests {
             with_ctx > without_ctx,
             "有上下文 {with_ctx} 应高于无上下文 {without_ctx}"
         );
+    }
+
+    #[test]
+    fn mixed_input_completes_english_word() {
+        let mut s = session(Mode::Pinyin);
+        type_str(&mut s, "hello");
+        let c = &s.composition().candidates;
+        assert_eq!(c[0].text, "hello", "{c:?}");
+        assert_eq!(c[0].consumed, 5);
+        assert_eq!(s.select(0).as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn mixed_input_keeps_case_intent() {
+        let mut s = session(Mode::Pinyin);
+        type_str(&mut s, "Hello");
+        let c = &s.composition().candidates;
+        assert_eq!(c[0].text, "Hello", "{c:?}");
+    }
+
+    #[test]
+    fn mixed_input_does_not_noise_short_pinyin() {
+        let mut s = session(Mode::Pinyin);
+        type_str(&mut s, "he");
+        let c = &s.composition().candidates;
+        assert_ne!(c[0].text, "he", "短拼音不应被英文词抢占: {c:?}");
+        assert_eq!(s.composition().preedit, "he");
+    }
+
+    #[test]
+    fn mixed_input_exact_long_word_beats_partial_chinese() {
+        let mut s = session(Mode::Pinyin);
+        type_str(&mut s, "test");
+        let c = &s.composition().candidates;
+        assert_eq!(c[0].text, "test", "{c:?}");
+    }
+
+    #[test]
+    fn emoji_mode_featured_and_filter() {
+        let mut s = session(Mode::Emoji);
+        let c = &s.composition().candidates;
+        assert!(!c.is_empty());
+        assert_eq!(c[0].text, "😀");
+
+        type_str(&mut s, "daku");
+        let c = &s.composition().candidates;
+        assert_eq!(c[0].text, "😭", "{c:?}");
+        assert_eq!(s.select(0).as_deref(), Some("😭"));
+        assert!(s.buffer().is_empty());
+        assert_eq!(s.user_model().count("😭"), 0, "表情不进用户词库");
     }
 
     #[test]

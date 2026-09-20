@@ -124,6 +124,35 @@ final class CandidateWindowController {
         }
     }
 
+    /// 提示条（网址模式等）：复用候选窗的玻璃外观。
+    func presentHint(_ text: String, near lineRect: NSRect?) {
+        row.arrangedSubviews.forEach {
+            row.removeArrangedSubview($0)
+            $0.removeFromSuperview()
+        }
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 12, weight: .medium)
+        label.textColor = .secondaryLabelColor
+        row.addArrangedSubview(label)
+        let size = row.fittingSize
+        panel.setContentSize(NSSize(width: max(120, size.width), height: max(32, size.height)))
+        let wasVisible = panel.isVisible
+        if let lineRect {
+            position(near: lineRect)
+        }
+        if !wasVisible {
+            panel.alphaValue = 0
+        }
+        panel.orderFrontRegardless()
+        if !wasVisible {
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.12
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                panel.animator().alphaValue = 1
+            }
+        }
+    }
+
     private func position(near lineRect: NSRect) {
         let size = panel.frame.size
         let gap: CGFloat = 4
@@ -186,9 +215,12 @@ private final class CandidateCell: NSView {
 
     func configure(_ candidate: Candidate) {
         textLabel.stringValue = candidate.text
+        textLabel.font = candidate.kind == "emoji"
+            ? .systemFont(ofSize: 26)
+            : .systemFont(ofSize: 17, weight: .regular)
         if let comment = candidate.comment, !comment.isEmpty {
             commentLabel.stringValue = comment
-            commentLabel.isHidden = false
+            commentLabel.isHidden = candidate.kind == "emoji"
         } else {
             commentLabel.stringValue = ""
             commentLabel.isHidden = true
