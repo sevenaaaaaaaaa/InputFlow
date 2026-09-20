@@ -35,10 +35,15 @@ swiftc -O -wmo \
 
 cp "$HERE/Info.plist" "$CONTENTS/Info.plist"
 
-echo "==> 3/4 生成外部词典（base.ifd，可选但推荐）"
+echo "==> 3/4 生成外部词典（base.ifd，20 万词条）"
 DICT_OUT="$HERE/build/base.ifd"
-cargo run --quiet --manifest-path "$ROOT/Cargo.toml" -p xtask -- \
-    dict build "$ROOT/crates/dict/data/base.tsv" -o "$DICT_OUT"
+DICT_SRC="$ROOT/crates/dict/data/base-large.tsv"
+if [[ ! -f "$DICT_OUT" || "$DICT_SRC" -nt "$DICT_OUT" ]]; then
+    cargo run --quiet --manifest-path "$ROOT/Cargo.toml" -p xtask -- \
+        dict build "$DICT_SRC" -o "$DICT_OUT"
+else
+    echo "词典已是最新，跳过（源文件未变）"
+fi
 
 echo "==> 4/4 Ad-hoc 签名"
 codesign --force --sign - "$BUNDLE" >/dev/null 2>&1 \

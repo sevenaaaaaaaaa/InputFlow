@@ -8,12 +8,37 @@ use inputflow_dict::Dictionary;
 use inputflow_pinyin::{Layout, PinyinDecoder};
 
 fn main() {
-    let dict = Arc::new(Dictionary::embedded());
+    let dict = match std::env::args().nth(1) {
+        Some(path) => {
+            let bytes = std::fs::read(&path).expect("读取词典失败");
+            Arc::new(Dictionary::from_bytes(&bytes).expect("解析词典失败"))
+        }
+        None => Arc::new(Dictionary::embedded()),
+    };
+    eprintln!(
+        "词典：{} key / {} 词条",
+        dict.key_count(),
+        dict.entry_count()
+    );
     let inputs = [
-        "ni", "nihao", "beijing", "shurufa", "zhongguodishehui", "woxihuanni",
-        "jintiantianqizenmeyang", "shuangpinshurufabukeyongle",
+        "n",
+        "ni",
+        "nih",
+        "shi",
+        "beij",
+        "ni",
+        "nihao",
+        "beijing",
+        "shurufa",
+        "zhongguodishehui",
+        "woxihuanni",
+        "jintiantianqizenmeyang",
+        "shuangpinshurufabukeyongle",
     ];
-    for layout in [Layout::Full, Layout::Shuangpin(inputflow_core::Scheme::Flypy)] {
+    for layout in [
+        Layout::Full,
+        Layout::Shuangpin(inputflow_core::Scheme::Flypy),
+    ] {
         for input in inputs {
             let d = PinyinDecoder::new(dict.clone(), layout);
             assert!(!d.candidates(input).is_empty());

@@ -123,4 +123,12 @@ enum InputFlowMode: String, CaseIterable {
 
     /// 中英切换时记住上一个中文模式。
     var isChinese: Bool { self != .en }
+
+    /// 使用中文全角标点的模式（日语标点后续单独处理）。
+    var usesChinesePunctuation: Bool {
+        switch self {
+        case .pinyin, .flypy, .mspy, .zrm: return true
+        case .en, .ja: return false
+        }
+    }
 }

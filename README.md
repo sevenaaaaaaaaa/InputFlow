@@ -11,9 +11,9 @@
 
 | 方案 | 状态 |
 |---|---|
-| 全拼（词库 + Viterbi 整句） | ✅ M0 |
+| 全拼（20 万词条词库 + Viterbi 整句 + 前缀补全） | ✅ M0 |
 | 双拼（小鹤 / 微软 / 自然码） | ✅ M0 |
-| 英文（前缀补全 + 词频） | ✅ M0 |
+| 英文（2 万词前缀补全 + 词频） | ✅ M0 |
 | 日语（罗马字 → 假名） | ✅ M0（假名） |
 | 日语（假名 → 汉字，Viterbi + JMdict） | ⏳ M2 |
 
@@ -32,9 +32,9 @@
 
 ```
 crates/core     类型与契约（候选、组合态、音节表），零依赖
-crates/dict     词典二进制格式 + 文本/Rime 导入器 + 内置基础词典
-crates/pinyin   全拼/双拼解码（切分 + Viterbi）与测试
-crates/en       英文补全
+crates/dict     词典二进制格式 + 文本/Rime 导入器 + 20 万词条主词库
+crates/pinyin   全拼/双拼解码（切分 + Viterbi + 前缀补全）与测试
+crates/en       英文补全（2 万词）
 crates/ja       日语罗马字 → 假名
 crates/sync     同步合并内核（LWW/CRDT 纯逻辑，无网络）
 crates/engine   会话编排：模式切换、翻页、学习重排
@@ -48,12 +48,14 @@ docs/           产品、架构、威胁模型、同步协议、ADR
 
 ```bash
 cargo test                      # 内核测试
-cargo run -p xtask -- dict build crates/dict/data/base.tsv -o base.ifd
+cargo run -p xtask -- dict build crates/dict/data/base-large.tsv -o base.ifd
 
 # macOS 输入法（构建并安装到 ~/Library/Input Methods）
 ./platforms/macos/build.sh
 ./platforms/macos/install.sh
 ```
+
+词典数据的来源与再生成流程见 `crates/dict/data/SOURCES.md`。
 
 ## 隐私承诺
 
@@ -64,4 +66,5 @@ cargo run -p xtask -- dict build crates/dict/data/base.tsv -o base.ifd
 
 ## 许可
 
-AGPL-3.0-only，见 `LICENSE`。
+AGPL-3.0-only，见 `LICENSE`。内置词库数据来源与许可见
+`crates/dict/data/SOURCES.md`、`crates/en/data/SOURCES.md`（含 GPL-3.0 / MIT 数据）。

@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 
 /// 候选窗：无激活面板 + Liquid Glass 背景（macOS 26+），旧系统回退 NSVisualEffectView。
 final class CandidateWindowController {
@@ -36,8 +37,8 @@ final class CandidateWindowController {
 
         row.orientation = .horizontal
         row.alignment = .centerY
-        row.spacing = 4
-        row.edgeInsets = NSEdgeInsets(top: 7, left: 10, bottom: 7, right: 10)
+        row.spacing = 2
+        row.edgeInsets = NSEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
         row.autoresizingMask = [.width, .height]
         if #available(macOS 26.0, *), let glass = background as? NSGlassEffectView {
             glass.contentView = row
@@ -97,15 +98,28 @@ final class CandidateWindowController {
         }
 
         let size = row.fittingSize
-        panel.setContentSize(NSSize(width: max(80, size.width), height: max(34, size.height)))
+        let maxWidth = (NSScreen.main?.visibleFrame.width ?? 1440) - 48
+        panel.setContentSize(NSSize(width: min(max(80, size.width), maxWidth), height: max(36, size.height)))
+        let wasVisible = panel.isVisible
         if let lineRect {
             position(near: lineRect)
         }
+        if !wasVisible {
+            panel.alphaValue = 0
+        }
         panel.orderFrontRegardless()
+        if !wasVisible {
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.12
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                panel.animator().alphaValue = 1
+            }
+        }
     }
 
     func hide() {
         if panel.isVisible {
+            panel.alphaValue = 0
             panel.orderOut(nil)
         }
     }
@@ -127,22 +141,27 @@ final class CandidateWindowController {
 
 /// 单个候选格：序号 + 文本 +（可选）拼音注释。
 private final class CandidateCell: NSView {
+    static let maxTextWidth: CGFloat = 320
+
     var onClick: (() -> Void)?
     private let indexLabel = NSTextField(labelWithString: "")
     private let textLabel = NSTextField(labelWithString: "")
     private let commentLabel = NSTextField(labelWithString: "")
+    private var trackingArea: NSTrackingArea?
+    private var baseBackground: CGColor = NSColor.clear.cgColor
 
     init(index: Int) {
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = 12
+        layer?.cornerRadius = 10
 
         indexLabel.stringValue = "\(index)"
         indexLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
         indexLabel.textColor = .tertiaryLabelColor
-        textLabel.font = .systemFont(ofSize: 16, weight: .regular)
+        textLabel.font = .systemFont(ofSize: 17, weight: .regular)
         textLabel.textColor = .labelColor
-        commentLabel.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
+        textLabel.lineBreakMode = .byTruncatingMiddle
+        commentLabel.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
         commentLabel.textColor = .secondaryLabelColor
         commentLabel.lineBreakMode = .byTruncatingTail
 
@@ -151,15 +170,15 @@ private final class CandidateCell: NSView {
             addSubview(label)
         }
         NSLayoutConstraint.activate([
-            indexLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7),
-            indexLabel.topAnchor.constraint(equalTo: topAnchor, constant: 2),
-            textLabel.leadingAnchor.constraint(equalTo: indexLabel.trailingAnchor, constant: 5),
-            textLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            textLabel.topAnchor.constraint(equalTo: topAnchor),
+            indexLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            indexLabel.topAnchor.constraint(equalTo: topAnchor, constant: 3),
+            textLabel.leadingAnchor.constraint(equalTo: indexLabel.trailingAnchor, constant: 6),
+            textLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            textLabel.topAnchor.constraint(equalTo: topAnchor, constant: 1),
             commentLabel.leadingAnchor.constraint(equalTo: textLabel.leadingAnchor),
             commentLabel.trailingAnchor.constraint(equalTo: textLabel.trailingAnchor),
             commentLabel.topAnchor.constraint(equalTo: textLabel.bottomAnchor, constant: 1),
-            commentLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
+            commentLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -3),
         ])
     }
 
@@ -174,29 +193,56 @@ private final class CandidateCell: NSView {
             commentLabel.stringValue = ""
             commentLabel.isHidden = true
         }
-        layer?.backgroundColor = candidate.kind == "literal"
-            ? NSColor.quaternaryLabelColor.withAlphaComponent(0.12).cgColor
+        baseBackground = candidate.kind == "literal"
+            ? NSColor.quaternaryLabelColor.withAlphaComponent(0.10).cgColor
             : NSColor.clear.cgColor
+        layer?.backgroundColor = baseBackground
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.14).cgColor
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        layer?.backgroundColor = baseBackground
     }
 
     override func mouseDown(with event: NSEvent) {
-        layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.22).cgColor
+        layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.24).cgColor
         onClick?()
     }
 
     override func mouseUp(with event: NSEvent) {
-        layer?.backgroundColor = NSColor.clear.cgColor
+        layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.14).cgColor
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override var intrinsicContentSize: NSSize {
-        let textWidth = max(
-            textLabel.intrinsicContentSize.width,
-            commentLabel.isHidden ? 0 : commentLabel.intrinsicContentSize.width
+        let textWidth = min(
+            max(
+                textLabel.intrinsicContentSize.width,
+                commentLabel.isHidden ? 0 : commentLabel.intrinsicContentSize.width
+            ),
+            Self.maxTextWidth
         )
         let height = textLabel.intrinsicContentSize.height
             + (commentLabel.isHidden ? 0 : commentLabel.intrinsicContentSize.height + 1)
-        return NSSize(width: 7 + indexLabel.intrinsicContentSize.width + 5 + textWidth + 8, height: height + 4)
+        return NSSize(width: 8 + indexLabel.intrinsicContentSize.width + 6 + textWidth + 10, height: height + 4)
     }
 }

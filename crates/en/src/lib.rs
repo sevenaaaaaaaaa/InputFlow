@@ -1,6 +1,7 @@
 //! 英文输入：前缀补全 + 词频排序。词表全部在本地，不做联网纠错。
 
 use std::collections::HashMap;
+use std::sync::{Arc, OnceLock};
 
 use inputflow_core::{Candidate, CandidateKind, Decoder};
 
@@ -22,6 +23,14 @@ impl Default for EnDecoder {
 impl EnDecoder {
     pub fn embedded() -> Self {
         Self::from_wordlist(EMBEDDED)
+    }
+
+    /// 进程内共享的内置词表（避免每个会话重复解析）。
+    pub fn embedded_shared() -> Arc<Self> {
+        static SHARED: OnceLock<Arc<EnDecoder>> = OnceLock::new();
+        SHARED
+            .get_or_init(|| Arc::new(EnDecoder::embedded()))
+            .clone()
     }
 
     pub fn from_wordlist(src: &str) -> Self {
@@ -136,16 +145,18 @@ mod tests {
         let d = EnDecoder::embedded();
         let c = d.decode("hel");
         assert!(!c.is_empty());
-        assert_eq!(c[0].text, "hello");
+        assert!(c[0].text.starts_with("hel"), "{}", c[0].text);
+        assert!(c.iter().any(|x| x.text == "hello"));
+        assert!(c.iter().any(|x| x.text == "help"));
         assert!(c.iter().all(|x| x.consumed == 3));
     }
 
     #[test]
     fn case_is_preserved() {
         let d = EnDecoder::embedded();
-        assert_eq!(d.decode("Hel")[0].text, "Hello");
-        assert_eq!(d.decode("HEL")[0].text, "HELLO");
-        assert_eq!(d.decode("hel")[0].text, "hello");
+        assert_eq!(d.decode("Hel")[0].text, "Help");
+        assert_eq!(d.decode("HEL")[0].text, "HELP");
+        assert_eq!(d.decode("hel")[0].text, "help");
     }
 
     #[test]

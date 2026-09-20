@@ -40,12 +40,14 @@ BIN="$HOME/Library/Input Methods/InputFlow.app/Contents/MacOS/InputFlow"
 | 回车 | 原样上屏当前编码 |
 | Esc | 取消当前组合 |
 | 单按左 Shift | 中/英切换（不影响正常大写输入） |
+| 标点（未组合时） | 中文模式自动转全角：`，。？！；：、（）【】《》“”‘’` 等 |
 | 输入法菜单 | 切换 拼音 / 小鹤双拼 / 微软双拼 / 自然码 / English / 日本語 |
 
 ## 词典
 
-- 内置基础词典（约 370 条）保证开箱可用；
-- 外部词典：`~/Library/Application Support/InputFlow/base.ifd`（重新登录或切换输入法后生效）；
+- 内置主词库 20 万词条（单字 4.6 万 + 词语 15.4 万），rime-ice 导入 + 人工校准高频词，
+  来源与许可见 `crates/dict/data/SOURCES.md`；
+- 外部词典：`~/Library/Application Support/InputFlow/base.ifd`（install.sh 自动安装；重新登录或切换输入法后生效）；
 - 从 Rime 词库导入（例如雾凇拼音）：
 
 ```bash
@@ -66,6 +68,5 @@ cp /tmp/base.ifd ~/Library/Application\ Support/InputFlow/base.ifd
 ## 已知限制（M0）
 
 - 用户词只在内存，重启丢失（M1 加密落盘）；
-- 标点、数字、中英混输仍是系统行为，未做中文标点映射；
-- 剪切板历史与跨设备同步未接入（M1/M3）；
+- 数字保持半角；emoji、剪切板历史与跨设备同步未接入（M1/M3）；
 - 双拼键位表以 Rime 官方 schema 为准，仍建议对照输入验证（见 `crates/pinyin/src/scheme.rs` 注释）。

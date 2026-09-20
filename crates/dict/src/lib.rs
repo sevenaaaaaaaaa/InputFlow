@@ -5,6 +5,7 @@ pub mod import;
 
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::OnceLock;
 
 pub use import::{ImportReport, normalize_pinyin};
 
@@ -17,10 +18,19 @@ pub struct Entry {
     pub syls: u16,
 }
 
+/// 前缀查询命中：`key` 的字母串（去撇号）以查询串开头。
+#[derive(Debug, Clone, Copy)]
+pub struct PrefixHit<'a> {
+    pub key: &'a str,
+    pub entry: &'a Entry,
+}
+
 #[derive(Debug, Default)]
 pub struct Dictionary {
     map: HashMap<String, Vec<Entry>>,
     entries: usize,
+    /// (字母串, key)，按字母串排序；首次前缀查询时构建。
+    prefix: OnceLock<Vec<(Box<str>, Box<str>)>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,11 +87,57 @@ impl Dictionary {
         if list.len() > 1 {
             list.sort_by(|a, b| b.freq.cmp(&a.freq).then_with(|| a.word.cmp(&b.word)));
         }
+        // 索引与内容保持一致：内容变化时重建。
+        self.prefix = OnceLock::new();
     }
 
     /// 按 key 查候选（词频降序，同频按字典序）。
     pub fn lookup(&self, key: &str) -> &[Entry] {
         self.map.get(key).map(Vec::as_slice).unwrap_or(EMPTY)
+    }
+
+    fn prefix_index(&self) -> &[(Box<str>, Box<str>)] {
+        self.prefix.get_or_init(|| {
+            let mut idx: Vec<(Box<str>, Box<str>)> = self
+                .map
+                .keys()
+                .map(|key| {
+                    let letters: String = key.chars().filter(|c| *c != '\'').collect();
+                    (letters.into_boxed_str(), key.clone().into_boxed_str())
+                })
+                .collect();
+            idx.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+            idx
+        })
+    }
+
+    /// 前缀查询：返回字母串以 `letters` 开头的 key（每个 key 取词频最高的一条）。
+    ///
+    /// `max_per_key` 控制同一 key 下取多少条词条（如 `shi` 下的 是/时/事）。
+    pub fn lookup_prefix(&self, letters: &str, per_key: usize, limit: usize) -> Vec<PrefixHit<'_>> {
+        if letters.is_empty() || limit == 0 {
+            return Vec::new();
+        }
+        let idx = self.prefix_index();
+        let start = idx.partition_point(|(l, _)| l.as_ref() < letters);
+        let mut out = Vec::new();
+        for (l, key) in &idx[start..] {
+            if !l.starts_with(letters) {
+                break;
+            }
+            if let Some(entries) = self.map.get(key.as_ref()) {
+                for entry in entries.iter().take(per_key.max(1)) {
+                    out.push(PrefixHit {
+                        key: key.as_ref(),
+                        entry,
+                    });
+                    if out.len() >= limit {
+                        return out;
+                    }
+                }
+            }
+        }
+        out
     }
 
     pub fn contains_key(&self, key: &str) -> bool {
@@ -107,6 +163,80 @@ impl Dictionary {
                 self.insert(key, &e.word, e.freq);
             }
         }
+    }
+
+    /// 只保留词频最高的至多 `max_entries` 条；单音节条目（生僻字输入）始终保留。
+    ///
+    /// 返回 `(保留单音节数, 保留多音节数)`。
+    pub fn prune(&mut self, max_entries: usize) -> (usize, usize) {
+        if self.entries <= max_entries {
+            return (0, 0);
+        }
+        let mut singles: Vec<(&String, usize)> = Vec::new();
+        let mut multis: Vec<(&String, usize, u32)> = Vec::new();
+        for (key, list) in &self.map {
+            for (i, _) in list.iter().enumerate() {
+                if list[i].syls <= 1 {
+                    singles.push((key, i));
+                } else {
+                    multis.push((key, i, list[i].freq));
+                }
+            }
+        }
+        let keep_multi = max_entries.saturating_sub(singles.len());
+        multis.sort_by_key(|x| std::cmp::Reverse(x.2));
+        multis.truncate(keep_multi);
+
+        let mut kept: std::collections::HashSet<(&str, usize)> =
+            std::collections::HashSet::with_capacity(singles.len() + multis.len());
+        for (k, i) in &singles {
+            kept.insert((k.as_str(), *i));
+        }
+        for (k, i, _) in &multis {
+            kept.insert((k.as_str(), *i));
+        }
+
+        let mut new_map: HashMap<String, Vec<Entry>> = HashMap::with_capacity(kept.len() / 2 + 1);
+        let mut new_entries = 0usize;
+        let mut kept_singles = 0usize;
+        let mut kept_multi = 0usize;
+        for (key, list) in &self.map {
+            let mut filtered = Vec::new();
+            for (i, e) in list.iter().enumerate() {
+                if kept.contains(&(key.as_str(), i)) {
+                    filtered.push(e.clone());
+                }
+            }
+            if !filtered.is_empty() {
+                new_entries += filtered.len();
+                kept_singles += filtered.iter().filter(|e| e.syls <= 1).count();
+                kept_multi += filtered.iter().filter(|e| e.syls > 1).count();
+                new_map.insert(key.clone(), filtered);
+            }
+        }
+        self.map = new_map;
+        self.entries = new_entries;
+        self.prefix = OnceLock::new();
+        (kept_singles, kept_multi)
+    }
+
+    /// 导出为 TSV（`词\t拼音\t词频`），按 key 排序，便于入库与 diff。
+    pub fn to_tsv(&self) -> String {
+        let mut keys: Vec<&String> = self.map.keys().collect();
+        keys.sort();
+        let mut out = String::with_capacity(self.entries * 32);
+        for key in keys {
+            let pinyin = key.replace('\'', " ");
+            for e in &self.map[key] {
+                out.push_str(&e.word);
+                out.push('\t');
+                out.push_str(&pinyin);
+                out.push('\t');
+                out.push_str(&e.freq.to_string());
+                out.push('\n');
+            }
+        }
+        out
     }
 
     /// 确定性序列化（key 排序后写入），便于校验与 diff。
@@ -216,6 +346,53 @@ mod tests {
         a.merge(&b);
         assert_eq!(a.entry_count(), 2);
         assert_eq!(a.lookup("ni")[0].freq, 7);
+    }
+
+    #[test]
+    fn prune_keeps_singles_and_top_words() {
+        let mut d = Dictionary::new();
+        d.insert("ni", "你", 10);
+        d.insert("ni'hao", "你好", 100);
+        d.insert("ni'hao", "泥号", 1);
+        d.insert("wo", "我", 50);
+        d.insert("bei'jing", "北京", 90);
+        let (singles, multi) = d.prune(3);
+        assert_eq!(singles, 2, "单音节始终保留");
+        assert_eq!(multi, 1, "多音节按词频取前 1");
+        assert_eq!(d.entry_count(), 3);
+        assert!(!d.lookup("ni'hao").is_empty());
+        assert!(d.lookup("bei'jing").is_empty(), "词频较低的多音节被剪掉");
+
+        let tsv = d.to_tsv();
+        assert!(tsv.contains("你\tni\t10"), "{tsv}");
+        assert!(tsv.contains("你好\tni hao\t100"), "{tsv}");
+    }
+
+    #[test]
+    fn prefix_lookup_returns_extensions() {
+        let mut d = Dictionary::new();
+        d.insert("ni", "你", 500);
+        d.insert("ni'hao", "你好", 100);
+        d.insert("ni'hai", "你孩", 10);
+        d.insert("shi", "是", 900);
+        d.insert("ni'hao", "泥号", 1);
+
+        let hits = d.lookup_prefix("nih", 1, 100);
+        let words: Vec<&str> = hits.iter().map(|h| h.entry.word.as_str()).collect();
+        assert!(words.contains(&"你好"), "{words:?}");
+        assert!(words.contains(&"你孩"), "{words:?}");
+        assert!(!words.contains(&"你"), "「你」不是 nih 的扩展: {words:?}");
+
+        let multi = d.lookup_prefix("ni", 2, 100);
+        let ni_words: Vec<&str> = multi
+            .iter()
+            .filter(|h| h.key == "ni")
+            .map(|h| h.entry.word.as_str())
+            .collect();
+        assert_eq!(ni_words.first().copied(), Some("你"));
+        assert!(!multi.iter().any(|h| h.key == "shi"));
+
+        assert!(d.lookup_prefix("zzz", 1, 100).is_empty());
     }
 
     #[test]

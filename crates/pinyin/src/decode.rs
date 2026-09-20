@@ -23,6 +23,12 @@ const PASS_THROUGH_PENALTY: f64 = -40.0;
 const LEN_BONUS: f64 = 1.8;
 /// 选择最佳切分时每个输入字符的覆盖加成（避免用更短的切分胜出）。
 const COVERAGE_BONUS: f64 = 1.0;
+/// 未输完音节时，补全候选每个已按键字符的加成（让 `nih`→你好 压过 `ni`→你）。
+const COMPLETION_BONUS: f64 = 3.0;
+/// 前缀查询单次扫描上限（防止首字母输入扫描过大）。
+const PREFIX_SCAN_LIMIT: usize = 8192;
+/// 前缀查询时同一 key 下取多少条词条（是/时/事/使…）。
+const PREFIX_PER_KEY: usize = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Layout {
@@ -93,6 +99,7 @@ impl PinyinDecoder {
             .collect();
 
         let paths = self.segment(chars);
+        let ends_complete = paths.iter().any(|p| p.iter().all(|s| s.syl.is_some()));
         let mut out: Vec<Candidate> = Vec::new();
         let mut best: Option<(Hyp, usize, usize)> = None;
         for path in &paths {
@@ -135,9 +142,74 @@ impl PinyinDecoder {
             CandidateKind::Literal,
             -1000.0,
         ));
+        self.push_prefix_candidates(chars, orig, !ends_complete, &mut out);
         dedupe_and_sort(&mut out);
         out.truncate(30);
         out
+    }
+
+    /// 前缀候选：把输入当作词库拼音的未输完前缀（`n` → 你/那…，`nih` → 你好…）。
+    ///
+    /// 仅在尾部音节未输完时给予补全加成，避免 `shi`（完整音节）被 `时候` 抢占。
+    fn push_prefix_candidates(
+        &self,
+        chars: &[char],
+        orig: &[usize],
+        partial_tail: bool,
+        out: &mut Vec<Candidate>,
+    ) {
+        let query = self.prefix_query(chars);
+        if query.is_empty() {
+            return;
+        }
+        let consumed = orig.last().map(|i| i + 1).unwrap_or(chars.len());
+        for hit in self
+            .dict
+            .lookup_prefix(&query, PREFIX_PER_KEY, PREFIX_SCAN_LIMIT)
+        {
+            let covered = covered_syllables(hit.key, &query);
+            let mut score = (hit.entry.freq as f64).ln() + LEN_BONUS * covered as f64;
+            let extends = hit.entry.letters as usize > query.len();
+            if partial_tail && extends {
+                score += COMPLETION_BONUS * consumed as f64;
+            }
+            let kind = if hit.entry.syls <= 1 {
+                CandidateKind::Char
+            } else {
+                CandidateKind::Word
+            };
+            out.push(
+                Candidate::new(hit.entry.word.clone(), consumed, kind, score)
+                    .with_comment(hit.key.replace('\'', " ")),
+            );
+        }
+    }
+
+    /// 构造前缀查询串（纯字母的全拼形式）。
+    ///
+    /// 双拼按键先按两键一音节解回全拼；末尾落单或无法解码的部分原样保留。
+    fn prefix_query(&self, chars: &[char]) -> String {
+        match self.layout {
+            Layout::Full => chars.iter().collect(),
+            Layout::Shuangpin(_) => {
+                let mut out = String::new();
+                let mut i = 0;
+                while i + 2 <= chars.len() {
+                    let code: String = chars[i..i + 2].iter().collect();
+                    match self.codes.syllables(&code).first() {
+                        Some(syl) => {
+                            out.push_str(syl);
+                            i += 2;
+                        }
+                        None => break,
+                    }
+                }
+                if i < chars.len() {
+                    out.extend(chars[i..].iter());
+                }
+                out
+            }
+        }
     }
 
     /// 预编辑串（按当前切分显示，未输完的尾巴原样保留）。
@@ -264,9 +336,23 @@ impl PinyinDecoder {
 }
 
 fn dedupe_and_sort(out: &mut Vec<Candidate>) {
-    out.sort_by(|a, b| b.score.total_cmp(&a.score));
+    out.sort_by(Candidate::rank_cmp);
     let mut seen: HashSet<(String, usize)> = HashSet::new();
     out.retain(|c| seen.insert((c.text.clone(), c.consumed)));
+}
+
+/// key（`ni'hao`）的前缀查询串覆盖了几个完整音节。
+fn covered_syllables(key: &str, query: &str) -> usize {
+    let mut pos = 0;
+    let mut n = 0;
+    for syl in key.split('\'') {
+        if pos + syl.len() > query.len() {
+            break;
+        }
+        pos += syl.len();
+        n += 1;
+    }
+    n
 }
 
 /// 归一化输入：只保留小写字母与 `;`（微软 ing 键），返回字符序列与「归一化 → 原始」索引。
@@ -495,5 +581,42 @@ mod tests {
             .find(|c| c.text == "西安")
             .expect("应包含「西安」");
         assert_eq!(c.consumed, 5, "含撇号在内的消费数应为 5");
+    }
+
+    #[test]
+    fn single_letter_shows_chinese_chars() {
+        let d = PinyinDecoder::new(dict(), Layout::Full);
+        let cands = d.candidates("n");
+        assert_eq!(cands[0].text, "你", "单字母 n 的首选应是「你」: {cands:?}");
+        assert!(cands.iter().any(|c| c.text == "那"));
+        assert!(cands.iter().all(|c| c.consumed == 1));
+    }
+
+    #[test]
+    fn partial_syllable_completes_word() {
+        let d = PinyinDecoder::new(dict(), Layout::Full);
+        let nih = d.candidates("nih");
+        assert_eq!(nih[0].text, "你好", "nih 首选应是「你好」: {nih:?}");
+        assert_eq!(nih[0].consumed, 3);
+        let beij = d.candidates("beij");
+        assert_eq!(beij[0].text, "北京", "beij 首选应是「北京」: {beij:?}");
+    }
+
+    #[test]
+    fn complete_syllable_keeps_exact_candidate_first() {
+        let d = PinyinDecoder::new(dict(), Layout::Full);
+        let shi = d.candidates("shi");
+        assert_eq!(shi[0].text, "是", "shi 首选应仍是「是」: {shi:?}");
+        assert!(
+            shi.iter().any(|c| c.text == "时候"),
+            "时候应作为前缀候选出现"
+        );
+    }
+
+    #[test]
+    fn shuangpin_prefix_completion() {
+        let d = PinyinDecoder::new(dict(), Layout::Shuangpin(Scheme::Flypy));
+        let nih = d.candidates("nih");
+        assert_eq!(nih[0].text, "你好", "小鹤 nih 首选应是「你好」: {nih:?}");
     }
 }

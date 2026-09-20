@@ -160,14 +160,66 @@ pub fn parse_tsv(s: &str) -> (Dictionary, ImportReport) {
 /// 权重做**按文件归一化**（映射到 1..=1_000_000），保证不同词库的权重尺度可比。
 pub fn parse_rime_dict(s: &str) -> (Dictionary, ImportReport) {
     let mut report = ImportReport::default();
+    let rows = parse_rime_rows(s, &mut report);
+
+    let max = rows.iter().map(|r| r.2).fold(0.0f64, f64::max);
+    let mut dict = Dictionary::new();
+    for (key, word, weight) in rows {
+        let freq = scale_weight(weight, max);
+        dict.insert(&key, &word, freq);
+        report.imported += 1;
+    }
+    (dict, report)
+}
+
+/// 多个 Rime 词库合并导入：所有来源按**同一全局尺度**归一化，保留作者设计的相对权重。
+///
+/// `sources` 为 `(名称, 内容, 权重乘数)`；乘数用于拉平来源之间的尺度差异
+/// （例如无权重列的词表给一个较小的权重）。
+pub fn parse_rime_dicts(sources: &[(String, String, f64)]) -> (Dictionary, ImportReport) {
+    let mut report = ImportReport::default();
     let mut rows: Vec<(String, String, f64)> = Vec::new();
+    for (_name, content, scale) in sources {
+        let mut parsed = parse_rime_rows(content, &mut report);
+        let factor = if scale.is_finite() && *scale > 0.0 {
+            *scale
+        } else {
+            1.0
+        };
+        for r in &mut parsed {
+            r.2 *= factor;
+        }
+        rows.extend(parsed);
+    }
+    let max = rows.iter().map(|r| r.2).fold(0.0f64, f64::max);
+    let mut dict = Dictionary::new();
+    for (key, word, weight) in rows {
+        let freq = scale_weight(weight, max);
+        dict.insert(&key, &word, freq);
+        report.imported += 1;
+    }
+    (dict, report)
+}
+
+fn scale_weight(weight: f64, max: f64) -> u32 {
+    if max <= 0.0 {
+        1
+    } else {
+        ((weight / max) * 1_000_000.0).round().max(1.0) as u32
+    }
+}
+
+/// 解析 Rime 词库条目为 `(key, word, weight)`；无权重列时默认 1.0。
+fn parse_rime_rows(s: &str, report: &mut ImportReport) -> Vec<(String, String, f64)> {
+    let mut rows: Vec<(String, String, f64)> = Vec::new();
+    // `...` 只有在**本文件已解析到词条**时才视为正文结束（否则是头部结束符）。
+    let mut parsed_here = 0usize;
 
     for (i, raw) in s.lines().enumerate() {
         let line_no = i + 1;
         let line = raw.trim_end_matches(['\r', '\n']);
         if line.trim() == "..." {
-            // 头部结束符出现在词条之前；若已经解析到词条，则视为正文结束
-            if report.total > 0 {
+            if parsed_here > 0 {
                 break;
             }
             continue;
@@ -190,6 +242,7 @@ pub fn parse_rime_dict(s: &str) -> (Dictionary, ImportReport) {
             continue;
         }
         report.total += 1;
+        parsed_here += 1;
 
         let Some(key) = normalize_pinyin(pinyin) else {
             report.skip(line_no, "拼音含非法音节");
@@ -202,19 +255,7 @@ pub fn parse_rime_dict(s: &str) -> (Dictionary, ImportReport) {
             .unwrap_or(1.0);
         rows.push((key, word.to_string(), weight));
     }
-
-    let max = rows.iter().map(|r| r.2).fold(0.0f64, f64::max);
-    let mut dict = Dictionary::new();
-    for (key, word, weight) in rows {
-        let freq = if max <= 0.0 {
-            1
-        } else {
-            ((weight / max) * 1_000_000.0).round().max(1.0) as u32
-        };
-        dict.insert(&key, &word, freq);
-        report.imported += 1;
-    }
-    (dict, report)
+    rows
 }
 
 #[cfg(test)]
@@ -275,5 +316,36 @@ mod tests {
         let (d, r) = parse_rime_dict(src);
         assert_eq!(r.imported, 1);
         assert!(d.lookup("wu'guan").is_empty());
+    }
+
+    #[test]
+    fn multi_source_keeps_global_scale() {
+        let chars = "这\tzhe\t17648808\n你\tni\t1422192\n";
+        let words = "你好\tni hao\t332885\n北京\tbei jing\t1119506\n";
+        let rare = "魑魅魍魉\tchi mei wang liang\t100\n";
+        let sources = vec![
+            ("chars".to_string(), chars.to_string(), 1.0),
+            ("words".to_string(), words.to_string(), 1.0),
+            ("rare".to_string(), rare.to_string(), 1.0),
+        ];
+        let (d, r) = parse_rime_dicts(&sources);
+        assert_eq!(r.imported, 5);
+        let zhe = d.lookup("zhe")[0].freq;
+        let ni = d.lookup("ni")[0].freq;
+        let nihao = d.lookup("ni'hao")[0].freq;
+        assert!(zhe > ni && ni > nihao, "{zhe} {ni} {nihao}");
+        assert!(d.lookup("chi'mei'wang'liang")[0].freq < nihao);
+    }
+
+    #[test]
+    fn multi_source_scale_factor() {
+        let a = "甲\tjia\t100\n";
+        let b = "乙\tyi\t1\n";
+        let sources = vec![
+            ("a".to_string(), a.to_string(), 1.0),
+            ("b".to_string(), b.to_string(), 500.0),
+        ];
+        let (d, _) = parse_rime_dicts(&sources);
+        assert!(d.lookup("yi")[0].freq > d.lookup("jia")[0].freq);
     }
 }

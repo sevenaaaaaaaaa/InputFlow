@@ -16,7 +16,7 @@ pub struct Session {
     buffer: String,
     comp: Composition,
     dict: Arc<Dictionary>,
-    en: EnDecoder,
+    en: Arc<EnDecoder>,
     ja: JaDecoder,
     user: UserModel,
 }
@@ -32,7 +32,7 @@ impl Session {
             buffer: String::new(),
             comp: Composition::default(),
             dict,
-            en: EnDecoder::embedded(),
+            en: EnDecoder::embedded_shared(),
             ja: JaDecoder,
             user: UserModel::new(),
         }
@@ -149,7 +149,8 @@ impl Session {
         for c in &mut cands {
             c.score += self.user.bonus(&c.text);
         }
-        cands.sort_by(|a, b| b.score.total_cmp(&a.score));
+        // 分层排序：literal 垫底、覆盖输入多的优先，用户词只在同层内重排。
+        cands.sort_by(inputflow_core::Candidate::rank_cmp);
         cands.truncate(MAX_CANDIDATES);
         self.comp = Composition {
             raw: self.buffer.clone(),
@@ -254,10 +255,38 @@ mod tests {
     }
 
     #[test]
+    fn candidates_keep_coverage_tiers() {
+        let mut s = session(Mode::Pinyin);
+        type_str(&mut s, "nihao");
+        let c = &s.composition().candidates;
+        let zh: Vec<_> = c
+            .iter()
+            .filter(|x| x.kind != inputflow_core::CandidateKind::Literal)
+            .collect();
+        let first_partial = zh.iter().position(|x| x.consumed < 5).unwrap_or(zh.len());
+        assert!(first_partial > 0, "应有覆盖全部输入的候选");
+        assert!(
+            zh[..first_partial].iter().all(|x| x.consumed == 5),
+            "覆盖全部的候选必须排在最前: {:?}",
+            zh.iter().map(|x| (&x.text, x.consumed)).collect::<Vec<_>>()
+        );
+        assert!(
+            zh[first_partial..].iter().all(|x| x.consumed < 5),
+            "部分覆盖的候选不能插队: {:?}",
+            zh.iter().map(|x| (&x.text, x.consumed)).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            c.last().map(|x| x.kind),
+            Some(inputflow_core::CandidateKind::Literal),
+            "原样上屏永远垫底"
+        );
+    }
+
+    #[test]
     fn english_mode_keeps_case() {
         let mut s = session(Mode::English);
         type_str(&mut s, "Hel");
-        assert_eq!(s.composition().candidates[0].text, "Hello");
+        assert_eq!(s.composition().candidates[0].text, "Help");
     }
 
     #[test]

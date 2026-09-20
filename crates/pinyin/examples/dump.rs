@@ -1,4 +1,4 @@
-//! 手动检查候选排序：`cargo run -p inputflow-pinyin --example dump`
+//! 手动检查候选排序：`cargo run -p inputflow-pinyin --example dump [dict.ifd]`
 
 use std::sync::Arc;
 
@@ -6,12 +6,39 @@ use inputflow_dict::Dictionary;
 use inputflow_pinyin::{Layout, PinyinDecoder};
 
 fn main() {
-    let dict = Arc::new(Dictionary::embedded());
+    let dict = match std::env::args().nth(1) {
+        Some(path) => {
+            let bytes = std::fs::read(&path).expect("读取词典失败");
+            Arc::new(Dictionary::from_bytes(&bytes).expect("解析词典失败"))
+        }
+        None => Arc::new(Dictionary::embedded()),
+    };
+    eprintln!(
+        "词典：{} key / {} 词条",
+        dict.key_count(),
+        dict.entry_count()
+    );
     for (layout, inputs) in [
         (
             Layout::Full,
             vec![
-                "zhongguo", "beijing", "nihao", "woshi", "xian", "an", "shi", "nihm", "shurufa",
+                "n",
+                "ni",
+                "nih",
+                "nihao",
+                "wo",
+                "shi",
+                "beij",
+                "zhongguo",
+                "woshi",
+                "woxihuanni",
+                "jintiantianqizenmeyang",
+                "woshiyimingchengxuyuan",
+                "mingtianqunaliwan",
+                "xian",
+                "an",
+                "nihm",
+                "shurufa",
             ],
         ),
         (

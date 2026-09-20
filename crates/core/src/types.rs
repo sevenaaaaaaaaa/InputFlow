@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::fmt;
 
 /// 双拼方案。解码端对各方案的差异持宽容态度（见 `inputflow-pinyin::scheme`）。
@@ -135,6 +136,18 @@ impl Candidate {
     pub fn with_comment(mut self, comment: impl Into<String>) -> Self {
         self.comment = Some(comment.into());
         self
+    }
+
+    /// 候选排序：literal 垫底；覆盖输入多的在前；同层按分数降序。
+    ///
+    /// 所有前端排序都必须走这个函数，保证用户词重排不会打乱分层。
+    pub fn rank_cmp(&self, other: &Self) -> Ordering {
+        let literal = (self.kind == CandidateKind::Literal) as u8;
+        let other_literal = (other.kind == CandidateKind::Literal) as u8;
+        literal
+            .cmp(&other_literal)
+            .then_with(|| other.consumed.cmp(&self.consumed))
+            .then_with(|| other.score.total_cmp(&self.score))
     }
 }
 

@@ -12,6 +12,8 @@ final class InputFlowInputController: IMKInputController {
     private var page = 0
     private var shiftArmed = false
     private var shiftUsed = false
+    private var openDoubleQuote = true
+    private var openSingleQuote = true
     private var lastChineseMode: InputFlowMode = {
         UserDefaults.standard.string(forKey: "InputFlowLastChineseMode")
             .flatMap(InputFlowMode.init(rawValue:))
@@ -160,6 +162,15 @@ final class InputFlowInputController: IMKInputController {
         }
 
         guard let chars = event.charactersIgnoringModifiers else { return false }
+
+        // 中文模式下的标点映射（未组合时）：`,。？！；：、（）【】《》“”‘’…
+        let mode = InputFlowMode(rawValue: engine.mode) ?? .pinyin
+        if !engine.hasComposition, mode.usesChinesePunctuation, let punct = chinesePunctuation(chars) {
+            client.insertText(punct, replacementRange: NSRange(location: NSNotFound, length: 0))
+            window.hide()
+            return true
+        }
+
         var accepted = false
         for ch in chars {
             if engine.feed(ch) {
@@ -197,6 +208,41 @@ final class InputFlowInputController: IMKInputController {
     }
 
     // MARK: - 内部
+
+    /// ASCII 标点 → 中文全角标点；返回 nil 表示不拦截。
+    /// 引号成对翻转，`^` 输出省略号，`\` 输出顿号。
+    private func chinesePunctuation(_ s: String) -> String? {
+        switch s {
+        case ",": return "，"
+        case ".": return "。"
+        case "?": return "？"
+        case "!": return "！"
+        case ":": return "："
+        case ";": return "；"
+        case "(": return "（"
+        case ")": return "）"
+        case "[": return "【"
+        case "]": return "】"
+        case "{": return "「"
+        case "}": return "」"
+        case "<": return "《"
+        case ">": return "》"
+        case "\\": return "、"
+        case "|": return "｜"
+        case "~": return "～"
+        case "^": return "……"
+        case "$": return "¥"
+        case "`": return "·"
+        case "\"":
+            defer { openDoubleQuote.toggle() }
+            return openDoubleQuote ? "“" : "”"
+        case "'":
+            defer { openSingleQuote.toggle() }
+            return openSingleQuote ? "‘" : "’"
+        default:
+            return nil
+        }
+    }
 
     private func handleFlagsChanged(_ event: NSEvent) -> Bool {
         guard event.keyCode == 56 || event.keyCode == 60 else { return false }

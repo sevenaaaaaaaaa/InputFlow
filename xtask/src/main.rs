@@ -3,13 +3,15 @@
 //! ```text
 //! xtask dict build <input.tsv> -o <output.ifd> [--with-base]
 //! xtask dict import-rime <dict.yaml> -o <output.ifd> [--with-base]
+//! xtask dict import-rime-multi -o <output.ifd> [--tsv out.tsv] [--max-entries N] \
+//!     <file.yaml[:scale]> [<file.yaml[:scale]> ...]
 //! xtask dict stats <file.ifd|file.tsv>
 //! ```
 
 use std::process::ExitCode;
 
 use inputflow_dict::Dictionary;
-use inputflow_dict::import::{ImportReport, parse_rime_dict, parse_tsv};
+use inputflow_dict::import::{ImportReport, parse_rime_dict, parse_rime_dicts, parse_tsv};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -65,6 +67,7 @@ fn dict_cmd(args: &[String]) -> Result<(), String> {
             }
             write_ifd(&dict, &output)
         }
+        Some("import-rime-multi") => import_rime_multi(&args[1..]),
         Some("stats") => {
             let Some(path) = args.get(1) else {
                 return Err("stats 需要文件路径".into());
@@ -87,8 +90,69 @@ fn dict_cmd(args: &[String]) -> Result<(), String> {
             Ok(())
         }
         Some(other) => Err(format!("未知 dict 子命令: {other}")),
-        None => Err("dict 需要子命令（build/import-rime/stats）".into()),
+        None => Err("dict 需要子命令（build/import-rime/import-rime-multi/stats）".into()),
     }
+}
+
+fn import_rime_multi(args: &[String]) -> Result<(), String> {
+    let mut inputs: Vec<(String, f64)> = Vec::new();
+    let mut output = None;
+    let mut tsv = None;
+    let mut max_entries = 0usize;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-o" | "--output" => {
+                i += 1;
+                output = Some(args.get(i).ok_or("--output 需要一个路径")?.clone());
+            }
+            "--tsv" => {
+                i += 1;
+                tsv = Some(args.get(i).ok_or("--tsv 需要一个路径")?.clone());
+            }
+            "--max-entries" => {
+                i += 1;
+                max_entries = args
+                    .get(i)
+                    .and_then(|v| v.parse().ok())
+                    .ok_or("--max-entries 需要一个整数")?;
+            }
+            other => {
+                let (path, scale) = match other.rsplit_once(':') {
+                    Some((p, s)) => match s.parse::<f64>() {
+                        Ok(v) => (p.to_string(), v),
+                        Err(_) => (other.to_string(), 1.0),
+                    },
+                    None => (other.to_string(), 1.0),
+                };
+                inputs.push((path, scale));
+            }
+        }
+        i += 1;
+    }
+    let output = output.ok_or("需要 -o 输出文件")?;
+    if inputs.is_empty() {
+        return Err("需要至少一个 Rime 词库文件".into());
+    }
+    let mut sources: Vec<(String, String, f64)> = Vec::with_capacity(inputs.len());
+    for (path, scale) in &inputs {
+        sources.push((path.clone(), read(path)?, *scale));
+    }
+    let (mut dict, report) = parse_rime_dicts(&sources);
+    print_report("Rime 合并", &format!("{} 个来源", sources.len()), &report);
+    for (path, scale) in &inputs {
+        println!("  - {path} (×{scale})");
+    }
+    if max_entries > 0 {
+        let (singles, multi) = dict.prune(max_entries);
+        println!("剪枝: 保留单音节 {singles} / 多音节 {multi}");
+    }
+    write_ifd(&dict, &output)?;
+    if let Some(path) = tsv {
+        std::fs::write(&path, dict.to_tsv()).map_err(|e| format!("写入 {path} 失败: {e}"))?;
+        println!("已写出 {path}: {} 词条", dict.entry_count());
+    }
+    Ok(())
 }
 
 fn parse_io(args: &[String]) -> Result<(String, String, bool), String> {
@@ -150,6 +214,8 @@ fn usage() {
         "用法:\n  \
          xtask dict build <input.tsv> -o <output.ifd> [--with-base]\n  \
          xtask dict import-rime <dict.yaml> -o <output.ifd> [--with-base]\n  \
+         xtask dict import-rime-multi -o <output.ifd> [--tsv out.tsv] [--max-entries N] \\\n      \
+             <file.yaml[:scale]> [<file.yaml[:scale]> ...]\n  \
          xtask dict stats <file.ifd|file.tsv>"
     );
 }
