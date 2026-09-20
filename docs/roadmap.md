@@ -22,6 +22,15 @@
 - [x] `crates/xtask`：词典构建/导入 CLI
 - [x] `platforms/macos`：IMK 外壳 + Liquid Glass 候选窗 + build/install 脚本
 
+## M1 进展（进行中）
+
+- [x] 用户词 + 二元组加密持久化：ChaCha20-Poly1305、钥匙串密钥、0600、原子写、损坏隔离（ADR-0005）
+- [x] 剪切板历史：默认关闭、跳过 Concealed/Transient、上限 200 条、搜索/复制/一键清空
+- [x] AI 增强：模型目录、内存推荐、下载与 sha256 校验（ADR-0004）
+- [ ] 设置面板整合（模式 / 剪切板 / AI / 隐私开关集中入口）
+- [ ] emoji 与更多标点策略
+- [ ] 用户词加密存储的跨平台格式与迁移
+
 ## 后续待办（M0 遗留）
 
 - [ ] 双拼方案表逐键校对（`crates/pinyin/src/scheme.rs` 附校对清单）

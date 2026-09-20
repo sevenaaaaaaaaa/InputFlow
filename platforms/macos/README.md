@@ -1,7 +1,8 @@
-# InputFlow for macOS（M0 骨架）
+# InputFlow for macOS（M1）
 
 InputMethodKit 外壳 + Rust 内核静态库；候选窗在 macOS 26+ 使用系统原生 Liquid Glass，
-旧系统回退 `NSVisualEffectView`。**无网络代码**：既没有网络权限声明，也不链接任何网络库。
+旧系统回退 `NSVisualEffectView`。**无网络代码**：既没有网络权限声明，也不链接任何网络库
+（AI 模型下载是唯一例外，只在用户点击下载时建立 HTTPS 连接）。
 
 ## 构建与安装
 
@@ -42,7 +43,36 @@ BIN="$HOME/Library/Input Methods/InputFlow.app/Contents/MacOS/InputFlow"
 | 单按左 Shift | 中/英切换（不影响正常大写输入） |
 | 标点（未组合时） | 中文模式自动转全角：`，。？！；：、（）【】《》“”‘’` 等 |
 | 输入法菜单 | 切换 拼音 / 小鹤双拼 / 微软双拼 / 自然码 / English / 日本語 |
+| 输入法菜单 | 剪切板历史（最近 8 条直接上屏；开启/关闭记录） |
 | 输入法菜单 | AI 增强…（内置统计模型状态、小模型下载/校验/启停） |
+
+## 用户数据（加密持久化）
+
+- 用户词 + 上下词二元组 + 剪切板历史统一存
+  `~/Library/Application Support/InputFlow/userdata.enc`（0600）；
+- 密钥 256-bit 随机生成，存系统钥匙串（service `dev.inputflow.inputmethod`），
+  钥匙串不可用时本次运行不落盘，绝不把密钥写到数据文件旁边；
+- 格式：`IFUE` + 版本 + ChaCha20-Poly1305（头部作为 AAD），原子写入；
+  文件损坏时隔离为 `userdata.enc.corrupt` 并按空数据继续；
+- 剪切板历史**默认关闭**：跳过密码管理器标记的 Concealed/Transient 内容，
+  上限 200 条 / 单条 100 KB，可一键清空；
+- 校验：`grep -a` 搜索文件应无明文；`ls -l` 应为 `-rw-------`。
+
+```bash
+./uninstall.sh --purge   # 同时删除数据目录与钥匙串密钥
+```
+
+## 调试命令
+
+```bash
+BIN="$HOME/Library/Input Methods/InputFlow.app/Contents/MacOS/InputFlow"
+"$BIN" --store-smoke       # 加密存储自检（临时文件，不触碰真实数据）
+"$BIN" --store-info        # 钥匙串可用性 + 已加载数据量
+"$BIN" --clipboard-smoke   # 剪切板监控自检（真实路径，写入一条测试数据）
+"$BIN" --ai-dump           # 模型目录 + 按内存推荐
+"$BIN" --clipboard-window  # 直接打开剪切板历史窗
+"$BIN" --ai-settings       # 直接打开 AI 增强窗
+```
 
 ## 本地 AI 增强
 
@@ -69,14 +99,17 @@ cp /tmp/base.ifd ~/Library/Application\ Support/InputFlow/base.ifd
 
 ## 开发说明
 
-- `Sources/Engine.swift`：C ABI 封装 + JSON 解码（组合态、候选）；
-- `Sources/InputController.swift`：按键翻译、预编辑串、模式菜单、Shift 切换；
+- `Sources/Engine.swift`：C ABI 封装 + JSON 解码（组合态、候选、AI 目录）；
+- `Sources/InputController.swift`：按键翻译、预编辑串、模式菜单、Shift 切换、剪切板上屏；
 - `Sources/CandidateWindow.swift`：候选窗（NSGlassEffectView / NSVisualEffectView 回退）；
+- `Sources/EncryptedStore.swift`：`userdata.enc` 容器（钥匙串密钥、ChaCha20-Poly1305、原子写）；
+- `Sources/ClipboardMonitor.swift` / `ClipboardWindow.swift`：剪切板监控与历史窗；
+- `Sources/AIModelStore.swift` / `SettingsWindow.swift`：模型下载/校验与 AI 增强窗；
 - 目标版本默认 `arm64-apple-macos13.0`，可用 `MACOSX_DEPLOYMENT_TARGET=14.0 ./build.sh` 覆盖；
   Intel 机器上脚本自动使用 `x86_64`（暂不产出 universal 包）。
 
-## 已知限制（M0）
+## 已知限制（M1）
 
-- 用户词只在内存，重启丢失（M1 加密落盘）；
-- 数字保持半角；emoji、剪切板历史与跨设备同步未接入（M1/M3）；
+- 数字保持半角；emoji 未接入；
+- 跨设备同步（用户词/剪切板）在 M3；
 - 双拼键位表以 Rime 官方 schema 为准，仍建议对照输入验证（见 `crates/pinyin/src/scheme.rs` 注释）。

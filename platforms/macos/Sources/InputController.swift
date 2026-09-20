@@ -9,6 +9,9 @@ final class InputFlowInputController: IMKInputController {
         mode: UserDefaults.standard.string(forKey: "InputFlowMode") ?? InputFlowMode.pinyin.rawValue
     )
     private let window = CandidateWindowController()
+    private let store = EncryptedStore.shared
+    private let clipboard = ClipboardMonitor.shared
+    private weak var currentClient: IMKTextInput?
     private var page = 0
     private var shiftArmed = false
     private var shiftUsed = false
@@ -22,6 +25,9 @@ final class InputFlowInputController: IMKInputController {
 
     override init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
         super.init(server: server, delegate: delegate, client: inputClient)
+        if !store.userModelTsv.isEmpty {
+            _ = engine.importUserModel(store.userModelTsv)
+        }
     }
 
     required init?(coder: NSCoder) { nil }
@@ -43,6 +49,9 @@ final class InputFlowInputController: IMKInputController {
             menu.addItem(item)
         }
         menu.addItem(.separator())
+        let clipItem = NSMenuItem(title: "剪切板历史", action: nil, keyEquivalent: "")
+        clipItem.submenu = clipboardSubmenu()
+        menu.addItem(clipItem)
         let ai = NSMenuItem(title: "AI 增强…", action: #selector(openAISettings(_:)), keyEquivalent: "")
         ai.target = self
         menu.addItem(ai)
@@ -50,6 +59,62 @@ final class InputFlowInputController: IMKInputController {
         prefs.target = self
         menu.addItem(prefs)
         return menu
+    }
+
+    private func clipboardSubmenu() -> NSMenu {
+        let submenu = NSMenu(title: "剪切板历史")
+        if clipboard.isEnabled {
+            if store.clipboard.isEmpty {
+                let empty = NSMenuItem(title: "（暂无记录）", action: nil, keyEquivalent: "")
+                empty.isEnabled = false
+                submenu.addItem(empty)
+            } else {
+                for item in store.clipboard.prefix(8) {
+                    let firstLine = item.text.split(separator: "\n").first.map(String.init) ?? item.text
+                    let title = firstLine.count > 26 ? String(firstLine.prefix(26)) + "…" : firstLine
+                    let entry = NSMenuItem(title: title, action: #selector(insertClipboardItem(_:)), keyEquivalent: "")
+                    entry.target = self
+                    entry.representedObject = item.text
+                    submenu.addItem(entry)
+                }
+            }
+            submenu.addItem(.separator())
+            let off = NSMenuItem(title: "关闭剪切板记录", action: #selector(disableClipboardRecording(_:)), keyEquivalent: "")
+            off.target = self
+            submenu.addItem(off)
+        } else {
+            let on = NSMenuItem(title: "开启剪切板记录…", action: #selector(openClipboardWindow(_:)), keyEquivalent: "")
+            on.target = self
+            submenu.addItem(on)
+        }
+        let open = NSMenuItem(title: "打开剪切板历史…", action: #selector(openClipboardWindow(_:)), keyEquivalent: "")
+        open.target = self
+        submenu.addItem(open)
+        return submenu
+    }
+
+    @objc private func insertClipboardItem(_ sender: NSMenuItem) {
+        guard let text = sender.representedObject as? String else { return }
+        if let client = currentClient {
+            client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+        } else {
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(text, forType: .string)
+            clipboard.ignore(text)
+        }
+    }
+
+    @objc private func openClipboardWindow(_ sender: Any) {
+        ClipboardWindowController.shared.show()
+    }
+
+    @objc private func disableClipboardRecording(_ sender: Any) {
+        clipboard.setEnabled(false)
+        let alert = NSAlert()
+        alert.messageText = "已关闭剪切板记录"
+        alert.informativeText = "已有历史保留在本地加密文件中，可在「剪切板历史…」中查看或清空。"
+        alert.runModal()
     }
 
     @objc private func openAISettings(_ sender: Any) {
@@ -196,6 +261,7 @@ final class InputFlowInputController: IMKInputController {
     override func commitComposition(_ sender: Any!) {
         if let client = sender as? IMKTextInput, let raw = engine.commitRaw() {
             client.insertText(raw, replacementRange: NSRange(location: NSNotFound, length: 0))
+            persistUserModel()
         }
         window.hide()
     }
@@ -206,11 +272,13 @@ final class InputFlowInputController: IMKInputController {
             clearMarkedText(client)
         }
         window.hide()
+        store.flush()
         super.deactivateServer(sender)
     }
 
     override func activateServer(_ sender: Any!) {
         super.activateServer(sender)
+        currentClient = sender as? IMKTextInput
         page = 0
     }
 
@@ -278,8 +346,14 @@ final class InputFlowInputController: IMKInputController {
 
     private func commit(_ text: String, client: IMKTextInput) {
         client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+        persistUserModel()
         page = 0
         update(client)
+    }
+
+    /// 把会话内学到的用户词（含上下词二元组）合并进加密存储。
+    private func persistUserModel() {
+        store.mergeUserModel(tsv: engine.exportUserModel())
     }
 
     private func update(_ client: IMKTextInput) {

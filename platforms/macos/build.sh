@@ -31,6 +31,9 @@ swiftc -O -wmo \
     "$HERE/Sources/main.swift" \
     "$HERE/Sources/Engine.swift" \
     "$HERE/Sources/CandidateWindow.swift" \
+    "$HERE/Sources/EncryptedStore.swift" \
+    "$HERE/Sources/ClipboardMonitor.swift" \
+    "$HERE/Sources/ClipboardWindow.swift" \
     "$HERE/Sources/AIModelStore.swift" \
     "$HERE/Sources/SettingsWindow.swift" \
     "$HERE/Sources/InputController.swift"

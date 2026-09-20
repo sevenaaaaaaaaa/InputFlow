@@ -109,8 +109,35 @@ if installArgs.count > 1 {
         }
         exit(0)
 
+    case "--store-smoke":
+        exit(EncryptedStore.smokeTest() ? 0 : 1)
+
+    case "--clipboard-smoke":
+        ClipboardMonitor.shared.setEnabled(true)
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString("clipboard-test-\(UUID().uuidString)", forType: .string)
+        RunLoop.main.run(until: Date().addingTimeInterval(2.5))
+        EncryptedStore.shared.flush()
+        print("clipboardItems=\(EncryptedStore.shared.clipboard.count)")
+        exit(EncryptedStore.shared.clipboard.isEmpty ? 1 : 0)
+
+    case "--store-info":
+        _ = EncryptedStore.shared.load()
+        print("bundleId=\(Bundle.main.bundleIdentifier ?? "nil")")
+        print("clipboardEnabled=\(UserDefaults.standard.bool(forKey: ClipboardMonitor.enabledKey))")
+        print("keyAvailable=\(EncryptedStore.shared.keyAvailable)")
+        print("userModelTsvBytes=\(EncryptedStore.shared.userModelTsv.utf8.count)")
+        print("clipboardItems=\(EncryptedStore.shared.clipboard.count)")
+        exit(0)
+
     case "--ai-settings":
         AISettingsWindowController.shared.show()
+        NSApplication.shared.run()
+        exit(0)
+
+    case "--clipboard-window":
+        ClipboardWindowController.shared.show()
         NSApplication.shared.run()
         exit(0)
 
@@ -120,6 +147,17 @@ if installArgs.count > 1 {
 }
 
 // MARK: - 输入法主进程
+
+// M1：加密用户数据（钥匙串密钥；不可用则本次仅内存）+ 剪切板监控（默认关闭）
+_ = EncryptedStore.shared.load()
+ClipboardMonitor.shared.startIfEnabled()
+NotificationCenter.default.addObserver(
+    forName: NSApplication.willTerminateNotification,
+    object: nil,
+    queue: .main
+) { _ in
+    EncryptedStore.shared.flush()
+}
 
 let connectionName = Bundle.main.infoDictionary?["InputMethodConnectionName"] as? String
     ?? "InputFlow_Connection"

@@ -33,7 +33,7 @@
 
 | 平台 | 集成方式 | 状态 |
 |---|---|---|
-| macOS | InputMethodKit + NSGlassEffectView | 🚧 M0（骨架） |
+| macOS | InputMethodKit + NSGlassEffectView | 🚧 M1（加密持久化 + 剪切板历史 + AI 增强） |
 | Windows | TSF（windows-rs） | ⏳ M3 |
 | Linux | Fcitx5 addon | ⏳ M3 |
 | Android | InputMethodService + JNI | ⏳ M4 |
@@ -73,7 +73,7 @@ cargo run -p xtask -- dict build crates/dict/data/base-large.tsv -o base.ifd
 ## 隐私承诺
 
 1. 内核不发任何网络请求，代码可审计；前端仅提供可选的局域网同步开关（默认关闭）。
-2. 按键缓存只在内存，提交后即清；用户词库加密落盘，密钥在系统钥匙串。
+2. 按键缓存只在内存，提交后即清；用户词与剪切板历史加密落盘（ChaCha20-Poly1305），密钥在系统钥匙串；剪切板历史默认关闭。
 3. 不申请 iOS Full Access 即可完整输入（同步功能除外）。
 4. 详见 `docs/threat-model.md`：明确能防什么、不能防什么。
 
