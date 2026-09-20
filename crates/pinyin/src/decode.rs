@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use inputflow_core::syllables::{is_syllable, is_syllable_prefix};
 use inputflow_core::{Candidate, CandidateKind, Scheme};
-use inputflow_dict::Dictionary;
+use inputflow_dict::{Dictionary, Entry};
 
 use crate::scheme::{Codes, MAX_SYLLABLE_LEN};
 
@@ -29,6 +29,16 @@ const COMPLETION_BONUS: f64 = 3.0;
 const PREFIX_SCAN_LIMIT: usize = 8192;
 /// 前缀查询时同一 key 下取多少条词条（是/时/事/使…）。
 const PREFIX_PER_KEY: usize = 3;
+/// 简拼候选的惩罚：低于同长度的完整拼音，避免抢占正常输入。
+const ABBR_PENALTY: f64 = 2.5;
+/// 混拼候选的惩罚（命中更具体，惩罚略小）。
+const MIXED_PENALTY: f64 = 1.5;
+/// 简拼候选上限（`nh` 这类两字母输入命中很多）。
+const ABBR_LIMIT: usize = 32;
+/// 混拼候选上限。
+const MIXED_LIMIT: usize = 64;
+/// 超过这个长度的输入不再尝试混拼扫描（长串本来就是整句输入）。
+const MAX_MIXED_QUERY: usize = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Layout {
@@ -123,6 +133,9 @@ impl PinyinDecoder {
                 }
             }
         }
+        let full_cover = best
+            .as_ref()
+            .is_some_and(|(_, consumed, _)| *consumed >= orig.len());
         if let Some((hyp, consumed, syls)) = best {
             let kind = if syls == 1 {
                 CandidateKind::Char
@@ -143,9 +156,60 @@ impl PinyinDecoder {
             -1000.0,
         ));
         self.push_prefix_candidates(chars, orig, !ends_complete, &mut out);
+        self.push_abbreviation_candidates(chars, orig, full_cover, &mut out);
         dedupe_and_sort(&mut out);
         out.truncate(30);
         out
+    }
+
+    /// 简拼 / 混拼候选：全拼模式只打几个字母也能整词命中。
+    ///
+    /// - 简拼：每个音节取首字母（`nh` → 你好、`bj` → 北京）；
+    /// - 混拼：整音节与首字母任意混打（`nhao` → 你好）。
+    ///
+    /// 仅在输入无法被完整拼音覆盖时才做混拼扫描（避免每键全表匹配）。
+    fn push_abbreviation_candidates(
+        &self,
+        chars: &[char],
+        orig: &[usize],
+        full_cover: bool,
+        out: &mut Vec<Candidate>,
+    ) {
+        if !matches!(self.layout, Layout::Full) || chars.len() < 2 {
+            return;
+        }
+        let query: String = chars.iter().collect();
+        let consumed = orig.last().map(|i| i + 1).unwrap_or(chars.len());
+        let qlen = chars.len() as f64;
+
+        for hit in self.dict.lookup_initials(&query, 1, ABBR_LIMIT) {
+            let score = (hit.entry.freq as f64).ln() + LEN_BONUS * qlen - ABBR_PENALTY;
+            out.push(
+                Candidate::new(
+                    hit.entry.word.clone(),
+                    consumed,
+                    word_kind(hit.entry),
+                    score,
+                )
+                .with_comment(hit.key.replace('\'', " ")),
+            );
+        }
+
+        if !full_cover && chars.len() <= MAX_MIXED_QUERY {
+            for hit in self.dict.lookup_mixed(&query, MIXED_LIMIT) {
+                let score = (hit.entry.freq as f64).ln() + LEN_BONUS * f64::from(hit.entry.syls)
+                    - MIXED_PENALTY;
+                out.push(
+                    Candidate::new(
+                        hit.entry.word.clone(),
+                        consumed,
+                        word_kind(hit.entry),
+                        score,
+                    )
+                    .with_comment(hit.key.replace('\'', " ")),
+                );
+            }
+        }
     }
 
     /// 前缀候选：把输入当作词库拼音的未输完前缀（`n` → 你/那…，`nih` → 你好…）。
@@ -339,6 +403,15 @@ fn dedupe_and_sort(out: &mut Vec<Candidate>) {
     out.sort_by(Candidate::rank_cmp);
     let mut seen: HashSet<(String, usize)> = HashSet::new();
     out.retain(|c| seen.insert((c.text.clone(), c.consumed)));
+}
+
+/// 词条按音节数分候选类型。
+fn word_kind(entry: &Entry) -> CandidateKind {
+    if entry.syls <= 1 {
+        CandidateKind::Char
+    } else {
+        CandidateKind::Word
+    }
 }
 
 /// key（`ni'hao`）的前缀查询串覆盖了几个完整音节。
@@ -618,5 +691,33 @@ mod tests {
         let d = PinyinDecoder::new(dict(), Layout::Shuangpin(Scheme::Flypy));
         let nih = d.candidates("nih");
         assert_eq!(nih[0].text, "你好", "小鹤 nih 首选应是「你好」: {nih:?}");
+    }
+
+    #[test]
+    fn initials_abbreviation_matches_words() {
+        let d = PinyinDecoder::new(dict(), Layout::Full);
+        let nh = d.candidates("nh");
+        assert_eq!(nh[0].text, "你好", "nh 首选应是「你好」: {nh:?}");
+        assert_eq!(nh[0].consumed, 2);
+        let bj = d.candidates("bj");
+        assert_eq!(bj[0].text, "北京", "bj 首选应是「北京」: {bj:?}");
+        let wm = d.candidates("wm");
+        assert_eq!(wm[0].text, "我们", "wm 首选应是「我们」: {wm:?}");
+    }
+
+    #[test]
+    fn mixed_abbreviation_matches_words() {
+        let d = PinyinDecoder::new(dict(), Layout::Full);
+        let nhao = d.candidates("nhao");
+        assert_eq!(nhao[0].text, "你好", "nhao 首选应是「你好」: {nhao:?}");
+        assert_eq!(nhao[0].consumed, 4);
+    }
+
+    #[test]
+    fn full_pinyin_still_wins_over_abbreviation() {
+        let d = PinyinDecoder::new(dict(), Layout::Full);
+        assert_eq!(d.candidates("ni")[0].text, "你");
+        assert_eq!(d.candidates("nihao")[0].text, "你好");
+        assert_eq!(d.candidates("shi")[0].text, "是");
     }
 }

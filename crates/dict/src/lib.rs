@@ -31,6 +31,8 @@ pub struct Dictionary {
     entries: usize,
     /// (字母串, key)，按字母串排序；首次前缀查询时构建。
     prefix: OnceLock<Vec<(Box<str>, Box<str>)>>,
+    /// (首字母串, key)，按首字母串排序；简拼查询用。
+    initials: OnceLock<Vec<(Box<str>, Box<str>)>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,6 +58,36 @@ impl fmt::Display for DictError {
 impl std::error::Error for DictError {}
 
 const EMPTY: &[Entry] = &[];
+
+/// key（`ni'hao`）的首字母串（`nh`）。
+fn initials_of(key: &str) -> String {
+    key.split('\'').filter_map(|s| s.chars().next()).collect()
+}
+
+/// 混拼匹配：query 的每个字母要么对应「整音节」，要么对应「音节首字母」。
+fn abbrev_match(query: &str, key: &str) -> bool {
+    fn go(q: &[u8], rest: &str) -> bool {
+        if q.is_empty() {
+            return rest.is_empty();
+        }
+        if rest.is_empty() {
+            return false;
+        }
+        let (syl, tail) = match rest.find('\'') {
+            Some(i) => (&rest[..i], &rest[i + 1..]),
+            None => (rest, ""),
+        };
+        let sb = syl.as_bytes();
+        if q.len() >= sb.len() && &q[..sb.len()] == sb && go(&q[sb.len()..], tail) {
+            return true;
+        }
+        if q[0] == sb[0] && go(&q[1..], tail) {
+            return true;
+        }
+        false
+    }
+    go(query.as_bytes(), key)
+}
 
 impl Dictionary {
     pub fn new() -> Self {
@@ -89,6 +121,7 @@ impl Dictionary {
         }
         // 索引与内容保持一致：内容变化时重建。
         self.prefix = OnceLock::new();
+        self.initials = OnceLock::new();
     }
 
     /// 按 key 查候选（词频降序，同频按字典序）。
@@ -137,6 +170,91 @@ impl Dictionary {
                 }
             }
         }
+        out
+    }
+
+    fn initials_index(&self) -> &[(Box<str>, Box<str>)] {
+        self.initials.get_or_init(|| {
+            let mut idx: Vec<(Box<str>, Box<str>)> = self
+                .map
+                .keys()
+                .map(|key| {
+                    (
+                        initials_of(key).into_boxed_str(),
+                        key.clone().into_boxed_str(),
+                    )
+                })
+                .collect();
+            idx.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+            idx
+        })
+    }
+
+    /// 简拼查询：返回首字母串以 `initials` 开头的 key（`nh` → 你好）。
+    pub fn lookup_initials(
+        &self,
+        initials: &str,
+        per_key: usize,
+        limit: usize,
+    ) -> Vec<PrefixHit<'_>> {
+        if initials.is_empty() || limit == 0 {
+            return Vec::new();
+        }
+        let idx = self.initials_index();
+        let start = idx.partition_point(|(l, _)| l.as_ref() < initials);
+        let mut out = Vec::new();
+        for (l, key) in &idx[start..] {
+            if !l.starts_with(initials) {
+                break;
+            }
+            if let Some(entries) = self.map.get(key.as_ref()) {
+                for entry in entries.iter().take(per_key.max(1)) {
+                    out.push(PrefixHit {
+                        key: key.as_ref(),
+                        entry,
+                    });
+                    if out.len() >= limit {
+                        return out;
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// 混拼查询：输入按「整音节 或 首字母」任意混打也能整词命中。
+    ///
+    /// 例：`nhao`→`ni'hao`（n 为 ni 的首字母，hao 为整音节）、`nh`→`ni'hao`。
+    /// 只扫描首字母相同的 key，避免全表遍历；返回词频最高的至多 `limit` 条。
+    pub fn lookup_mixed(&self, query: &str, limit: usize) -> Vec<PrefixHit<'_>> {
+        if query.len() < 2 || limit == 0 {
+            return Vec::new();
+        }
+        let idx = self.prefix_index();
+        let first = &query[..1];
+        let start = idx.partition_point(|(l, _)| l.as_ref() < first);
+        let mut out: Vec<PrefixHit<'_>> = Vec::new();
+        let cap = limit * 4;
+        for (l, key) in &idx[start..] {
+            if !l.starts_with(first) {
+                break;
+            }
+            if !abbrev_match(query, key) {
+                continue;
+            }
+            if let Some(entry) = self.map.get(key.as_ref()).and_then(|v| v.first()) {
+                out.push(PrefixHit {
+                    key: key.as_ref(),
+                    entry,
+                });
+                if out.len() >= cap {
+                    out.sort_by_key(|h| std::cmp::Reverse(h.entry.freq));
+                    out.truncate(limit);
+                }
+            }
+        }
+        out.sort_by_key(|h| std::cmp::Reverse(h.entry.freq));
+        out.truncate(limit);
         out
     }
 
@@ -393,6 +511,38 @@ mod tests {
         assert!(!multi.iter().any(|h| h.key == "shi"));
 
         assert!(d.lookup_prefix("zzz", 1, 100).is_empty());
+    }
+
+    #[test]
+    fn initials_and_mixed_lookup() {
+        let mut d = Dictionary::new();
+        d.insert("ni'hao", "你好", 100);
+        d.insert("ni'hao'ma", "你好吗", 50);
+        d.insert("nan'hai", "男孩", 40);
+        d.insert("bei'jing", "北京", 90);
+
+        let hits = d.lookup_initials("nh", 1, 100);
+        let words: Vec<&str> = hits.iter().map(|h| h.entry.word.as_str()).collect();
+        assert!(words.contains(&"你好"), "{words:?}");
+        assert!(words.contains(&"你好吗"), "{words:?}");
+        assert!(words.contains(&"男孩"), "{words:?}");
+
+        let mixed = d.lookup_mixed("nhao", 100);
+        let words: Vec<&str> = mixed.iter().map(|h| h.entry.word.as_str()).collect();
+        assert!(words.contains(&"你好"), "{words:?}");
+        assert!(!words.contains(&"北京"), "{words:?}");
+
+        // 混拼要求整词命中：`nh` 不会命中「你好吗」（还有未匹配的音节）
+        assert!(
+            !d.lookup_mixed("nh", 100)
+                .iter()
+                .any(|h| h.entry.word == "你好吗")
+        );
+
+        // 全首字母也能作为混拼整词命中，且不跨首字母扫描
+        let bj = d.lookup_mixed("bj", 100);
+        assert!(bj.iter().any(|h| h.entry.word == "北京"), "bj 应命中北京");
+        assert!(!bj.iter().any(|h| h.entry.word == "你好"));
     }
 
     #[test]
