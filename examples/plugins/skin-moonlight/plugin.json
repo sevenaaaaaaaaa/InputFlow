@@ -1,0 +1,10 @@
+{
+  "id": "skin-moonlight",
+  "name": "明月",
+  "version": "1.0.0",
+  "kind": "skin",
+  "authors": ["InputFlow examples"],
+  "description": "暖米纸色底、青蓝重点；配色思路化用鼠须管「明月」方案（GPL-3.0 社区配色传统）",
+  "license": "CC0-1.0",
+  "permissions": []
+}

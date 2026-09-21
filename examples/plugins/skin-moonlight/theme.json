@@ -1,0 +1,18 @@
+{
+  "light": {
+    "surface": "#F6F1E4F2",
+    "text": "#3E3A33",
+    "comment": "#8A8272",
+    "accent": "#2E7D8C",
+    "radius": 20,
+    "font_size": 17
+  },
+  "dark": {
+    "surface": "#2B2C28E8",
+    "text": "#E8E2D2",
+    "comment": "#97907E",
+    "accent": "#63B4C2",
+    "radius": 20,
+    "font_size": 17
+  }
+}

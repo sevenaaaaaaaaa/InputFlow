@@ -1,0 +1,10 @@
+{
+  "id": "skin-inkstone",
+  "name": "墨泉",
+  "version": "1.0.0",
+  "kind": "skin",
+  "authors": ["InputFlow examples"],
+  "description": "墨色磨砂底、金橙重点，为深色模式设计",
+  "license": "CC0-1.0",
+  "permissions": []
+}

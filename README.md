@@ -8,6 +8,30 @@
 - **开源可审计**：AGPL-3.0，无第三方运行时依赖（内核零 crates 依赖）。
 - **苹果 Liquid Glass**：macOS/iOS 26+ 使用系统原生玻璃 API，其他平台用同源设计契约近似。
 
+## 插件：声明式数据包（零代码执行）
+
+社区扩展只有一种形态——数据包（皮肤 / 桌宠形象 / 词典），装包即放目录
+`~/Library/Application Support/InputFlow/plugins/<id>/`，无在线市场、无自动更新。
+内核做权限白名单校验（`crates/plugin`），坏包跳过并给出原因。脚手架：
+
+```bash
+cargo run -p xtask -- plugin new --kind skin --id skin-mine --name 我的皮肤
+cargo run -p xtask -- plugin new --kind pet  --id pet-mine  --name 我的桌宠
+cargo run -p xtask -- plugin check plugins/skin-mine
+```
+
+示例包见 `examples/plugins/`：皮肤（明月/墨泉）与五个桌宠形象——
+**胖橘**（机械键盘）、**豆豆柴**（宠物玩具琴，追鼠标）、**铁蛋**（全息屏幕）、
+**墨韵佳人**（古筝，黑丝长发的东方美人）、**金发淑女**（钢琴，高挑的西方淑女）。
+桌宠支持帧动画（idle 小动作 / 敲击乐器 / 上屏开心 + 星星）、打字弹动、
+上屏礼花、鼠标追踪朝向；`genpets.py` 是纯标准库的美术生成器，可复现可魔改。
+交互：悬停被摸头、左键点按切中英、右键配置菜单（强制半角标点等）、
+底部快启台（中/EN、昨日总结）、头顶气泡提醒（仅本机任务：模型下载完成、
+傍晚小结；**永不承载付款/营销类内容**，见 `docs/adr/0006-notifications-and-stats.md`）。
+**输入统计**（只计数零内容，内核可单测，保留 7 天可清空）：速度、准确率、
+纠错/回车次数、节省击键、最长发呆、卡路里估算、语音字数；傍晚 18 点后
+当天首次打字时气泡展示今日小结。插件边界见 `docs/adr/0005-plugin-system.md`。
+
 ## 输入方案
 
 | 方案 | 状态 |
@@ -37,7 +61,7 @@
 
 | 平台 | 集成方式 | 状态 |
 |---|---|---|
-| macOS | InputMethodKit + NSGlassEffectView | 🚧 M1（加密持久化 + 剪切板历史 + AI 增强） |
+| macOS | InputMethodKit + NSGlassEffectView | 🚧 M1（加密持久化 + 剪切板历史 + AI 增强 + 按应用记忆中英 + 皮肤/桌宠插件 + 权限中心） |
 | Windows | TSF（windows-rs） | ⏳ M3 |
 | Linux | Fcitx5 addon | ⏳ M3 |
 | Android | InputMethodService + JNI | ⏳ M4 |
@@ -56,6 +80,7 @@ crates/emoji    表情模式（拼音关键词过滤，零依赖）
 crates/symbol   符号输入（`u` 前缀，符号/序号/货币/数学表，零依赖）
 crates/zhconv   简繁转换（OpenCC 词表，最长匹配，零依赖）
 crates/ai       本地 AI 模型目录与内存推荐（零依赖）
+crates/plugin   插件包框架：声明式数据包（皮肤/桌宠/词典），权限白名单制，零代码执行
 crates/sync     同步合并内核（LWW/CRDT 纯逻辑，无网络）
 crates/engine   会话编排：模式切换、翻页、学习重排
 crates/ffi      C ABI + JSON（供各平台前端调用）

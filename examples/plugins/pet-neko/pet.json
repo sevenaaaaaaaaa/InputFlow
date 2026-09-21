@@ -1,0 +1,11 @@
+{
+  "size": 96,
+  "states": {
+    "idle": "idle.png",
+    "composing": "composing.png",
+    "commit": "commit.png"
+  },
+  "follow_cursor": true,
+  "typing_bounce": true,
+  "commit_particles": true
+}
