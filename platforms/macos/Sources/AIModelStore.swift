@@ -171,7 +171,11 @@ final class AIModelStore: NSObject {
                 try? FileManager.default.removeItem(at: destination)
                 throw NSError(domain: "InputFlow.AI", code: 1, userInfo: [NSLocalizedDescriptionKey: "sha256 校验失败，已删除下载文件"])
             }
-            DispatchQueue.main.async { self.onFinish?(id, nil) }
+            // 本机任务完成提醒（桌宠气泡）：仅限下载/校验这类无敏感内容的事件
+            DispatchQueue.main.async {
+                PetWindowController.shared.showToast("✅ 模型已就绪：\(model.id)（sha256 校验通过）", duration: 6)
+                self.onFinish?(id, nil)
+            }
         } catch {
             DispatchQueue.main.async { self.onFinish?(id, error.localizedDescription) }
         }

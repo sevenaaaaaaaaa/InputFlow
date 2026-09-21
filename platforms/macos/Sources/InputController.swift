@@ -28,6 +28,14 @@ final class InputFlowInputController: IMKInputController {
             .flatMap(InputFlowMode.init(rawValue:))
             .flatMap { $0.isChinese ? $0 : nil } ?? .pinyin
     }()
+    /// 当前活跃会话：桌宠点按/菜单动作只作用在它身上（IMK 每个客户端一个控制器实例）。
+    private static weak var activeController: InputFlowInputController?
+    /// 统计与发呆跟踪：上一次按键事件的时间戳。
+    private var lastEventAt: TimeInterval?
+    private var digestChecked = false
+
+    /// 统计存储。
+    private let stats = PetStats.shared
 
     override init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
         super.init(server: server, delegate: delegate, client: inputClient)
@@ -35,6 +43,38 @@ final class InputFlowInputController: IMKInputController {
             _ = engine.importUserModel(store.userModelTsv)
         }
         engine.setTraditional(UserDefaults.standard.bool(forKey: Self.traditionalKey))
+        observePetActions()
+    }
+
+    /// 桌宠与菜单的跨实例动作走通知；只有活跃会话响应。
+    private func observePetActions() {
+        NotificationCenter.default.addObserver(
+            forName: .petToggleLanguage, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self, Self.activeController === self else { return }
+            self.toggleLanguage()
+            self.refreshPetModeLabel()
+        }
+        NotificationCenter.default.addObserver(
+            forName: .petTogglePunctuation, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard Self.activeController === self else { return }
+            let key = "InputFlowForceHalfPunctuation"
+            let on = !UserDefaults.standard.bool(forKey: key)
+            UserDefaults.standard.set(on, forKey: key)
+            PetWindowController.shared.showToast(on ? "已强制半角标点（全局）" : "标点恢复按应用自动", duration: 4)
+        }
+        NotificationCenter.default.addObserver(
+            forName: .petShowStats, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard Self.activeController === self else { return }
+            PetWindowController.shared.showStatsCard(yesterday: true)
+        }
+    }
+
+    private func refreshPetModeLabel() {
+        let chinese = (InputFlowMode(rawValue: engine.mode) ?? .pinyin).isChinese
+        PetWindowController.shared.setModeLabel(chinese: chinese)
     }
 
     /// 繁体输出开关（跨会话记住）。
@@ -63,6 +103,29 @@ final class InputFlowInputController: IMKInputController {
         pet.target = self
         pet.state = PetWindowController.isEnabled ? .on : .off
         menu.addItem(pet)
+        let petSkin = NSMenuItem(title: "桌宠形象", action: nil, keyEquivalent: "")
+        petSkin.submenu = petSubmenu()
+        menu.addItem(petSkin)
+        let skins = NSMenuItem(title: "皮肤", action: nil, keyEquivalent: "")
+        skins.submenu = skinSubmenu()
+        menu.addItem(skins)
+        let perms = NSMenuItem(title: "权限与隐私…", action: #selector(openPermissionCenter(_:)), keyEquivalent: "")
+        perms.target = self
+        menu.addItem(perms)
+        let mem = NSMenuItem(title: "按应用记忆中/英", action: #selector(toggleAppModeMemory(_:)), keyEquivalent: "")
+        mem.target = self
+        mem.state = AppModeMemory.shared.isEnabled ? .on : .off
+        menu.addItem(mem)
+        let forgetMem = NSMenuItem(title: "忘记此应用的中英偏好", action: #selector(forgetAppModeMemory(_:)), keyEquivalent: "")
+        forgetMem.target = self
+        menu.addItem(forgetMem)
+        let punct = NSMenuItem(title: "强制半角标点", action: #selector(toggleHalfPunctuation(_:)), keyEquivalent: "")
+        punct.target = self
+        punct.state = UserDefaults.standard.bool(forKey: "InputFlowForceHalfPunctuation") ? .on : .off
+        menu.addItem(punct)
+        let statsItem = NSMenuItem(title: "昨日输入总结", action: #selector(showYesterdayStats(_:)), keyEquivalent: "")
+        statsItem.target = self
+        menu.addItem(statsItem)
         let clipItem = NSMenuItem(title: "剪切板历史", action: nil, keyEquivalent: "")
         clipItem.submenu = clipboardSubmenu()
         menu.addItem(clipItem)
@@ -198,10 +261,101 @@ final class InputFlowInputController: IMKInputController {
         sender.state = PetWindowController.isEnabled ? .on : .off
     }
 
-    /// 当前前台应用画像（代码/浏览器/聊天），决定标点与手势能力。
+    @objc private func toggleAppModeMemory(_ sender: NSMenuItem) {
+        AppModeMemory.shared.isEnabled.toggle() // 关闭时顺带清空学习结果
+        sender.state = AppModeMemory.shared.isEnabled ? .on : .off
+    }
+
+    @objc private func forgetAppModeMemory(_ sender: NSMenuItem) {
+        AppModeMemory.shared.forget(appId: currentAppId)
+    }
+
+    /// 皮肤子菜单：跟随系统 + 社区皮肤包。
+    private func skinSubmenu() -> NSMenu {
+        let submenu = NSMenu(title: "皮肤")
+        let active = ThemeStore.activeId
+        let system = NSMenuItem(title: "跟随系统", action: #selector(selectSkin(_:)), keyEquivalent: "")
+        system.target = self
+        system.representedObject = ""
+        system.state = active.isEmpty ? .on : .off
+        submenu.addItem(system)
+        for pack in ThemeStore.availableSkins() {
+            let item = NSMenuItem(
+                title: "\(pack.name)（v\(pack.version)）",
+                action: #selector(selectSkin(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = pack.id
+            item.state = pack.id == active ? .on : .off
+            submenu.addItem(item)
+        }
+        return submenu
+    }
+
+    @objc private func selectSkin(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        ThemeStore.activeId = id
+        for item in sender.menu?.items ?? [] {
+            item.state = (item.representedObject as? String) == id ? .on : .off
+        }
+    }
+
+    /// 桌宠形象子菜单：内置小猫 + 社区形象包。
+    private func petSubmenu() -> NSMenu {
+        let submenu = NSMenu(title: "桌宠形象")
+        let active = PetWindowController.activePackId
+        let builtin = NSMenuItem(title: "内置小猫", action: #selector(selectPetPack(_:)), keyEquivalent: "")
+        builtin.target = self
+        builtin.representedObject = ""
+        builtin.state = active.isEmpty ? .on : .off
+        submenu.addItem(builtin)
+        for pack in PetWindowController.availablePets() {
+            let item = NSMenuItem(
+                title: "\(pack.name)（v\(pack.version)）",
+                action: #selector(selectPetPack(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = pack.id
+            item.state = pack.id == active ? .on : .off
+            submenu.addItem(item)
+        }
+        return submenu
+    }
+
+    @objc private func selectPetPack(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        PetWindowController.activePackId = id
+        for item in sender.menu?.items ?? [] {
+            item.state = (item.representedObject as? String) == id ? .on : .off
+        }
+    }
+
+    @objc private func openPermissionCenter(_ sender: Any) {
+        PermissionCenterWindowController.shared.show()
+    }
+
+    /// 当前前台应用画像（代码/浏览器/聊天），决定标点与手势能力；
+    /// 「强制半角标点」打开时全局覆盖（快捷配置入口：桌宠右键 / 本菜单）。
     private var profile: AppProfile {
         let bundleId = currentClient?.bundleIdentifier() ?? NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        return AppProfile.make(bundleId: bundleId)
+        var p = AppProfile.make(bundleId: bundleId)
+        if UserDefaults.standard.bool(forKey: "InputFlowForceHalfPunctuation") {
+            p.asciiPunctuation = true
+        }
+        return p
+    }
+
+    @objc private func toggleHalfPunctuation(_ sender: NSMenuItem) {
+        let key = "InputFlowForceHalfPunctuation"
+        let on = !UserDefaults.standard.bool(forKey: key)
+        UserDefaults.standard.set(on, forKey: key)
+        sender.state = on ? .on : .off
+    }
+
+    @objc private func showYesterdayStats(_ sender: Any) {
+        PetWindowController.shared.showStatsCard(yesterday: true)
     }
 
     @objc private func selectMode(_ sender: NSMenuItem) {
@@ -213,6 +367,7 @@ final class InputFlowInputController: IMKInputController {
         engine.setMode(id)
         if mode.isChinese { lastChineseMode = mode }
         persist(mode: mode)
+        recordModeSignal(strong: true)
         for item in sender.menu?.items ?? [] {
             item.state = (item.representedObject as? String) == id ? .on : .off
         }
@@ -240,7 +395,41 @@ final class InputFlowInputController: IMKInputController {
         }
         engine.setMode(next.rawValue)
         persist(mode: next)
+        recordModeSignal(strong: true)
         window.hide()
+    }
+
+    /// 当前前台应用 bundle id（用于每应用中英记忆）。
+    private var currentAppId: String? {
+        currentClient?.bundleIdentifier() ?? NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+    }
+
+    /// 把当前模式作为学习信号记录：手动切换是强信号，上屏是弱信号。
+    /// 表情等特殊模式不在 InputFlowMode 里，不计票。
+    private func recordModeSignal(strong: Bool) {
+        guard let mode = InputFlowMode(rawValue: engine.mode) else { return }
+        AppModeMemory.shared.observe(appId: currentAppId, chinese: mode.isChinese, strong: strong)
+    }
+
+    /// 切到某个应用时，按学到的偏好恢复中/英。
+    /// 样本足够（强票或明显优势）才动手；单次意外切换会被下一次切回抵消，不会纠缠。
+    private func restoreModeForApp() {
+        guard AppModeMemory.shared.isEnabled, modeBeforeEmoji == nil, !urlMode else { return }
+        guard let current = InputFlowMode(rawValue: engine.mode), current != .ja else { return }
+        guard let preferChinese = AppModeMemory.shared.preferredChinese(appId: currentAppId) else { return }
+        if preferChinese, !current.isChinese {
+            engine.setMode(lastChineseMode.rawValue)
+            persist(mode: lastChineseMode)
+            showModeHint("已切回\(lastChineseMode.title)（记住的偏好）")
+        } else if !preferChinese, current.isChinese {
+            engine.setMode(InputFlowMode.en.rawValue)
+            persist(mode: .en)
+            showModeHint("已切到 English（记住的偏好）")
+        }
+    }
+
+    private func showModeHint(_ text: String) {
+        window.presentHint(text, near: currentClient.flatMap { caretRect($0) })
     }
 
     // MARK: - 事件处理
@@ -272,12 +461,30 @@ final class InputFlowInputController: IMKInputController {
         guard event.type == .keyDown else { return false }
         if shiftArmed { shiftUsed = true }
 
+        // 统计：发呆结束（≥5s）或活跃打字（<10s）；只记秒数与次数。
+        let nowTick = Date().timeIntervalSince1970
+        if let last = lastEventAt {
+            let gap = nowTick - last
+            if gap >= 5 {
+                stats.recordStare(seconds: gap)
+            } else if gap < 10 {
+                stats.recordActive(seconds: gap)
+            }
+        }
+        lastEventAt = nowTick
+
         let flags = event.modifierFlags
         if flags.contains(.command) || flags.contains(.control) || flags.contains(.option) {
             return false
         }
 
         let keyCode = event.keyCode
+        if keyCode == 51 {
+            stats.recordDelete()  // 删除键：含组合态外的原编辑
+        }
+        if keyCode == 36 || keyCode == 76 {
+            stats.recordEnter()  // 回车键：同上
+        }
 
         switch keyCode {
         case 53: // Esc
@@ -291,8 +498,12 @@ final class InputFlowInputController: IMKInputController {
             update(client)
             return true
         case 36, 76: // Return
-            guard engine.hasComposition, let raw = engine.commitRaw() else { return false }
-            commit(raw, client: client)
+            guard engine.hasComposition else { return false }
+            let keys = engine.composition.raw.count
+            if let raw = engine.commitRaw() {
+                stats.recordCommit(chars: raw.count, keys: keys)
+                commit(raw, client: client)
+            }
             return true
         case 51: // Delete
             guard engine.hasComposition else { return false }
@@ -372,14 +583,17 @@ final class InputFlowInputController: IMKInputController {
         }
 
         var accepted = false
+        var fed = 0
         for ch in chars {
             if engine.feed(ch) {
                 accepted = true
+                fed += 1
             } else {
                 break
             }
         }
         if accepted {
+            stats.recordKeys(fed)
             page = 0
             update(client)
         }
@@ -387,9 +601,14 @@ final class InputFlowInputController: IMKInputController {
     }
 
     override func commitComposition(_ sender: Any!) {
-        if let client = sender as? IMKTextInput, let raw = engine.commitRaw() {
-            client.insertText(raw, replacementRange: NSRange(location: NSNotFound, length: 0))
-            persistUserModel()
+        if let client = sender as? IMKTextInput {
+            let keys = engine.composition.raw.count
+            if let raw = engine.commitRaw() {
+                stats.recordCommit(chars: raw.count, keys: keys)
+                client.insertText(raw, replacementRange: NSRange(location: NSNotFound, length: 0))
+                recordModeSignal(strong: false)
+                persistUserModel()
+            }
         }
         window.hide()
     }
@@ -397,6 +616,17 @@ final class InputFlowInputController: IMKInputController {
     override func deactivateServer(_ sender: Any!) {
         engine.clear()
         urlMode = false
+        // 会话结束：截断发呆计时，避免跨应用间隙被误计
+        if let last = lastEventAt {
+            let gap = Date().timeIntervalSince1970 - last
+            if gap >= 5 {
+                stats.recordStare(seconds: gap)
+            }
+        }
+        lastEventAt = nil
+        if Self.activeController === self {
+            Self.activeController = nil
+        }
         if let previous = modeBeforeEmoji {
             engine.setMode(previous)
             modeBeforeEmoji = nil
@@ -413,7 +643,25 @@ final class InputFlowInputController: IMKInputController {
     override func activateServer(_ sender: Any!) {
         super.activateServer(sender)
         currentClient = sender as? IMKTextInput
+        Self.activeController = self
         page = 0
+        restoreModeForApp()
+        refreshPetModeLabel()
+        maybeEveningDigest()
+    }
+
+    /// 傍晚总结：18 点后当天第一次激活时弹一次今日小结气泡。
+    /// 不用系统通知权限——进程活着才会弹，属于「打字时顺带看到」。
+    private func maybeEveningDigest() {
+        guard !digestChecked else { return }
+        digestChecked = true
+        guard PetStats.shared.isEnabled else { return }
+        let hour = Calendar.current.component(.hour, from: Date())
+        guard hour >= 18 else { return }
+        let today = PetStats.dayKey()
+        guard UserDefaults.standard.string(forKey: "InputFlowDigestShown") != today else { return }
+        UserDefaults.standard.set(today, forKey: "InputFlowDigestShown")
+        PetWindowController.shared.showStatsCard(yesterday: false)
     }
 
     // MARK: - 内部
@@ -471,15 +719,18 @@ final class InputFlowInputController: IMKInputController {
     }
 
     private func select(index: Int, client: IMKTextInput) {
+        let keys = engine.composition.raw.count
         guard let text = engine.select(index) else {
             NSSound.beep()
             return
         }
+        stats.recordCommit(chars: text.count, keys: keys)
         commit(text, client: client)
     }
 
     private func commit(_ text: String, client: IMKTextInput) {
         client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+        recordModeSignal(strong: false)
         persistUserModel()
         PetWindowController.shared.react(.commit)
         page = 0

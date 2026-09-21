@@ -2,18 +2,23 @@ import AppKit
 import QuartzCore
 
 /// 候选窗：无激活面板 + Liquid Glass 背景（macOS 26+），旧系统回退 NSVisualEffectView。
+/// 支持皮肤包（ThemeStore）：颜色/圆角/字号来自激活皮肤，缺省回落系统语义色。
 final class CandidateWindowController {
     static let pageSize = 9
 
     private let panel: NSPanel
-    private let background: NSView
+    private var background: NSView
     private let row = NSStackView()
     private let pageLabel = NSTextField(labelWithString: "")
     private var onPick: ((Int) -> Void)?
+    private var theme: CandidateTheme
+    private var themeObserver: NSObjectProtocol?
 
     private(set) var page = 0
 
     init() {
+        let initialTheme = ThemeStore.activeTheme()
+        theme = initialTheme
         panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 240, height: 40),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -31,28 +36,61 @@ final class CandidateWindowController {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.ignoresMouseEvents = false
 
-        background = Self.makeGlassBackground()
-        background.autoresizingMask = [.width, .height]
-        panel.contentView = background
-
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 2
         row.edgeInsets = NSEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
         row.autoresizingMask = [.width, .height]
-        if #available(macOS 26.0, *), let glass = background as? NSGlassEffectView {
-            glass.contentView = row
-        } else {
-            background.addSubview(row)
+
+        background = Self.makeBackground(initialTheme.current)
+        applyBackground()
+        panel.contentView = background
+
+        themeObserver = NotificationCenter.default.addObserver(
+            forName: ThemeStore.changedNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.reloadTheme()
         }
     }
 
-    private static func makeGlassBackground() -> NSView {
+    deinit {
+        if let themeObserver {
+            NotificationCenter.default.removeObserver(themeObserver)
+        }
+    }
+
+    /// 切换皮肤时重建背景并让后续渲染走新主题。
+    func reloadTheme() {
+        theme = ThemeStore.activeTheme()
+        background = Self.makeBackground(theme.current)
+        applyBackground()
+        panel.contentView = background
+    }
+
+    private func applyBackground() {
+        background.autoresizingMask = [.width, .height]
+        let side = theme.current
+        if #available(macOS 26.0, *), let glass = background as? NSGlassEffectView {
+            glass.contentView = row
+            if let surface = side.surface {
+                glass.tintColor = surface
+            }
+        } else {
+            background.addSubview(row)
+            if let surface = side.surface {
+                background.wantsLayer = true
+                background.layer?.backgroundColor = surface.cgColor
+            }
+        }
+    }
+
+    private static func makeBackground(_ side: CandidateTheme.Side) -> NSView {
+        let radius = side.radius ?? 18
         if #available(macOS 26.0, *) {
             let glass = NSGlassEffectView()
-            glass.cornerRadius = 18
+            glass.cornerRadius = radius
             glass.style = .regular
-            glass.tintColor = NSColor.windowBackgroundColor.withAlphaComponent(0.25)
+            glass.tintColor = side.surface ?? NSColor.windowBackgroundColor.withAlphaComponent(0.25)
             return glass
         }
         let effect = NSVisualEffectView()
@@ -60,7 +98,7 @@ final class CandidateWindowController {
         effect.blendingMode = .behindWindow
         effect.state = .active
         effect.wantsLayer = true
-        effect.layer?.cornerRadius = 18
+        effect.layer?.cornerRadius = radius
         effect.layer?.masksToBounds = true
         return effect
     }
@@ -81,8 +119,9 @@ final class CandidateWindowController {
         let slice = Array(candidates[start..<min(start + Self.pageSize, total)])
 
         row.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let side = theme.current
         for (offset, candidate) in slice.enumerated() {
-            let cell = CandidateCell(index: offset + 1)
+            let cell = CandidateCell(index: offset + 1, side: side)
             cell.configure(candidate)
             cell.onClick = { [weak self] in
                 self?.onPick?(start + offset)
@@ -93,7 +132,7 @@ final class CandidateWindowController {
         if pageCount > 1 {
             pageLabel.stringValue = "\(page + 1)/\(pageCount)"
             pageLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .regular)
-            pageLabel.textColor = .tertiaryLabelColor
+            pageLabel.textColor = side.comment ?? .tertiaryLabelColor
             row.addArrangedSubview(pageLabel)
         }
 
@@ -132,7 +171,7 @@ final class CandidateWindowController {
         }
         let label = NSTextField(labelWithString: text)
         label.font = .systemFont(ofSize: 12, weight: .medium)
-        label.textColor = .secondaryLabelColor
+        label.textColor = theme.current.comment ?? .secondaryLabelColor
         row.addArrangedSubview(label)
         let size = row.fittingSize
         panel.setContentSize(NSSize(width: max(120, size.width), height: max(32, size.height)))
@@ -168,7 +207,7 @@ final class CandidateWindowController {
     }
 }
 
-/// 单个候选格：序号 + 文本 +（可选）拼音注释。
+/// 单个候选格：序号 + 文本 +（可选）拼音注释。颜色/字号来自主题侧。
 private final class CandidateCell: NSView {
     static let maxTextWidth: CGFloat = 320
 
@@ -178,20 +217,24 @@ private final class CandidateCell: NSView {
     private let commentLabel = NSTextField(labelWithString: "")
     private var trackingArea: NSTrackingArea?
     private var baseBackground: CGColor = NSColor.clear.cgColor
+    private var hoverAccent: NSColor
+    private var commentColor: NSColor
 
-    init(index: Int) {
+    init(index: Int, side: CandidateTheme.Side) {
+        hoverAccent = side.accent ?? .controlAccentColor
+        commentColor = side.comment ?? .secondaryLabelColor
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = 10
+        layer?.cornerRadius = (side.radius ?? 18) * 0.55
 
         indexLabel.stringValue = "\(index)"
         indexLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
-        indexLabel.textColor = .tertiaryLabelColor
-        textLabel.font = .systemFont(ofSize: 17, weight: .regular)
-        textLabel.textColor = .labelColor
+        indexLabel.textColor = side.comment ?? .tertiaryLabelColor
+        textLabel.font = .systemFont(ofSize: side.fontSize ?? 17, weight: .regular)
+        textLabel.textColor = side.text ?? .labelColor
         textLabel.lineBreakMode = .byTruncatingMiddle
         commentLabel.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
-        commentLabel.textColor = .secondaryLabelColor
+        commentLabel.textColor = commentColor
         commentLabel.lineBreakMode = .byTruncatingTail
 
         for label in [indexLabel, textLabel, commentLabel] {
@@ -214,10 +257,10 @@ private final class CandidateCell: NSView {
     required init?(coder: NSCoder) { nil }
 
     func configure(_ candidate: Candidate) {
-        textLabel.stringValue = candidate.text
+        let baseFontSize = (textLabel.font?.pointSize ?? 17)
         textLabel.font = candidate.kind == "emoji"
-            ? .systemFont(ofSize: 26)
-            : .systemFont(ofSize: 17, weight: .regular)
+            ? .systemFont(ofSize: baseFontSize + 9)
+            : textLabel.font
         if let comment = candidate.comment, !comment.isEmpty {
             commentLabel.stringValue = comment
             commentLabel.isHidden = candidate.kind == "emoji"
@@ -247,7 +290,7 @@ private final class CandidateCell: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.14).cgColor
+        layer?.backgroundColor = hoverAccent.withAlphaComponent(0.14).cgColor
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -255,12 +298,12 @@ private final class CandidateCell: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.24).cgColor
+        layer?.backgroundColor = hoverAccent.withAlphaComponent(0.24).cgColor
         onClick?()
     }
 
     override func mouseUp(with event: NSEvent) {
-        layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.14).cgColor
+        layer?.backgroundColor = hoverAccent.withAlphaComponent(0.14).cgColor
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
