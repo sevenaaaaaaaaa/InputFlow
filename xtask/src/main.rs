@@ -8,10 +8,12 @@
 //! xtask dict stats <file.ifd|file.tsv>
 //! ```
 
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use inputflow_dict::Dictionary;
 use inputflow_dict::import::{ImportReport, parse_rime_dict, parse_rime_dicts, parse_tsv};
+use inputflow_plugin::Pack;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -29,6 +31,7 @@ fn main() -> ExitCode {
 fn run(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         Some("dict") => dict_cmd(&args[1..]),
+        Some("plugin") => plugin_cmd(&args[1..]),
         Some("-h") | Some("--help") => {
             usage();
             Ok(())
@@ -39,6 +42,143 @@ fn run(args: &[String]) -> Result<(), String> {
             Ok(())
         }
     }
+}
+
+/// `xtask plugin new|check`：插件包脚手架与校验（清单由内核 crate 统一把关）。
+fn plugin_cmd(args: &[String]) -> Result<(), String> {
+    match args.first().map(String::as_str) {
+        Some("new") => plugin_new(&args[1..]),
+        Some("check") => {
+            let Some(dir) = args.get(1) else {
+                return Err("check 需要包目录".into());
+            };
+            match Pack::from_dir(Path::new(dir)) {
+                Ok(p) => {
+                    println!("✓ {dir}: {} v{}（{}）入口 {}", p.name, p.version, p.kind.id(), p.entry);
+                    if !p.permissions.is_empty() {
+                        println!("  权限: {:?}", p.permissions);
+                    }
+                    Ok(())
+                }
+                Err(e) => Err(format!("✗ {dir}: {e}")),
+            }
+        }
+        Some(other) => Err(format!("未知 plugin 子命令: {other}")),
+        None => Err("plugin 需要子命令（new/check）".into()),
+    }
+}
+
+fn plugin_new(args: &[String]) -> Result<(), String> {
+    let mut kind = String::new();
+    let mut id = String::new();
+    let mut name = String::new();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--kind" => {
+                i += 1;
+                kind = args.get(i).ok_or("--kind 缺值")?.clone();
+            }
+            "--id" => {
+                i += 1;
+                id = args.get(i).ok_or("--id 缺值")?.clone();
+            }
+            "--name" => {
+                i += 1;
+                name = args.get(i).ok_or("--name 缺值")?.clone();
+            }
+            "-o" | "--output" => {
+                i += 1;
+                out = args.get(i).ok_or("-o 缺值")?.clone();
+            }
+            other => return Err(format!("无法识别的参数: {other}")),
+        }
+        i += 1;
+    }
+    if kind.is_empty() || id.is_empty() || name.is_empty() {
+        return Err("需要 --kind <skin|pet> --id <包id> --name <显示名>".into());
+    }
+    let entry = match kind.as_str() {
+        "skin" => "theme.json",
+        "pet" => "pet.json",
+        other => return Err(format!("--kind 只支持 skin|pet（dict 用 xtask dict build 生成）: {other}")),
+    };
+    let dir = if out.is_empty() {
+        PathBuf::from(format!("plugins/{id}"))
+    } else {
+        PathBuf::from(&out).join(&id)
+    };
+    if dir.exists() {
+        return Err(format!("目录已存在: {}", dir.display()));
+    }
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建目录失败: {e}"))?;
+
+    let manifest = format!(
+        r#"{{
+  "id": "{id}",
+  "name": "{name}",
+  "version": "0.1.0",
+  "kind": "{kind}",
+  "authors": ["你的名字"],
+  "description": "一句话说明这个包",
+  "license": "CC0-1.0",
+  "permissions": []
+}}
+"#
+    );
+    std::fs::write(dir.join("plugin.json"), &manifest)
+        .map_err(|e| format!("写清单失败: {e}"))?;
+
+    match kind.as_str() {
+        "skin" => std::fs::write(
+            dir.join(entry),
+            // 与 platforms/macos/Sources/Theme.swift 的 CandidateTheme 字段一一对应
+            r##"{
+  "light": {
+    "surface": "#FFFFFFE6",
+    "text": "#222222",
+    "comment": "#888888",
+    "accent": "#337BFF",
+    "radius": 18,
+    "font_size": 17
+  },
+  "dark": {
+    "surface": "#3A3A3CD9",
+    "text": "#F2F2F2",
+    "comment": "#9A9A9A",
+    "accent": "#5A9BFF",
+    "radius": 18,
+    "font_size": 17
+  }
+}
+"##,
+        ),
+        _ => std::fs::write(
+            dir.join(entry),
+            // 与 platforms/macos/Sources/PetWindow.swift 的 PetPack 字段一一对应；
+            // states 里至少要有 idle 指向包内的一张图片
+            r#"{
+  "size": 96,
+  "states": {
+    "idle": "idle.png",
+    "composing": "composing.png",
+    "commit": "commit.png"
+  },
+  "follow_cursor": true,
+  "typing_bounce": true,
+  "commit_particles": true
+}
+"#,
+        ),
+    }
+    .map_err(|e| format!("写入口文件失败: {e}"))?;
+
+    // 用内核校验回读，确保骨架天生合规
+    let pack = Pack::from_dir(&dir).map_err(|e| format!("生成的包未通过内核校验: {e}"))?;
+    println!("已生成 {}（{} v{}）", dir.display(), pack.name, pack.version);
+    println!("下一步：编辑 {} 与图片/颜色数据，然后用 `xtask plugin check {}` 复验", entry, dir.display());
+    Ok(())
 }
 
 fn dict_cmd(args: &[String]) -> Result<(), String> {
@@ -216,6 +356,10 @@ fn usage() {
          xtask dict import-rime <dict.yaml> -o <output.ifd> [--with-base]\n  \
          xtask dict import-rime-multi -o <output.ifd> [--tsv out.tsv] [--max-entries N] \\\n      \
              <file.yaml[:scale]> [<file.yaml[:scale]> ...]\n  \
-         xtask dict stats <file.ifd|file.tsv>"
+         xtask dict stats <file.ifd|file.tsv>\n  \
+         xtask plugin new --kind <skin|pet> --id <包id> --name <显示名> [-o 输出目录]\n      \
+             生成一个可编辑的插件包骨架（清单 + 入口文件），并通过内核校验回读。\n  \
+         xtask plugin check <包目录>\n      \
+             用内核校验一个插件包，打印通过/失败原因。"
     );
 }

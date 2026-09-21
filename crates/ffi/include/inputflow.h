@@ -15,6 +15,7 @@ extern "C" {
 #endif
 
 typedef struct InputFlowSession InputFlowSession;
+typedef struct InputFlowAppMode InputFlowAppMode;
 
 /* 创建会话。mode: "pinyin" | "flypy" | "mspy" | "zrm" | "en" | "ja"；
  * 传 NULL 时使用内置词典与拼音模式。 */
@@ -69,6 +70,40 @@ void inputflow_free_string(char *s);
 /* 本地 AI 增强（零云 API）：模型目录与内存推荐，JSON 由调用方释放。 */
 char *inputflow_ai_catalog_json(void);
 char *inputflow_ai_recommend_json(uint64_t total_ram_mb);
+
+/* 每应用中英模式记忆：本地统计模型，只存 bundle id 与票数，无按键内容。
+ * 句柄独立于输入会话，整个进程共享一份；持久化由前端负责。 */
+InputFlowAppMode *inputflow_app_mode_new(void);
+void inputflow_app_mode_free(InputFlowAppMode *memory);
+
+/* 记录一次信号：zh 非 0 为中文侧；strong 非 0 为手动切换（Shift/菜单），
+ * 否则为上屏弱信号；now 为 Unix 秒。返回 1 表示已记录。 */
+int32_t inputflow_app_mode_observe(InputFlowAppMode *memory, const char *app_id,
+                                   int32_t zh, int32_t strong, uint64_t now);
+
+/* 该应用该用中文还是英文？1 = 中文，0 = 英文，-1 = 样本不足不干预。 */
+int32_t inputflow_app_mode_decide(InputFlowAppMode *memory, const char *app_id,
+                                  uint64_t now);
+
+/* 忘记单个应用的偏好。返回 1 表示存在过并已删除。 */
+int32_t inputflow_app_mode_forget(InputFlowAppMode *memory, const char *app_id);
+
+/* 清空全部学习结果（关闭学习开关时调用，不留数据）。 */
+void inputflow_app_mode_forget_all(InputFlowAppMode *memory);
+
+/* 学习结果 TSV 导出/导入（应用\t中文票\t英文票\t上屏天\t上屏票\t更新时间）。 */
+char *inputflow_app_mode_export(InputFlowAppMode *memory);
+int32_t inputflow_app_mode_import(InputFlowAppMode *memory, const char *tsv);
+
+/* 输入统计总结（全为计数，零内容）：返回指标 JSON，由调用方释放。 */
+char *inputflow_stats_digest_json(uint64_t chars, uint64_t keys, uint64_t deletes,
+                                  uint64_t enters, uint64_t saved_keys,
+                                  uint64_t voice_chars, uint64_t active_secs,
+                                  uint64_t stare_max_secs);
+
+/* 插件包扫描（皮肤/桌宠/词典声明式数据包，零代码执行）：
+ * 返回目录 JSON {"packs":[...],"errors":[...]}，由调用方释放。 */
+char *inputflow_plugin_scan_json(const char *dir);
 
 /* 版本字符串（静态，勿释放）。 */
 const char *inputflow_version(void);

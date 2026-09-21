@@ -15,3 +15,4 @@ inputflow-core = { workspace = true }
 inputflow-dict = { workspace = true }
 inputflow-engine = { workspace = true }
 inputflow-ai = { workspace = true }
+inputflow-plugin = { workspace = true }

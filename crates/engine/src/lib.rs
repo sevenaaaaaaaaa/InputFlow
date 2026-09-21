@@ -11,6 +11,10 @@ use inputflow_ja::JaDecoder;
 use inputflow_pinyin::{Layout, PinyinDecoder};
 use inputflow_symbol::SymbolDecoder;
 
+pub mod app_mode;
+pub mod stats;
+pub use app_mode::AppModeMemory;
+
 /// 单次组合态最多返回的候选数（前端分页展示）。
 pub const MAX_CANDIDATES: usize = 30;
 /// 中英混输时最多掺入的英文候选数。

@@ -17,3 +17,7 @@ target/
 # macOS
 .DS_Store
 ._*
+
+# 会话工具产物
+.v2c/
+.video_agent/

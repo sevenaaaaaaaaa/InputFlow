@@ -1,0 +1,9 @@
+[package]
+name = "inputflow-plugin"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "InputFlow 插件包框架：声明式数据包（皮肤/桌宠/词典），零代码执行"
+
+[dependencies]

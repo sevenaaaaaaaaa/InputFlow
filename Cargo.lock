@@ -53,6 +53,7 @@ dependencies = [
  "inputflow-core",
  "inputflow-dict",
  "inputflow-engine",
+ "inputflow-plugin",
 ]
 
 [[package]]
@@ -69,6 +70,10 @@ dependencies = [
  "inputflow-core",
  "inputflow-dict",
 ]
+
+[[package]]
+name = "inputflow-plugin"
+version = "0.1.0"
 
 [[package]]
 name = "inputflow-symbol"
@@ -90,4 +95,5 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "inputflow-dict",
+ "inputflow-plugin",
 ]

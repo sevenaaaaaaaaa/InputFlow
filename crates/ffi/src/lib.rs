@@ -7,14 +7,22 @@
 
 use std::ffi::{CStr, CString, c_char};
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::path::Path;
 use std::sync::Arc;
 
 use inputflow_core::Mode;
 use inputflow_dict::Dictionary;
+use inputflow_engine::app_mode::AppModeMemory;
 use inputflow_engine::Session;
+use inputflow_plugin::Pack as PluginPack;
 
 pub struct InputFlowSession {
     inner: Session,
+}
+
+/// 每应用中英模式记忆（独立于输入会话：跨应用共享一份）。
+pub struct InputFlowAppMode {
+    inner: AppModeMemory,
 }
 
 impl InputFlowSession {
@@ -370,6 +378,173 @@ pub extern "C" fn inputflow_ai_recommend_json(total_ram_mb: u64) -> *mut c_char 
     guard_ptr(|| into_c(inputflow_ai::recommend_json(total_ram_mb)))
 }
 
+/// 扫描插件目录（皮肤/桌宠/词典数据包），返回目录 JSON：
+/// `{"packs":[{"id","name","version","kind","authors","description","license","permissions","dir"}],
+///   "errors":[{"dir","error"}]}`。坏包跳过不中断。调用方释放。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_plugin_scan_json(dir: *const c_char) -> *mut c_char {
+    let dir = unsafe { cstr(dir) };
+    guard_ptr(|| {
+        let Some(dir) = dir else {
+            return std::ptr::null_mut();
+        };
+        let (packs, errors) = PluginPack::scan(Path::new(&dir));
+        into_c(PluginPack::catalog_json(&packs, &errors))
+    })
+}
+
+/// 输入统计总结（全为计数，零内容）：返回指标 JSON：
+/// `{"speed_cpm","accuracy","kcal","saved_keys","voice_chars","deletes","enters","stare_max_secs"}`。
+#[unsafe(no_mangle)]
+pub extern "C" fn inputflow_stats_digest_json(
+    chars: u64,
+    keys: u64,
+    deletes: u64,
+    enters: u64,
+    saved_keys: u64,
+    voice_chars: u64,
+    active_secs: u64,
+    stare_max_secs: u64,
+) -> *mut c_char {
+    guard_ptr(|| {
+        let digest = inputflow_engine::stats::Digest::compute(&inputflow_engine::stats::DayStats {
+            chars,
+            keys,
+            deletes,
+            enters,
+            saved_keys,
+            voice_chars,
+            active_secs,
+            stare_max_secs,
+        });
+        into_c(digest.to_json())
+    })
+}
+
+// ──────────────────── 每应用中英模式记忆 ────────────────────
+#[unsafe(no_mangle)]
+pub extern "C" fn inputflow_app_mode_new() -> *mut InputFlowAppMode {
+    catch_unwind(AssertUnwindSafe(|| {
+        Box::into_raw(Box::new(InputFlowAppMode {
+            inner: AppModeMemory::new(),
+        }))
+    }))
+    .unwrap_or(std::ptr::null_mut())
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_app_mode_free(memory: *mut InputFlowAppMode) {
+    if memory.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        drop(unsafe { Box::from_raw(memory) });
+    }));
+}
+
+/// 记录一次信号：`zh` 非 0 表示中文侧，`strong` 非 0 表示手动切换（Shift/菜单），
+/// 否则为上屏弱信号；`now` 为 Unix 秒。返回 1 表示已记录（应用 id 非法时为 0）。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_app_mode_observe(
+    memory: *mut InputFlowAppMode,
+    app_id: *const c_char,
+    zh: i32,
+    strong: i32,
+    now: u64,
+) -> i32 {
+    if memory.is_null() {
+        return 0;
+    }
+    let app = unsafe { cstr(app_id) };
+    guard_int(|| {
+        let Some(app) = app else { return 0 };
+        let memory = unsafe { &mut *memory };
+        i32::from(memory.inner.observe(&app, zh != 0, strong != 0, now))
+    })
+}
+
+/// 该应用现在该用中文还是英文？返回 1 = 中文，0 = 英文，-1 = 样本不足不干预。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_app_mode_decide(
+    memory: *mut InputFlowAppMode,
+    app_id: *const c_char,
+    now: u64,
+) -> i32 {
+    if memory.is_null() {
+        return -1;
+    }
+    let app = unsafe { cstr(app_id) };
+    guard_int(|| {
+        let Some(app) = app else { return -1 };
+        let memory = unsafe { &*memory };
+        match memory.inner.decide(&app, now) {
+            Some(true) => 1,
+            Some(false) => 0,
+            None => -1,
+        }
+    })
+}
+
+/// 忘记单个应用的偏好。返回 1 表示存在过并已删除。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_app_mode_forget(
+    memory: *mut InputFlowAppMode,
+    app_id: *const c_char,
+) -> i32 {
+    if memory.is_null() {
+        return 0;
+    }
+    let app = unsafe { cstr(app_id) };
+    guard_int(|| {
+        let Some(app) = app else { return 0 };
+        let memory = unsafe { &mut *memory };
+        i32::from(memory.inner.forget(&app))
+    })
+}
+
+/// 清空全部学习结果（关闭学习开关时调用，不留数据）。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_app_mode_forget_all(memory: *mut InputFlowAppMode) {
+    if memory.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let memory = unsafe { &mut *memory };
+        memory.inner.forget_all();
+    }));
+}
+
+/// 导出学习结果 TSV（前端负责持久化；只含 bundle id 与票数，无按键内容）。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_app_mode_export(
+    memory: *mut InputFlowAppMode,
+) -> *mut c_char {
+    if memory.is_null() {
+        return std::ptr::null_mut();
+    }
+    guard_ptr(|| {
+        let memory = unsafe { &*memory };
+        into_c(memory.inner.export_tsv())
+    })
+}
+
+/// 导入学习结果 TSV，返回导入行数。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_app_mode_import(
+    memory: *mut InputFlowAppMode,
+    tsv: *const c_char,
+) -> i32 {
+    if memory.is_null() {
+        return -1;
+    }
+    let tsv = unsafe { cstr(tsv) };
+    guard_int(|| {
+        let Some(tsv) = tsv else { return -1 };
+        let memory = unsafe { &mut *memory };
+        memory.inner.import_tsv(&tsv) as i32
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -485,5 +660,91 @@ mod tests {
         let rec = unsafe { call_str(|| inputflow_ai_recommend_json(16 * 1024)) }.unwrap();
         assert!(rec.contains("\"kind\":\"speech\""), "{rec}");
         assert!(rec.contains("\"level\":\"suggested\""), "{rec}");
+    }
+
+    #[test]
+    fn app_mode_memory_via_c_abi() {
+        let mem = inputflow_app_mode_new();
+        assert!(!mem.is_null());
+        unsafe {
+            // 手动切到英文（强信号）→ 判英文；换应用 → 不干预
+            assert_eq!(
+                inputflow_app_mode_observe(mem, c"com.apple.Terminal".as_ptr(), 0, 1, 1_000),
+                1
+            );
+            assert_eq!(
+                inputflow_app_mode_decide(mem, c"com.apple.Terminal".as_ptr(), 1_000),
+                0
+            );
+            assert_eq!(
+                inputflow_app_mode_decide(mem, c"com.other.app".as_ptr(), 1_000),
+                -1
+            );
+
+            // 非法应用 id 被忽略
+            assert_eq!(inputflow_app_mode_observe(mem, c"".as_ptr(), 1, 1, 1_000), 0);
+            assert_eq!(
+                inputflow_app_mode_observe(mem, c"a\tb".as_ptr(), 1, 1, 1_000),
+                0
+            );
+
+            // 导出 → 导入另一个实例 → 判定一致
+            let tsv = call_str(|| inputflow_app_mode_export(mem)).unwrap();
+            let other = inputflow_app_mode_new();
+            let c_tsv = CString::new(tsv).unwrap();
+            assert_eq!(inputflow_app_mode_import(other, c_tsv.as_ptr()), 1);
+            assert_eq!(
+                inputflow_app_mode_decide(other, c"com.apple.Terminal".as_ptr(), 1_000),
+                0
+            );
+
+            // 忘记后不再判定
+            assert_eq!(
+                inputflow_app_mode_forget(other, c"com.apple.Terminal".as_ptr()),
+                1
+            );
+            assert_eq!(
+                inputflow_app_mode_decide(other, c"com.apple.Terminal".as_ptr(), 1_000),
+                -1
+            );
+            inputflow_app_mode_free(other);
+            inputflow_app_mode_free(mem);
+        }
+    }
+
+    #[test]
+    fn app_mode_null_and_bad_args_are_safe() {
+        unsafe {
+            assert_eq!(inputflow_app_mode_observe(std::ptr::null_mut(), c"a".as_ptr(), 1, 1, 0), 0);
+            assert_eq!(inputflow_app_mode_decide(std::ptr::null_mut(), c"a".as_ptr(), 0), -1);
+            assert_eq!(inputflow_app_mode_forget(std::ptr::null_mut(), c"a".as_ptr()), 0);
+            assert!(inputflow_app_mode_export(std::ptr::null_mut()).is_null());
+            assert_eq!(inputflow_app_mode_import(std::ptr::null_mut(), c"x".as_ptr()), -1);
+            inputflow_app_mode_free(std::ptr::null_mut());
+        }
+    }
+
+    #[test]
+    fn plugin_scan_via_c_abi() {
+        let root = std::env::temp_dir().join(format!("iffi-plugin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let pack = root.join("skin-x");
+        std::fs::create_dir_all(&pack).unwrap();
+        std::fs::write(
+            pack.join("plugin.json"),
+            r#"{"id":"skin-x","name":"X","version":"1.0.0","kind":"skin","permissions":[]}"#,
+        )
+        .unwrap();
+        std::fs::write(pack.join("theme.json"), "{}").unwrap();
+
+        let c_dir = CString::new(root.to_str().unwrap()).unwrap();
+        let json = unsafe { call_str(|| inputflow_plugin_scan_json(c_dir.as_ptr())) }.unwrap();
+        assert!(json.contains("\"id\":\"skin-x\""), "{json}");
+        assert!(json.contains("\"errors\":[]"), "{json}");
+
+        let c_missing = CString::new("/nonexistent-inputflow-plugins").unwrap();
+        let empty = unsafe { call_str(|| inputflow_plugin_scan_json(c_missing.as_ptr())) }.unwrap();
+        assert!(empty.contains("\"packs\":[]"), "{empty}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

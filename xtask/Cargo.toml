@@ -4,8 +4,9 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "InputFlow 构建工具：词典构建/导入/统计"
+description = "InputFlow 构建工具：词典构建/导入/统计、插件包脚手架"
 publish = false
 
 [dependencies]
 inputflow-dict = { workspace = true }
+inputflow-plugin = { workspace = true }
