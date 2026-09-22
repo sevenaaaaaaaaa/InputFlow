@@ -1,26 +1,12 @@
 {
+  "renderer": "emoji",
   "size": 136,
   "fps": 6,
-  "frames": {
-    "idle": [
-      "frames/idle-0.png",
-      "frames/idle-1.png",
-      "frames/idle-2.png",
-      "frames/idle-3.png"
-    ],
-    "typing": [
-      "frames/typing-0.png",
-      "frames/typing-1.png",
-      "frames/typing-2.png",
-      "frames/typing-3.png"
-    ],
-    "commit": [
-      "frames/commit-0.png"
-    ]
-  },
+  "fps_idle": 3,
+  "fps_typing": 9,
+  "emoji": "🐶",
+  "prop": "🎹",
   "follow_cursor": true,
   "typing_bounce": true,
-  "commit_particles": true,
-  "fps_idle": 3,
-  "fps_typing": 9
+  "commit_particles": true
 }

@@ -75,6 +75,9 @@ final class PetWindowController {
     private var panel: NSPanel?
     private let face = NSTextField(labelWithString: "🐱")
     private var imageView: NSImageView?
+    private var emojiLabel: NSTextField?
+    private var propLabel: NSTextField?
+    private var unsupportedRenderer: String?
     private var particleEmitter: CAEmitterLayer?
     private var resetWorkItem: DispatchWorkItem?
     private var modeButton: PetQuickButton?
@@ -95,6 +98,12 @@ final class PetWindowController {
         var followCursor = false
         var typingBounce = true
         var commitParticles = true
+        /// emoji 角色：用系统 emoji 作为形象（`emoji` + 可选 `prop` 道具）
+        var emoji: String?
+        var prop: String?
+        /// 渲染器：emoji | sprites | rive | live2d | vrm（见 ADR-0007）
+        var renderer: String = "emoji"
+        var entry: String?
 
         static func load(dir: URL) -> PetPack? {
             guard
@@ -129,8 +138,15 @@ final class PetWindowController {
             pack.followCursor = json.follow_cursor ?? false
             pack.typingBounce = json.typing_bounce ?? true
             pack.commitParticles = json.commit_particles ?? true
-            // 至少要有一张 idle 图，否则包视为不可用
-            return pack.idle.isEmpty ? nil : pack
+            if let e = json.emoji, !e.isEmpty { pack.emoji = e }
+            if let p = json.prop, !p.isEmpty { pack.prop = p }
+            if let r = json.renderer, !r.isEmpty { pack.renderer = r }
+            pack.entry = json.entry
+            if pack.renderer == "emoji" && pack.emoji == nil && !pack.idle.isEmpty {
+                pack.renderer = "sprites"
+            }
+            // 至少要有一张 idle 图或一个 emoji 角色，否则包视为不可用
+            return (pack.idle.isEmpty && pack.emoji == nil) ? nil : pack
         }
 
         struct PetFile: Codable {
@@ -143,6 +159,10 @@ final class PetWindowController {
             var follow_cursor: Bool?
             var typing_bounce: Bool?
             var commit_particles: Bool?
+            var emoji: String?
+            var prop: String?
+            var renderer: String?
+            var entry: String?
 
             struct StateFiles: Codable {
                 var idle: String?
@@ -178,6 +198,9 @@ final class PetWindowController {
         panel?.orderOut(nil)
         self.panel = nil
         imageView = nil
+        emojiLabel = nil
+        propLabel = nil
+        unsupportedRenderer = nil
         particleEmitter = nil
         loadPack()
         if Self.isEnabled {
@@ -195,6 +218,9 @@ final class PetWindowController {
         startMouseTrackingIfNeeded()
         startAnimTimerIfNeeded()
         react(.idle)
+        if let renderer = unsupportedRenderer {
+            showToast("该形象包需要 \(renderer.uppercased()) 渲染器（尚未接入，见 ADR-0007）", duration: 5)
+        }
     }
 
     func hide() {
@@ -248,7 +274,19 @@ final class PetWindowController {
     }
 
     private func tick() {
-        guard let pack, let imageView, panel?.isVisible == true else { return }
+        guard panel?.isVisible == true else { return }
+        // emoji 角色包：轻微上下浮动（idle 慢、打字快），不换帧
+        if let emojiLabel, let pack, pack.emoji != nil {
+            let t = CACurrentMediaTime()
+            let speed = currentState == .idle ? 1.7 : 5.2
+            let amp: CGFloat = currentState == .idle ? 2.2 : 3.8
+            emojiLabel.wantsLayer = true
+            emojiLabel.layer?.setAffineTransform(
+                CGAffineTransform(translationX: 0, y: CGFloat(sin(t * speed)) * amp)
+            )
+            return
+        }
+        guard let pack, let imageView else { return }
         switch currentState {
         case .idle:
             frameIndex = (frameIndex + 1) % max(1, pack.idle.count)
@@ -286,6 +324,25 @@ final class PetWindowController {
                 if pack.commitParticles {
                     emitSparks()
                 }
+            }
+            return
+        }
+        // emoji 角色包：不改帧，按状态给弹性动效
+        if let pack, let emojiLabel, pack.emoji != nil {
+            currentState = state
+            restartAnimTimer()
+            emojiLabel.stringValue = pack.emoji ?? Self.builtinEmoji
+            switch state {
+            case .idle:
+                break
+            case .composing:
+                if pack.typingBounce { pulse(scale: 1.1, duration: 0.16) }
+            case .commit:
+                pulse(scale: 1.26, duration: 0.34)
+                if pack.commitParticles { emitSparks() }
+                let item = DispatchWorkItem { [weak self] in self?.react(.idle) }
+                resetWorkItem = item
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.7, execute: item)
             }
             return
         }
@@ -333,13 +390,52 @@ final class PetWindowController {
             self?.presentPetMenu(event)
         }
 
-        if let pack, let idle = pack.idle.first {
+        if let pack, pack.renderer == "vrm" || pack.renderer == "live2d" || pack.renderer == "rive" {
+            // 高级渲染器（VRM 3D / Live2D / Rive）尚未接入：明确提示，不用程序化丑图糊弄
+            let note = NSTextField(wrappingLabelWithString:
+                "\(pack.renderer.uppercased()) 形象\n渲染器未接入\n（见 ADR-0007）")
+            note.font = .systemFont(ofSize: 11)
+            note.textColor = .secondaryLabelColor
+            note.alignment = .center
+            note.translatesAutoresizingMaskIntoConstraints = false
+            background.addSubview(note)
+            NSLayoutConstraint.activate([
+                note.centerXAnchor.constraint(equalTo: background.centerXAnchor),
+                note.centerYAnchor.constraint(equalTo: background.centerYAnchor),
+                note.widthAnchor.constraint(lessThanOrEqualTo: background.widthAnchor, constant: -8),
+            ])
+            unsupportedRenderer = pack.renderer
+        } else if let pack, pack.renderer == "sprites", let idle = pack.idle.first {
             let view = NSImageView(frame: background.bounds)
             view.image = idle
             view.imageScaling = .scaleProportionallyUpOrDown
             view.autoresizingMask = [.width, .height]
             background.addSubview(view)
             imageView = view
+        } else if let pack, let emoji = pack.emoji {
+            // emoji 角色包：系统 emoji 作形象（可爱/好看），可选道具 emoji
+            let label = NSTextField(labelWithString: emoji)
+            label.font = .systemFont(ofSize: size * 0.62)
+            label.alignment = .center
+            label.translatesAutoresizingMaskIntoConstraints = false
+            background.addSubview(label)
+            NSLayoutConstraint.activate([
+                label.centerXAnchor.constraint(equalTo: background.centerXAnchor),
+                label.centerYAnchor.constraint(equalTo: background.centerYAnchor, constant: -size * 0.06),
+            ])
+            emojiLabel = label
+            if let prop = pack.prop, !prop.isEmpty {
+                let p = NSTextField(labelWithString: prop)
+                p.font = .systemFont(ofSize: size * 0.3)
+                p.alignment = .center
+                p.translatesAutoresizingMaskIntoConstraints = false
+                background.addSubview(p)
+                NSLayoutConstraint.activate([
+                    p.centerXAnchor.constraint(equalTo: background.centerXAnchor),
+                    p.bottomAnchor.constraint(equalTo: background.bottomAnchor, constant: -size * 0.02),
+                ])
+                propLabel = p
+            }
         } else {
             face.stringValue = Self.builtinEmoji
             face.font = .systemFont(ofSize: size * 0.62)

@@ -1,4 +1,5 @@
 {
+  "renderer": "emoji",
   "size": 96,
   "states": {
     "idle": "idle.png",

@@ -347,6 +347,7 @@ final class InputFlowInputController: IMKInputController {
         for item in sender.menu?.items ?? [] {
             item.state = (item.representedObject as? String) == emoji ? .on : .off
         }
+        PetWindowController.shared.showToast("已切换桌宠形象：\(emoji)", duration: 2.5)
     }
 
     @objc private func selectPetPack(_ sender: NSMenuItem) {
@@ -358,6 +359,7 @@ final class InputFlowInputController: IMKInputController {
         for item in sender.menu?.items ?? [] {
             item.state = (item.representedObject as? String) == id ? .on : .off
         }
+        PetWindowController.shared.showToast("已切换桌宠形象：\(sender.title)", duration: 2.5)
     }
 
     @objc private func openPermissionCenter(_ sender: Any) {

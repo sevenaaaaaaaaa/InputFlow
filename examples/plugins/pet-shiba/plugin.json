@@ -1,12 +1,12 @@
 {
   "id": "pet-shiba",
   "name": "豆豆柴",
-  "version": "1.1.0",
+  "version": "1.3.0",
   "kind": "pet",
   "authors": [
     "InputFlow examples"
   ],
-  "description": "活泼粘人的柴犬，敲的是彩色宠物玩具琴，还会追着鼠标看",
+  "description": "活泼粘人的柴犬，敲的是彩色宠物玩具琴",
   "license": "CC0-1.0",
   "permissions": []
 }

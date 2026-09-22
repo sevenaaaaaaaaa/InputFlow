@@ -165,6 +165,22 @@ if installArgs.count > 1 {
         NSApplication.shared.run()
         exit(0)
 
+    case "--pet-switch-test":
+        // 进程内连续切换形象包并快照，验证切换是否真的生效
+        PluginStore.seedBundledPacks()
+        PetWindowController.setEnabled(true)
+        let dir = installArgs.count > 2 ? installArgs[2] : "/tmp/pet-switch"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        for id in ["pet-orange-cat", "pet-robot", "pet-oriental-beauty", "pet-orange-cat"] {
+            PetWindowController.activePackId = id
+            RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+            let path = "\(dir)/\(id).png"
+            PetWindowController.shared.snapshot(to: path)
+            let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int) ?? 0
+            print("switch -> \(id)  snapshot=\(size ?? 0)B")
+        }
+        exit(0)
+
     case "--pet-demo":
         PluginStore.seedBundledPacks()
         let packId = installArgs.count > 2 ? installArgs[2] : ""
