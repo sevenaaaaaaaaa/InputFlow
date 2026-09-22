@@ -58,7 +58,8 @@ SWIFT_SOURCES=("$HERE/Sources/main.swift" "$HERE/Sources/Engine.swift" \
     "$HERE/Sources/AIModelStore.swift" "$HERE/Sources/BackupManager.swift" \
     "$HERE/Sources/SettingsWindow.swift" "$HERE/Sources/InputController.swift" \
     "$HERE/Sources/AppModeMemory.swift" "$HERE/Sources/Theme.swift" \
-    "$HERE/Sources/PermissionCenter.swift" "$HERE/Sources/PetStats.swift")
+    "$HERE/Sources/PermissionCenter.swift" "$HERE/Sources/PetStats.swift" \
+    "$HERE/Sources/VRMPetView.swift")
 if [[ "$UNIVERSAL" == "1" ]]; then
     SWIFT_ARCHS=(arm64 x86_64)
 else
@@ -69,7 +70,7 @@ for arch in "${SWIFT_ARCHS[@]}"; do
         -target "${arch}-apple-macos${DEPLOY_TARGET}" \
         -import-objc-header "$ROOT/crates/ffi/include/inputflow.h" \
         "$RUST_LIB" \
-        -framework AppKit -framework InputMethodKit -framework Carbon \
+        -framework AppKit -framework InputMethodKit -framework Carbon -framework WebKit \
         -o "$BIN_DIR/$APP.$arch" \
         "${SWIFT_SOURCES[@]}"
 done
@@ -83,6 +84,10 @@ fi
 cp "$HERE/Info.plist" "$CONTENTS/Info.plist"
 printf 'APPL????' > "$CONTENTS/PkgInfo"
 cp "$HERE/assets/InputFlow.icns" "$CONTENTS/Resources/InputFlow.icns"
+
+# VRM 桌宠运行时（three.js + three-vrm，本地离线）
+rm -rf "$CONTENTS/Resources/PetRuntime"
+cp -R "$HERE/assets/PetRuntime" "$CONTENTS/Resources/PetRuntime"
 
 # 随包分发示例插件（皮肤/桌宠形象包），首次启动 seeding 到用户插件目录
 mkdir -p "$CONTENTS/Resources/Plugins"

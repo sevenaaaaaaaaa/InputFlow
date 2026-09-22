@@ -78,6 +78,8 @@ final class PetWindowController {
     private var emojiLabel: NSTextField?
     private var propLabel: NSTextField?
     private var unsupportedRenderer: String?
+    private var vrmView: VRMPetView?
+    private var gazeTick = 0
     private var particleEmitter: CAEmitterLayer?
     private var resetWorkItem: DispatchWorkItem?
     private var modeButton: PetQuickButton?
@@ -145,8 +147,10 @@ final class PetWindowController {
             if pack.renderer == "emoji" && pack.emoji == nil && !pack.idle.isEmpty {
                 pack.renderer = "sprites"
             }
-            // 至少要有一张 idle 图或一个 emoji 角色，否则包视为不可用
-            return (pack.idle.isEmpty && pack.emoji == nil) ? nil : pack
+            // 可用性：有帧图 / 有 emoji / 或声明了独立渲染器（vrm/live2d/rive）
+            let usable = !pack.idle.isEmpty || pack.emoji != nil
+                || pack.renderer == "vrm" || pack.renderer == "live2d" || pack.renderer == "rive"
+            return usable ? pack : nil
         }
 
         struct PetFile: Codable {
@@ -200,6 +204,7 @@ final class PetWindowController {
         imageView = nil
         emojiLabel = nil
         propLabel = nil
+        vrmView = nil
         unsupportedRenderer = nil
         particleEmitter = nil
         loadPack()
@@ -240,6 +245,48 @@ final class PetWindowController {
         }
     }
 
+    /// 开发用：抓取 VRM 画面到 PNG。
+    func captureVrmPNG(to path: String, completion: @escaping (Bool) -> Void) {
+        guard let vrmView else {
+            completion(false)
+            return
+        }
+        vrmView.capturePNG { data in
+            guard let data else {
+                completion(false)
+                return
+            }
+            try? data.write(to: URL(fileURLWithPath: path))
+            completion(true)
+        }
+    }
+
+    /// 开发用：VRM 页面内部状态。
+    func vrmDebugState(_ completion: @escaping (String) -> Void) {
+        if let vrmView {
+            vrmView.debugState(completion)
+        } else {
+            completion("no-vrm-view")
+        }
+    }
+
+    /// 异步快照：VRM（WKWebView/WebGL）需要 takeSnapshot 才能截到内容。
+    func snapshotAsync(to path: String, completion: @escaping (Bool) -> Void) {
+        if let vrmView {
+            vrmView.capturePNG { data in
+                guard let data else {
+                    completion(false)
+                    return
+                }
+                try? data.write(to: URL(fileURLWithPath: path))
+                completion(true)
+            }
+            return
+        }
+        snapshot(to: path)
+        completion(FileManager.default.fileExists(atPath: path))
+    }
+
     // MARK: - 帧动画状态机
 
     private var currentState: State = .idle
@@ -275,6 +322,17 @@ final class PetWindowController {
 
     private func tick() {
         guard panel?.isVisible == true else { return }
+        // VRM：状态给 JS 处理；这里只按鼠标更新注视（约 20fps 节流）
+        if let vrmView {
+            gazeTick += 1
+            if gazeTick % 3 == 0, let panel {
+                let mouse = NSEvent.mouseLocation
+                let dx = (mouse.x - panel.frame.midX) / max(120, panel.frame.width)
+                let dy = (mouse.y - panel.frame.midY) / max(120, panel.frame.height)
+                vrmView.setGaze(dx: Double(dx), dy: Double(dy))
+            }
+            return
+        }
         // emoji 角色包：轻微上下浮动（idle 慢、打字快），不换帧
         if let emojiLabel, let pack, pack.emoji != nil {
             let t = CACurrentMediaTime()
@@ -324,6 +382,19 @@ final class PetWindowController {
                 if pack.commitParticles {
                     emitSparks()
                 }
+            }
+            return
+        }
+        // VRM 3D：状态交给 JS（poseIdle/poseTyping/poseCommit）
+        if let pack, let vrmView, pack.renderer == "vrm" {
+            currentState = state
+            restartAnimTimer()
+            vrmView.setState(state == .composing ? "typing" : (state == .commit ? "commit" : "idle"))
+            if state == .commit {
+                if pack.commitParticles { emitSparks() }
+                let item = DispatchWorkItem { [weak self] in self?.react(.idle) }
+                resetWorkItem = item
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: item)
             }
             return
         }
@@ -390,7 +461,20 @@ final class PetWindowController {
             self?.presentPetMenu(event)
         }
 
-        if let pack, pack.renderer == "vrm" || pack.renderer == "live2d" || pack.renderer == "rive" {
+        if let pack, pack.renderer == "vrm" {
+            // VRM 3D：WKWebView + three.js/three-vrm（注视/眨眼/物理/状态机）
+            if let modelPath = PetRuntimeStore.modelPath(for: Self.activePackId, entry: pack.entry) {
+                let view = VRMPetView(frame: background.bounds, modelPath: modelPath)
+                view.autoresizingMask = [.width, .height]
+                view.onError = { [weak self] message in
+                    self?.showToast("VRM 加载失败：\(message)", duration: 6)
+                }
+                background.addSubview(view)
+                vrmView = view
+            } else {
+                unsupportedRenderer = "vrm(缺少模型)"
+            }
+        } else if let pack, pack.renderer == "live2d" || pack.renderer == "rive" {
             // 高级渲染器（VRM 3D / Live2D / Rive）尚未接入：明确提示，不用程序化丑图糊弄
             let note = NSTextField(wrappingLabelWithString:
                 "\(pack.renderer.uppercased()) 形象\n渲染器未接入\n（见 ADR-0007）")

@@ -319,6 +319,10 @@ final class InputFlowInputController: IMKInputController {
             submenu.addItem(item)
         }
 
+        let importItem = NSMenuItem(title: "导入 VRM 模型…", action: #selector(importVRM(_:)), keyEquivalent: "")
+        importItem.target = self
+        submenu.addItem(importItem)
+
         submenu.addItem(.separator())
         let packHeader = NSMenuItem(title: "形象包", action: nil, keyEquivalent: "")
         packHeader.isEnabled = false
@@ -360,6 +364,43 @@ final class InputFlowInputController: IMKInputController {
             item.state = (item.representedObject as? String) == id ? .on : .off
         }
         PetWindowController.shared.showToast("已切换桌宠形象：\(sender.title)", duration: 2.5)
+    }
+
+    /// 导入用户自己的 VRM 模型（VRoid Studio 可免费导出），生成 vrm-custom 形象包。
+    @objc private func importVRM(_ sender: Any) {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.message = "选择 VRM 模型文件（VRoid Studio 可免费导出）"
+        if #available(macOS 11.0, *) {
+            panel.allowedContentTypes = [.init(filenameExtension: "vrm") ?? .data]
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let fm = FileManager.default
+        let dest = PluginStore.pluginsDir.appendingPathComponent("vrm-custom", isDirectory: true)
+        do {
+            try fm.createDirectory(at: dest, withIntermediateDirectories: true)
+            let model = dest.appendingPathComponent("model.vrm")
+            try? fm.removeItem(at: model)
+            try fm.copyItem(at: url, to: model)
+            let plugin = """
+            {"id":"vrm-custom","name":"自定义 VRM","version":"1.0.0","kind":"pet",\
+            "authors":["user"],"description":"导入的 VRM 模型：\(url.lastPathComponent)","license":"user-provided","permissions":[]}
+            """
+            let pet = """
+            {"renderer":"vrm","size":220,"fps":30,"fps_idle":30,"fps_typing":60,\
+            "entry":"model.vrm","follow_cursor":false,"typing_bounce":true,"commit_particles":true}
+            """
+            try plugin.data(using: .utf8)?.write(to: dest.appendingPathComponent("plugin.json"))
+            try pet.data(using: .utf8)?.write(to: dest.appendingPathComponent("pet.json"))
+            PetWindowController.activePackId = "vrm-custom"
+            if !PetWindowController.isEnabled {
+                PetWindowController.setEnabled(true)
+            }
+            PetWindowController.shared.showToast("已导入 VRM：\(url.lastPathComponent)", duration: 4)
+        } catch {
+            PetWindowController.shared.showToast("导入失败：\(error.localizedDescription)", duration: 6)
+        }
     }
 
     @objc private func openPermissionCenter(_ sender: Any) {

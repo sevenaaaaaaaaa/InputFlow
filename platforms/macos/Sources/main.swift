@@ -181,15 +181,34 @@ if installArgs.count > 1 {
         }
         exit(0)
 
+    case "--pet-vrm-check":
+        PluginStore.seedBundledPacks()
+        PetWindowController.activePackId = "pet-vrm-sample"
+        PetWindowController.setEnabled(true)
+        RunLoop.main.run(until: Date().addingTimeInterval(6))
+        PetWindowController.shared.vrmDebugState { state in
+            print("vrm-debug: \(state)")
+        }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+        PetWindowController.shared.captureVrmPNG(to: "/tmp/petshots/vrm-live.png") { ok in
+            print("capture=\(ok)")
+            exit(0)
+        }
+        RunLoop.main.run()
+        exit(0)
+
     case "--pet-demo":
         PluginStore.seedBundledPacks()
         let packId = installArgs.count > 2 ? installArgs[2] : ""
         PetWindowController.activePackId = packId
         PetWindowController.setEnabled(true)
-        RunLoop.main.run(until: Date().addingTimeInterval(0.7))
         let out = installArgs.count > 3 ? installArgs[3] : "/tmp/pet-demo.png"
-        PetWindowController.shared.snapshot(to: out)
-        print("pack=\(packId.isEmpty ? "builtin" : packId) -> \(out)")
+        RunLoop.main.run(until: Date().addingTimeInterval(5.0))
+        PetWindowController.shared.snapshotAsync(to: out) { ok in
+            print("pack=\(packId.isEmpty ? "builtin" : packId) -> \(out) ok=\(ok)")
+            exit(0)
+        }
+        RunLoop.main.run()
         exit(0)
 
     case "--pets":
