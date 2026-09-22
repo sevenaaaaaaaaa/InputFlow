@@ -19,6 +19,13 @@ UNIVERSAL="${UNIVERSAL:-1}"
 # macOS 26+ 只收录有效签名（Apple 签发、带 Team ID）的第三方输入法，ad-hoc 不会出现。
 CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null \
     | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -1)}"
+# bundle id：默认产品 id；本机开发可覆盖（例如系统对旧 id 留下负面缓存时）
+# 优先级：环境变量 BUNDLE_ID > platforms/macos/.bundle-id（已 gitignore）> 产品默认
+if [[ -f "$HERE/.bundle-id" ]]; then
+    BUNDLE_ID="${BUNDLE_ID:-$(tr -d '[:space:]' < "$HERE/.bundle-id")}"
+else
+    BUNDLE_ID="${BUNDLE_ID:-dev.inputflow.inputmethod}"
+fi
 
 echo "==> 1/5 构建 Rust 内核静态库"
 mkdir -p "$ROOT/target/release"
@@ -76,6 +83,21 @@ fi
 cp "$HERE/Info.plist" "$CONTENTS/Info.plist"
 printf 'APPL????' > "$CONTENTS/PkgInfo"
 cp "$HERE/assets/InputFlow.icns" "$CONTENTS/Resources/InputFlow.icns"
+
+# 覆盖 bundle id（默认与 Info.plist 一致；本机开发可用 BUNDLE_ID=... 规避系统负面缓存）
+if [[ "$BUNDLE_ID" != "dev.inputflow.inputmethod" ]]; then
+    PB=/usr/libexec/PlistBuddy
+    PL="$CONTENTS/Info.plist"
+    "$PB" -c "Set :CFBundleIdentifier $BUNDLE_ID" "$PL"
+    "$PB" -c "Set :TISInputSourceID $BUNDLE_ID" "$PL"
+    CONNECTION="InputFlow_$(printf '%s' "$BUNDLE_ID" | tr '.' '_')"
+    "$PB" -c "Set :InputMethodConnectionName $CONNECTION" "$PL"
+    "$PB" -c "Copy :ComponentInputModeDict:tsInputModeListKey:dev.inputflow.inputmethod.zh :ComponentInputModeDict:tsInputModeListKey:${BUNDLE_ID}.zh" "$PL"
+    "$PB" -c "Delete :ComponentInputModeDict:tsInputModeListKey:dev.inputflow.inputmethod.zh" "$PL"
+    "$PB" -c "Set :ComponentInputModeDict:tsInputModeListKey:${BUNDLE_ID}.zh:TISInputSourceID ${BUNDLE_ID}.zh" "$PL"
+    "$PB" -c "Set :ComponentInputModeDict:tsVisibleInputModeOrderedArrayKey:0 ${BUNDLE_ID}.zh" "$PL"
+    echo "    bundle id 覆盖为: $BUNDLE_ID"
+fi
 
 echo "==> 3/5 生成外部词典（base.ifd，20 万词条）"
 DICT_OUT="$HERE/build/base.ifd"

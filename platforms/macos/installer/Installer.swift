@@ -6,7 +6,13 @@ import Carbon
 /// 签名说明：macOS 26+ 的输入源扫描器会拒绝 ad-hoc 签名的第三方输入法，
 /// 必须 Developer ID 签名（并公证）才会出现在系统输入法列表；界面会给出诊断。
 final class InstallerWindowController: NSWindowController {
-    private let imeBundleID = "dev.inputflow.inputmethod"
+    /// 以内嵌 InputFlow.app 的实际 bundle id 为准（支持 build.sh 的 BUNDLE_ID 覆盖）。
+    private lazy var imeBundleID: String = {
+        let plist = (Bundle.main.resourcePath ?? "") + "/InputFlow.app/Contents/Info.plist"
+        let value = runShell("/usr/bin/plutil -extract CFBundleIdentifier raw \"\(plist)\" 2>/dev/null")
+        let id = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return id.isEmpty ? "dev.inputflow.inputmethod" : id
+    }()
     private let userAppPath = NSHomeDirectory() + "/Library/Input Methods/InputFlow.app"
     private let systemAppPath = "/Library/Input Methods/InputFlow.app"
     private let accent = NSColor.controlAccentColor

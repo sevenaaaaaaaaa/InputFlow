@@ -26,7 +26,7 @@ final class EncryptedStore {
     private let fileURL: URL
     private var key: SymmetricKey?
     private var saveWorkItem: DispatchWorkItem?
-    private let service = "dev.inputflow.inputmethod"
+    private let service = Bundle.main.bundleIdentifier ?? "dev.inputflow.inputmethod"
     private let account = "userdata-key"
 
     private static let magic = Data("IFUE".utf8)
