@@ -15,6 +15,10 @@ CONTENTS="$BUNDLE/Contents"
 BIN_DIR="$CONTENTS/MacOS"
 DEPLOY_TARGET="${MACOSX_DEPLOYMENT_TARGET:-13.0}"
 UNIVERSAL="${UNIVERSAL:-1}"
+# 签名身份：优先 CODESIGN_IDENTITY，其次自动选用钥匙串里的 Apple Development，最后退回 ad-hoc。
+# macOS 26+ 只收录有效签名（Apple 签发、带 Team ID）的第三方输入法，ad-hoc 不会出现。
+CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null \
+    | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -1)}"
 
 echo "==> 1/5 构建 Rust 内核静态库"
 mkdir -p "$ROOT/target/release"
@@ -103,11 +107,21 @@ cp "$HERE/assets/InputFlow.icns" "$INSTALLER_RES/InputFlow.icns"
 cp -R "$BUNDLE" "$INSTALLER_RES/InputFlow.app"
 cp "$HERE/build/base.ifd" "$INSTALLER_RES/base.ifd"
 
-echo "==> 5/5 Ad-hoc 签名"
-codesign --force --deep --sign - "$BUNDLE" >/dev/null 2>&1 \
-    || echo "（签名失败不影响本地安装）"
-codesign --force --deep --sign - "$INSTALLER" >/dev/null 2>&1 \
-    || echo "（安装器签名失败不影响本地使用）"
+echo "==> 5/5 签名"
+if [[ -n "$CODESIGN_IDENTITY" ]]; then
+    echo "    使用签名身份: $CODESIGN_IDENTITY"
+    codesign --force --deep --sign "$CODESIGN_IDENTITY" "$BUNDLE" >/dev/null 2>&1 \
+        || echo "（签名失败，退化为 ad-hoc）"
+    codesign --force --deep --sign "$CODESIGN_IDENTITY" "$INSTALLER" >/dev/null 2>&1 \
+        || echo "（安装器签名失败）"
+else
+    echo "    未找到有效签名身份，使用 ad-hoc（macOS 26+ 不会被系统收录）"
+    codesign --force --deep --sign - "$BUNDLE" >/dev/null 2>&1 \
+        || echo "（签名失败不影响本地安装）"
+    codesign --force --deep --sign - "$INSTALLER" >/dev/null 2>&1 \
+        || echo "（安装器签名失败不影响本地使用）"
+fi
+codesign -dv "$BUNDLE" 2>&1 | rg 'TeamIdentifier|Signature' | sed 's/^/    /' || true
 
 echo
 echo "完成: $BUNDLE"
