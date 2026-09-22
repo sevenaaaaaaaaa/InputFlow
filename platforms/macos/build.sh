@@ -70,6 +70,7 @@ else
 fi
 
 cp "$HERE/Info.plist" "$CONTENTS/Info.plist"
+printf 'APPL????' > "$CONTENTS/PkgInfo"
 
 echo "==> 3/4 生成外部词典（base.ifd，20 万词条）"
 DICT_OUT="$HERE/build/base.ifd"

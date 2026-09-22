@@ -16,6 +16,8 @@
     <string>InputFlow</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
+    <key>CFBundleSignature</key>
+    <string>????</string>
     <key>CFBundleShortVersionString</key>
     <string>0.1.0</string>
     <key>CFBundleVersion</key>
@@ -24,11 +26,15 @@
     <true/>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
+    <key>TICapsLockLanguageSwitchCapable</key>
+    <true/>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
     <key>InputMethodConnectionName</key>
     <string>InputFlow_Connection</string>
     <key>InputMethodServerControllerClass</key>
+    <string>InputFlowInputController</string>
+    <key>InputMethodServerDelegateClass</key>
     <string>InputFlowInputController</string>
     <key>TISInputSourceID</key>
     <string>dev.inputflow.inputmethod</string>
