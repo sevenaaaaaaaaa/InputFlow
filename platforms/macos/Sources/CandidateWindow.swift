@@ -105,6 +105,18 @@ final class CandidateWindowController {
 
     var isVisible: Bool { panel.isVisible }
 
+    /// 开发用：把当前候选窗渲染成 PNG（离屏，不依赖屏幕录制权限）。
+    func snapshot(to path: String) {
+        panel.layoutIfNeeded()
+        guard let view = panel.contentView else { return }
+        view.layoutSubtreeIfNeeded()
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        if let data = rep.representation(using: .png, properties: [:]) {
+            try? data.write(to: URL(fileURLWithPath: path))
+        }
+    }
+
     /// 更新内容并定位在光标下方；没有候选时自动隐藏。
     func present(candidates: [Candidate], page newPage: Int, near lineRect: NSRect?, onPick: @escaping (Int) -> Void) {
         self.onPick = onPick
@@ -215,14 +227,15 @@ private final class CandidateCell: NSView {
     private let indexLabel = NSTextField(labelWithString: "")
     private let textLabel = NSTextField(labelWithString: "")
     private let commentLabel = NSTextField(labelWithString: "")
+    private let column = NSStackView()
     private var trackingArea: NSTrackingArea?
     private var baseBackground: CGColor = NSColor.clear.cgColor
-    private var hoverAccent: NSColor
-    private var commentColor: NSColor
+    private let hoverAccent: NSColor
+    private let baseFontSize: CGFloat
 
     init(index: Int, side: CandidateTheme.Side) {
         hoverAccent = side.accent ?? .controlAccentColor
-        commentColor = side.comment ?? .secondaryLabelColor
+        baseFontSize = side.fontSize ?? 17
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = (side.radius ?? 18) * 0.55
@@ -230,40 +243,50 @@ private final class CandidateCell: NSView {
         indexLabel.stringValue = "\(index)"
         indexLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
         indexLabel.textColor = side.comment ?? .tertiaryLabelColor
-        textLabel.font = .systemFont(ofSize: side.fontSize ?? 17, weight: .regular)
+        indexLabel.alignment = .right
+
+        textLabel.font = .systemFont(ofSize: baseFontSize, weight: .regular)
         textLabel.textColor = side.text ?? .labelColor
         textLabel.lineBreakMode = .byTruncatingMiddle
-        commentLabel.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
-        commentLabel.textColor = commentColor
-        commentLabel.lineBreakMode = .byTruncatingTail
+        textLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        for label in [indexLabel, textLabel, commentLabel] {
-            label.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(label)
-        }
+        commentLabel.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
+        commentLabel.textColor = side.comment ?? .secondaryLabelColor
+        commentLabel.lineBreakMode = .byTruncatingTail
+        commentLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        // 文本 + 注释用纵向 stack：注释隐藏时自动收起，避免留空错位
+        column.orientation = .vertical
+        column.alignment = .leading
+        column.spacing = 1
+        column.addArrangedSubview(textLabel)
+        column.addArrangedSubview(commentLabel)
+
+        indexLabel.translatesAutoresizingMaskIntoConstraints = false
+        column.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(indexLabel)
+        addSubview(column)
         NSLayoutConstraint.activate([
             indexLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            indexLabel.topAnchor.constraint(equalTo: topAnchor, constant: 3),
-            textLabel.leadingAnchor.constraint(equalTo: indexLabel.trailingAnchor, constant: 6),
-            textLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-            textLabel.topAnchor.constraint(equalTo: topAnchor, constant: 1),
-            commentLabel.leadingAnchor.constraint(equalTo: textLabel.leadingAnchor),
-            commentLabel.trailingAnchor.constraint(equalTo: textLabel.trailingAnchor),
-            commentLabel.topAnchor.constraint(equalTo: textLabel.bottomAnchor, constant: 1),
-            commentLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -3),
+            indexLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 10),
+            indexLabel.firstBaselineAnchor.constraint(equalTo: textLabel.firstBaselineAnchor),
+            column.leadingAnchor.constraint(equalTo: indexLabel.trailingAnchor, constant: 6),
+            column.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            column.topAnchor.constraint(equalTo: topAnchor, constant: 2),
+            column.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -3),
         ])
     }
 
     required init?(coder: NSCoder) { nil }
 
     func configure(_ candidate: Candidate) {
-        let baseFontSize = (textLabel.font?.pointSize ?? 17)
+        textLabel.stringValue = candidate.text
         textLabel.font = candidate.kind == "emoji"
             ? .systemFont(ofSize: baseFontSize + 9)
-            : textLabel.font
-        if let comment = candidate.comment, !comment.isEmpty {
+            : .systemFont(ofSize: baseFontSize, weight: .regular)
+        if let comment = candidate.comment, !comment.isEmpty, candidate.kind != "emoji" {
             commentLabel.stringValue = comment
-            commentLabel.isHidden = candidate.kind == "emoji"
+            commentLabel.isHidden = false
         } else {
             commentLabel.stringValue = ""
             commentLabel.isHidden = true
@@ -318,6 +341,6 @@ private final class CandidateCell: NSView {
         )
         let height = textLabel.intrinsicContentSize.height
             + (commentLabel.isHidden ? 0 : commentLabel.intrinsicContentSize.height + 1)
-        return NSSize(width: 8 + indexLabel.intrinsicContentSize.width + 6 + textWidth + 10, height: height + 4)
+        return NSSize(width: 8 + max(10, indexLabel.intrinsicContentSize.width) + 6 + textWidth + 10, height: height + 5)
     }
 }

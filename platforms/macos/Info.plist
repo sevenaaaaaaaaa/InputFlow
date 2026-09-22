@@ -4,6 +4,12 @@
 <dict>
     <key>TISInputSourceID</key>
     <string>dev.inputflow.inputmethod</string>
+    <key>TISIntendedLanguage</key>
+    <string>zh-Hans</string>
+    <key>tsInputMethodCharacterRepertoireKey</key>
+    <array>
+        <string>Hans</string>
+    </array>
     <key>CFBundleDevelopmentRegion</key>
     <string>zh_CN</string>
     <key>CFBundleExecutable</key>

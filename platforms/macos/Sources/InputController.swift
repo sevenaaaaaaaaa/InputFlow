@@ -818,17 +818,23 @@ final class InputFlowInputController: IMKInputController {
     }
 
     private func caretRect(_ client: IMKTextInput) -> NSRect? {
-        // 首选 firstRect（更标准），失败再退回 attributes 行高矩形。
+        // attributes 返回的是光标所在行的矩形（屏幕坐标，AppKit 原点），是 IME 最稳的定位方式；
+        // firstRect 在部分应用里对 NSNotFound 范围返回无效值，放在其后兜底。
+        var rect: NSRect = .zero
+        _ = client.attributes(forCharacterIndex: 0, lineHeightRectangle: &rect)
+        if rect.height > 0, rect.origin.x.isFinite, rect.origin.y.isFinite {
+            return rect
+        }
         var actual = NSRange()
         let first = client.firstRect(
             forCharacterRange: NSRange(location: NSNotFound, length: 0),
             actualRange: &actual
         )
-        if first.height > 0 {
+        if first.height > 0, first.origin.x.isFinite, first.origin.y.isFinite {
             return first
         }
-        var rect: NSRect = .zero
-        _ = client.attributes(forCharacterIndex: 0, lineHeightRectangle: &rect)
-        return rect.height > 0 ? rect : nil
+        // 两者都失败时退回鼠标位置，至少让候选窗出现在用户视线附近
+        let mouse = NSEvent.mouseLocation
+        return NSRect(x: mouse.x, y: mouse.y - 20, width: 2, height: 20)
     }
 }

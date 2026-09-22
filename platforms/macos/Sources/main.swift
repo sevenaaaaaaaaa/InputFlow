@@ -9,23 +9,22 @@ private func inputSourceID() -> String {
     Bundle.main.bundleIdentifier ?? "dev.inputflow.inputmethod"
 }
 
-private func findInputSource() -> TISInputSource? {
+private func findInputSources() -> [TISInputSource] {
     guard let list = TISCreateInputSourceList(nil, true)?.takeRetainedValue() as? [TISInputSource] else {
-        return nil
+        return []
     }
     let prefix = inputSourceID()
-    var fallback: TISInputSource?
-    for source in list {
+    return list.filter { source in
         let idRef = TISGetInputSourceProperty(source, kTISPropertyInputSourceID)
-        guard let id = unsafeBitCast(idRef, to: CFString?.self) as String?, id.hasPrefix(prefix) else {
-            continue
-        }
-        if boolProperty(source, kTISPropertyInputSourceIsSelectCapable) == true {
-            return source
-        }
-        if fallback == nil { fallback = source }
+        guard let id = unsafeBitCast(idRef, to: CFString?.self) as String? else { return false }
+        return id.hasPrefix(prefix)
     }
-    return fallback
+}
+
+private func findInputSource() -> TISInputSource? {
+    let sources = findInputSources()
+    return sources.first { boolProperty($0, kTISPropertyInputSourceIsSelectCapable) == true }
+        ?? sources.first
 }
 
 private func sourceIdentifier(_ source: TISInputSource) -> String {
@@ -62,17 +61,27 @@ if installArgs.count > 1 {
         exit(1)
 
     case "--enable-input-source":
-        guard let source = findInputSource() else {
+        let sources = findInputSources()
+        guard !sources.isEmpty else {
             print("未找到输入源，请先 --register-input-source")
             exit(1)
         }
-        if boolProperty(source, kTISPropertyInputSourceIsEnabled) == true {
-            print("已启用: \(inputSourceID()) (\(describe(source)))")
-            exit(0)
+        // 输入法容器与其模式需要一起启用，否则菜单栏不会出现
+        var allOK = true
+        for source in sources {
+            if boolProperty(source, kTISPropertyInputSourceIsEnabled) == true {
+                print("已启用: \(describe(source))")
+                continue
+            }
+            let status = TISEnableInputSource(source)
+            if status == noErr {
+                print("启用成功: \(describe(source))")
+            } else {
+                print("启用失败 (status=\(status)): \(sourceIdentifier(source))")
+                allOK = false
+            }
         }
-        let status = TISEnableInputSource(source)
-        print(status == noErr ? "启用成功: \(describe(source))" : "启用失败 (status=\(status))")
-        exit(status == noErr ? 0 : 1)
+        exit(allOK ? 0 : 1)
 
     case "--select-input-source":
         guard let source = findInputSource(), boolProperty(source, kTISPropertyInputSourceIsEnabled) == true else {
@@ -114,6 +123,23 @@ if installArgs.count > 1 {
 
     case "--store-smoke":
         exit(EncryptedStore.smokeTest() ? 0 : 1)
+
+    case "--candidate-demo":
+        let demoEngine = InputFlowEngine(mode: "pinyin")
+        for ch in "nihao" { _ = demoEngine.feed(ch) }
+        let comp = demoEngine.composition
+        let demoWindow = CandidateWindowController()
+        demoWindow.present(
+            candidates: comp.candidates,
+            page: 0,
+            near: NSRect(x: 300, y: 300, width: 2, height: 18),
+            onPick: { _ in }
+        )
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        let out = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : "/tmp/candidate-demo.png"
+        demoWindow.snapshot(to: out)
+        print("候选数=\(comp.candidates.count)，已渲染: \(out)")
+        exit(0)
 
     case "--clipboard-smoke":
         ClipboardMonitor.shared.setEnabled(true)
