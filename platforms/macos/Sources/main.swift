@@ -165,6 +165,18 @@ if installArgs.count > 1 {
         NSApplication.shared.run()
         exit(0)
 
+    case "--pets":
+        PluginStore.seedBundledPacks()
+        let catalog = PluginStore.scan()
+        print("插件包共 \(catalog.packs.count) 个：")
+        for pack in catalog.packs {
+            print("  [\(pack.kind)] \(pack.id)\t\(pack.name)\t\(pack.description ?? "")")
+        }
+        for error in catalog.errors {
+            print("  ! \(error.dir): \(error.error)")
+        }
+        exit(0)
+
     case "--clipboard-window":
         ClipboardWindowController.shared.show()
         NSApplication.shared.run()
@@ -185,6 +197,7 @@ if installArgs.count > 1 {
 
 // M1：加密用户数据（钥匙串密钥；不可用则本次仅内存）+ 剪切板监控（默认关闭）
 _ = NSApplication.shared
+PluginStore.seedBundledPacks()
 _ = EncryptedStore.shared.load()
 ClipboardMonitor.shared.startIfEnabled()
 PetWindowController.restoreIfEnabled()

@@ -327,6 +327,9 @@ final class InputFlowInputController: IMKInputController {
     @objc private func selectPetPack(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }
         PetWindowController.activePackId = id
+        if !PetWindowController.isEnabled {
+            PetWindowController.setEnabled(true)
+        }
         for item in sender.menu?.items ?? [] {
             item.state = (item.representedObject as? String) == id ? .on : .off
         }

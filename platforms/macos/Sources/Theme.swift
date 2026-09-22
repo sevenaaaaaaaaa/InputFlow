@@ -138,6 +138,24 @@ enum PluginStore {
     static func packs(kind: String, in catalog: PluginCatalog) -> [PluginCatalog.Pack] {
         catalog.packs.filter { $0.kind == kind }
     }
+
+    /// 把 app 内随包分发的示例插件（Resources/Plugins/*） seeding 到用户插件目录。
+    /// 已存在的目录不覆盖，用户自己的修改优先。
+    static func seedBundledPacks() {
+        guard let resources = Bundle.main.resourceURL else { return }
+        let source = resources.appendingPathComponent("Plugins", isDirectory: true)
+        let fm = FileManager.default
+        try? fm.createDirectory(at: pluginsDir, withIntermediateDirectories: true)
+        guard let items = try? fm.contentsOfDirectory(at: source, includingPropertiesForKeys: [.isDirectoryKey]) else {
+            return
+        }
+        for item in items where item.hasDirectoryPath {
+            let target = pluginsDir.appendingPathComponent(item.lastPathComponent, isDirectory: true)
+            if !fm.fileExists(atPath: target.path) {
+                try? fm.copyItem(at: item, to: target)
+            }
+        }
+    }
 }
 
 // MARK: - 皮肤管理

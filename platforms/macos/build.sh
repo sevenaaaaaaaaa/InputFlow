@@ -84,6 +84,15 @@ cp "$HERE/Info.plist" "$CONTENTS/Info.plist"
 printf 'APPL????' > "$CONTENTS/PkgInfo"
 cp "$HERE/assets/InputFlow.icns" "$CONTENTS/Resources/InputFlow.icns"
 
+# 随包分发示例插件（皮肤/桌宠形象包），首次启动 seeding 到用户插件目录
+mkdir -p "$CONTENTS/Resources/Plugins"
+for d in "$ROOT"/examples/plugins/*/; do
+    name="$(basename "$d")"
+    case "$name" in
+        pet-*|skin-*) cp -R "${d%/}" "$CONTENTS/Resources/Plugins/$name" ;;
+    esac
+done
+
 # 覆盖 bundle id（默认与 Info.plist 一致；本机开发可用 BUNDLE_ID=... 规避系统负面缓存）
 if [[ "$BUNDLE_ID" != "dev.inputflow.inputmethod" ]]; then
     PB=/usr/libexec/PlistBuddy
