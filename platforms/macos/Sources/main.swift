@@ -165,6 +165,17 @@ if installArgs.count > 1 {
         NSApplication.shared.run()
         exit(0)
 
+    case "--pet-demo":
+        PluginStore.seedBundledPacks()
+        let packId = installArgs.count > 2 ? installArgs[2] : ""
+        PetWindowController.activePackId = packId
+        PetWindowController.setEnabled(true)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.7))
+        let out = installArgs.count > 3 ? installArgs[3] : "/tmp/pet-demo.png"
+        PetWindowController.shared.snapshot(to: out)
+        print("pack=\(packId.isEmpty ? "builtin" : packId) -> \(out)")
+        exit(0)
+
     case "--pets":
         PluginStore.seedBundledPacks()
         let catalog = PluginStore.scan()

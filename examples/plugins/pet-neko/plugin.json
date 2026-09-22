@@ -1,9 +1,11 @@
 {
   "id": "pet-neko",
   "name": "电子猫",
-  "version": "0.1.0",
+  "version": "1.1.0",
   "kind": "pet",
-  "authors": ["InputFlow examples"],
+  "authors": [
+    "InputFlow examples"
+  ],
   "description": "示例形象包：替换三张 PNG 为你自己的形象（二次元/像素/自绘均可）",
   "license": "CC0-1.0",
   "permissions": []

@@ -301,15 +301,28 @@ final class InputFlowInputController: IMKInputController {
         }
     }
 
-    /// 桌宠形象子菜单：内置小猫 + 社区形象包。
+    /// 桌宠形象子菜单：内置 emoji 形象 + 社区形象包。
     private func petSubmenu() -> NSMenu {
         let submenu = NSMenu(title: "桌宠形象")
         let active = PetWindowController.activePackId
-        let builtin = NSMenuItem(title: "内置小猫", action: #selector(selectPetPack(_:)), keyEquivalent: "")
-        builtin.target = self
-        builtin.representedObject = ""
-        builtin.state = active.isEmpty ? .on : .off
-        submenu.addItem(builtin)
+
+        // 内置 emoji 形象（默认推荐：系统绘制，干净不糊）
+        let emojiHeader = NSMenuItem(title: "内置表情", action: nil, keyEquivalent: "")
+        emojiHeader.isEnabled = false
+        submenu.addItem(emojiHeader)
+        let emojis = ["🐱", "🐶", "🦊", "🐼", "🐹", "🐰", "🐧", "🤖", "👧", "🧑‍🎨"]
+        for emoji in emojis {
+            let item = NSMenuItem(title: "\(emoji)  内置表情", action: #selector(selectPetEmoji(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = emoji
+            item.state = (active.isEmpty && PetWindowController.builtinEmoji == emoji) ? .on : .off
+            submenu.addItem(item)
+        }
+
+        submenu.addItem(.separator())
+        let packHeader = NSMenuItem(title: "形象包", action: nil, keyEquivalent: "")
+        packHeader.isEnabled = false
+        submenu.addItem(packHeader)
         for pack in PetWindowController.availablePets() {
             let item = NSMenuItem(
                 title: "\(pack.name)（v\(pack.version)）",
@@ -318,10 +331,22 @@ final class InputFlowInputController: IMKInputController {
             )
             item.target = self
             item.representedObject = pack.id
+            item.toolTip = pack.description
             item.state = pack.id == active ? .on : .off
             submenu.addItem(item)
         }
         return submenu
+    }
+
+    @objc private func selectPetEmoji(_ sender: NSMenuItem) {
+        guard let emoji = sender.representedObject as? String else { return }
+        PetWindowController.builtinEmoji = emoji
+        if !PetWindowController.isEnabled {
+            PetWindowController.setEnabled(true)
+        }
+        for item in sender.menu?.items ?? [] {
+            item.state = (item.representedObject as? String) == emoji ? .on : .off
+        }
     }
 
     @objc private func selectPetPack(_ sender: NSMenuItem) {

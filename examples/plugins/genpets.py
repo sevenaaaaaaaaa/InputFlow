@@ -191,37 +191,39 @@ def o_rrect(img, cx, cy, w, h, r, fill, line_c, lw=2.5):
 # ─────────────────────────── 通用部件 ───────────────────────────
 
 def shadow(img):
-    img.ellipse(128, 244, 66, 8, C("000000", 40))
+    # 柔和暖阴影：两层低透明度，避免黑色硬饼
+    img.ellipse(128, 245, 74, 10, C("4A3A2E", 16))
+    img.ellipse(128, 244, 58, 7, C("4A3A2E", 26))
 
 
 def face(img, ex=10, ey=0, blink=False, happy=False, blush_a=110, mouth="smile"):
     """通用脸部：眼睛 + 腮红 + 嘴。坐标基于 256 画布。"""
-    blush = C("FF9D9D", blush_a)
+    blush = C("EFA6A0", blush_a)
     if happy:
         # ^^ 眼
         for x in (106 + ex, 150 + ex):
-            img.line(x - 7, 104 + ey, x, 97 + ey, 3.4, C("2A2118"))
-            img.line(x, 97 + ey, x + 7, 104 + ey, 3.4, C("2A2118"))
+            img.line(x - 7, 104 + ey, x, 97 + ey, 3.4, C("3A2E26"))
+            img.line(x, 97 + ey, x + 7, 104 + ey, 3.4, C("3A2E26"))
         img.ellipse(94 + ex, 116 + ey, 9, 5.5, blush)
         img.ellipse(162 + ex, 116 + ey, 9, 5.5, blush)
-        mouth_arc(img, 128 + ex, 120 + ey, 9, C("7A3B2E"), 3.2, up=False)
+        mouth_arc(img, 128 + ex, 120 + ey, 9, C("7E4A3C"), 3.2, up=False)
         return
     if blink:
         for x in (106 + ex, 150 + ex):
-            img.line(x - 7, 102 + ey, x + 7, 102 + ey, 3.6, C("2A2118"))
+            img.line(x - 7, 102 + ey, x + 7, 102 + ey, 3.6, C("3A2E26"))
     else:
         for x in (106 + ex, 150 + ex):
-            img.ellipse(x, 101 + ey, 6.2, 8.6, C("2A2118"))
-            img.ellipse(x + 2, 97.6 + ey, 2.2, 2.8, C("FFFFFF"))
+            img.ellipse(x, 101 + ey, 6.2, 8.6, C("3A2E26"))
+            img.ellipse(x + 2, 97.6 + ey, 2.2, 2.8, C("FFFDFB"))
     img.ellipse(95 + ex, 115 + ey, 8.5, 5, blush)
     img.ellipse(161 + ex, 115 + ey, 8.5, 5, blush)
     if mouth == "omega":
-        img.line(122 + ex, 118 + ey, 127 + ex, 122 + ey, 2.8, C("7A3B2E"))
-        img.line(127 + ex, 122 + ey, 128 + ex, 119 + ey, 2.8, C("7A3B2E"))
-        img.line(128 + ex, 119 + ey, 129 + ex, 122 + ey, 2.8, C("7A3B2E"))
-        img.line(129 + ex, 122 + ey, 134 + ex, 118 + ey, 2.8, C("7A3B2E"))
+        img.line(122 + ex, 118 + ey, 127 + ex, 122 + ey, 2.8, C("7E4A3C"))
+        img.line(127 + ex, 122 + ey, 128 + ex, 119 + ey, 2.8, C("7E4A3C"))
+        img.line(128 + ex, 119 + ey, 129 + ex, 122 + ey, 2.8, C("7E4A3C"))
+        img.line(129 + ex, 122 + ey, 134 + ex, 118 + ey, 2.8, C("7E4A3C"))
     else:
-        mouth_arc(img, 128 + ex, 117 + ey, 7, C("7A3B2E"), 2.8, up=True)
+        mouth_arc(img, 128 + ex, 117 + ey, 7, C("7E4A3C"), 2.8, up=True)
 
 
 def mouth_arc(img, cx, cy, r, color, w, up):
@@ -237,45 +239,45 @@ def mouth_arc(img, cx, cy, r, color, w, up):
 
 
 def sparkles(img):
-    gold = C("FFD75E")
+    gold = C("E9CC85")
     img.star(52, 74, 12, gold)
     img.star(200, 60, 9, gold)
-    img.star(208, 118, 7, C("FFE9A8"))
-    img.star(44, 140, 6, C("FFE9A8"))
+    img.star(208, 118, 7, C("F2E6C4"))
+    img.star(44, 140, 6, C("F2E6C4"))
 
 
 # ─────────────────────────── 乐器 ───────────────────────────
 
 def keyboard(img, press_left, press_right):
-    o_rrect(img, 128, 216, 152, 22, 8, C("EADFC4"), C("B8A87E"))
+    o_rrect(img, 128, 216, 152, 22, 8, C("EADFC9"), C("BDAD8C"))
     for row, y in enumerate((209, 218)):
         for i in range(10):
             kx = 62 + i * 14.7
             accent = (row * 10 + i) % 7 == 3
-            c = C("F59E4C") if accent else C("FBF6EA")
-            o_rrect(img, kx, y, 11, 6, 2, c, C("C9BC98"), 1.2)
+            c = C("E9A470") if accent else C("FBF6EA")
+            o_rrect(img, kx, y, 11, 6, 2, c, C("C5B99A"), 1.2)
     for px, py in ((100, 205 + press_left * 3), (156, 205 + press_right * 3)):
         pass  # 爪子由角色画在键上
 
 
 def piano(img):
-    o_rrect(img, 104, 222, 156, 26, 5, C("141419"), C("000000"))
-    o_rrect(img, 100, 208, 132, 12, 3, C("F7F5EE"), C("B9B4A4"), 1.5)
+    o_rrect(img, 104, 222, 156, 26, 5, C("1E1C22"), C("000000"))
+    o_rrect(img, 100, 208, 132, 12, 3, C("F8F6F0"), C("BAB5A6"), 1.5)
     for i in range(8):
         if i % 3 != 2:
-            img.rrect(48 + i * 14.6 + 9, 206, 6, 7, 1, C("1A1A20"))
+            img.rrect(48 + i * 14.6 + 9, 206, 6, 7, 1, C("24222A"))
 
 
 def guzheng(img):
-    o_rrect(img, 106, 227, 172, 17, 8, C("8A5630"), C("54301B"), 2.5)
-    img.rrect(106, 227, 160, 11, 5, C("A56A3C"))
+    o_rrect(img, 106, 227, 172, 17, 8, C("8A6042"), C("5A3E2C"), 2.5)
+    img.rrect(106, 227, 160, 11, 5, C("A57B54"))
     for i in range(5):
         y = 222 + i * 2.4
-        img.line(26, y, 186, y, 1.6, C("F7EBC0"))
+        img.line(26, y, 186, y, 1.6, C("F4EAC8"))
     for i in range(5):
-        img.ellipse(46 + i * 28, 223.6 + (i % 2) * 2, 2.4, 2.4, C("FFE9A8"))
-    img.rrect(19, 227, 10, 17, 4, C("5A3419"))
-    img.rrect(193, 227, 10, 17, 4, C("5A3419"))
+        img.ellipse(46 + i * 28, 223.6 + (i % 2) * 2, 2.4, 2.4, C("F2E6C4"))
+    img.rrect(19, 227, 10, 17, 4, C("5E4530"))
+    img.rrect(193, 227, 10, 17, 4, C("5E4530"))
 
 
 def toy(img):
@@ -291,33 +293,33 @@ def toy(img):
 
 
 def holo(img, t):
-    glow = C("3FE0FF", 150)
+    glow = C("6FD0E0", 150)
     sx, sy = 190, 128  # 屏幕中心：右上，不挡身体
-    img.rrect(sx, sy, 96, 70, 9, C("3FE0FF", 60))
-    img.rrect(sx, sy, 90, 64, 8, C("103048", 170))
+    img.rrect(sx, sy, 96, 70, 9, C("6FD0E0", 60))
+    img.rrect(sx, sy, 90, 64, 8, C("2A4258", 170))
     for x1, y1, x2, y2 in ((145, 96, 145, 160), (235, 96, 235, 160), (145, 96, 235, 96), (145, 160, 235, 160)):
         img.line(x1, y1, x2, y2, 1.6, glow)
     # 柱状图（随打字节拍跳动）
     for i in range(4):
         hgt = 7 + 11 * abs(math.sin(t * math.tau + i * 1.1))
-        img.rrect(160 + i * 18, 146 - hgt / 2, 11, hgt, 2, C("3FE0FF", 210))
+        img.rrect(160 + i * 18, 146 - hgt / 2, 11, hgt, 2, C("6FD0E0", 210))
     # 波形
     prev = None
     for i in range(12):
         x = 150 + i * 7.2
         y = 110 + math.sin(t * math.tau * 2 + i * 0.9) * 5
         if prev:
-            img.line(*prev, x, y, 1.8, C("8FF0FF", 220))
+            img.line(*prev, x, y, 1.8, C("A8E4EE", 220))
         prev = (x, y)
     # 投射光束：屏幕底 → 键盘平板
-    img.polygon([(160, 162), (196, 190), (160, 190)], C("3FE0FF", 40))
-    img.ellipse(128, 244, 52, 7, C("3FE0FF", 70))  # 悬浮基座光圈
+    img.polygon([(160, 162), (196, 190), (160, 190)], C("6FD0E0", 40))
+    img.ellipse(128, 244, 52, 7, C("6FD0E0", 70))  # 悬浮基座光圈
 
 
 # ─────────────────────────── 角色 ───────────────────────────
 
 def draw_cat(img, state, t):
-    fur, dark, cream, line_c = C("F59E4C"), C("DE8434"), C("FFF1DE"), C("A85A20")
+    fur, dark, cream, line_c = C("E9A470"), C("CE8A57"), C("FBF3E6"), C("8E6038")
     blink = state == "idle" and t >= 0.5
     happy = state == "commit"
     pl = max(0.0, math.sin(t * math.tau))
@@ -325,8 +327,8 @@ def draw_cat(img, state, t):
     sway = math.sin(t * math.tau) * 12 if state != "commit" else 18
     shadow(img)
     # 坐垫
-    img.ellipse(128, 232, 62, 13, C("E06A4F"))
-    img.ellipse(128, 229, 56, 10, C("EE7E62"))
+    img.ellipse(128, 232, 62, 13, C("CC7A66"))
+    img.ellipse(128, 229, 56, 10, C("D98A72"))
     # 尾巴（摆动）
     base = (182, 204)
     tip = (base[0] + 26 * math.cos(math.radians(-38 + sway)), base[1] + 26 * math.sin(math.radians(-38 + sway)))
@@ -350,8 +352,8 @@ def draw_cat(img, state, t):
     img.polygon([(176, 62), (188, 26), (148, 44)], line_c)
     img.polygon([(83, 58), (74, 32), (104, 47)], fur)
     img.polygon([(173, 58), (182, 32), (152, 47)], fur)
-    img.polygon([(84, 53), (79, 38), (98, 47)], C("FFB3A0"))
-    img.polygon([(172, 53), (177, 38), (158, 47)], C("FFB3A0"))
+    img.polygon([(84, 53), (79, 38), (98, 47)], C("F2BBA9"))
+    img.polygon([(172, 53), (177, 38), (158, 47)], C("F2BBA9"))
     # 头
     o_ellipse(img, 128, 104, 55, 49, fur, line_c)
     img.ellipse(128, 122, 26, 17, cream)
@@ -361,9 +363,9 @@ def draw_cat(img, state, t):
         face(img, blink=blink, mouth="omega" if state == "idle" and 0.25 <= t < 0.5 else "smile")
     # 胡须
     for sx, sy, ex, ey in ((78, 108, 52, 104), (78, 116, 52, 118), (178, 108, 204, 104), (178, 116, 204, 118)):
-        img.line(sx, sy, ex, ey, 2, C("8A5A2A", 160))
+        img.line(sx, sy, ex, ey, 2, C("8A6240", 160))
     # 鼻子
-    img.polygon([(124, 112), (132, 112), (128, 117)], C("E86A6A"))
+    img.polygon([(124, 112), (132, 112), (128, 117)], C("D98A86"))
     if state in ("typing", "commit"):
         keyboard(img, pl, pr)
         yl, yr = 203 - pl * 6, 203 - pr * 6
@@ -376,7 +378,7 @@ def draw_cat(img, state, t):
 
 
 def draw_shiba(img, state, t):
-    fur, cream, line_c = C("EF9F55"), C("FFF6E8"), C("B06A28")
+    fur, cream, line_c = C("E5AA74"), C("FCF6EC"), C("8F6636")
     blink = state == "idle" and t >= 0.75
     happy = state == "commit"
     tongue = state == "idle" and 0.25 <= t < 0.5
@@ -384,8 +386,8 @@ def draw_shiba(img, state, t):
     pr = max(0.0, math.sin(t * math.tau + math.pi))
     sway = math.sin(t * math.tau) * 8
     shadow(img)
-    img.rrect(128, 233, 128, 12, 6, C("8FBF7A"))
-    img.rrect(128, 233, 118, 8, 4, C("A5D18F"))
+    img.rrect(128, 233, 128, 12, 6, C("9CBF8C"))
+    img.rrect(128, 233, 118, 8, 4, C("AFCFA0"))
     # 卷尾
     tx, ty = 178 + sway, 196
     img.ellipse(tx, ty, 16, 16, fur)
@@ -407,15 +409,15 @@ def draw_shiba(img, state, t):
         img.polygon([(ex - 11, 61), (ex + dx * 1, 31), (ex + 12, 56)], fur)
     # 头
     o_ellipse(img, 128, 102, 53, 48, fur, line_c)
-    o_ellipse(img, 128, 120, 27, 19, cream, C("E8CBA0"), 1.2)
+    o_ellipse(img, 128, 120, 27, 19, cream, C("DFC7A6"), 1.2)
     if happy:
         face(img, happy=True)
     else:
         face(img, blink=blink)
-        img.ellipse(128, 112, 4.6, 4, C("2A2118"))
+        img.ellipse(128, 112, 4.6, 4, C("3A2E26"))
         if tongue:
-            img.ellipse(128, 126, 6, 8, C("F08080"))
-            img.ellipse(128, 132, 6, 4, C("F08080"))
+            img.ellipse(128, 126, 6, 8, C("E79A9A"))
+            img.ellipse(128, 132, 6, 4, C("E79A9A"))
     if state in ("typing", "commit"):
         toy(img)
         yl, yr = 202 - pl * 6, 202 - pr * 6
@@ -426,21 +428,22 @@ def draw_shiba(img, state, t):
 
 
 def draw_robot(img, state, t):
-    body_c, dark, visor = C("C9D2DC"), C("6E7885"), C("101820")
+    body_c, dark, visor = C("D6DDE4"), C("85909C"), C("1C2530")
     happy = state == "commit"
     scan = math.sin(t * math.tau) * 4
     pl = max(0.0, math.sin(t * math.tau))
     shadow(img)
-    img.ellipse(128, 244, 46, 7, C("3FE0FF", 60))
     # 天线
     img.line(128, 76, 128, 56, 3.5, dark)
-    img.ellipse(128, 52, 5.5, 5.5, C("FF5A5A") if (state == "idle" and t < 0.5) or state != "idle" else C("FFE066"))
+    img.ellipse(128, 52, 5.5, 5.5, C("E07B74") if (state == "idle" and t < 0.5) or state != "idle" else C("F0C97A"))
+    # 脖子（连接头与身体）
+    img.rrect(128, 134, 18, 24, 7, dark)
     # 头
-    o_rrect(img, 128, 102, 56, 46, 16, C("D6DEE7"), dark)
+    o_rrect(img, 128, 102, 56, 46, 16, C("DEE4EA"), dark)
     img.rrect(128, 102, 40, 14, 6, visor)
     ex = 122 + (scan if state != "commit" else 0)
     for dx in (0, 16):
-        img.rrect(ex + dx, 102, 8, 7, 2.5, C("3FE0FF") if not happy else C("7FF3FF"))
+        img.rrect(ex + dx, 102, 8, 7, 2.5, C("6FD0E0") if not happy else C("A8E8F0"))
     # 嘴（ speaker ）
     for i in range(3):
         img.line(120 + i * 8, 122, 120 + i * 8, 126, 2.4, dark)
@@ -449,26 +452,26 @@ def draw_robot(img, state, t):
     img.rrect(159, 102, 8, 18, 3, dark)
     # 身体
     o_rrect(img, 128, 170, 58, 54, 14, body_c, dark)
-    img.rrect(128, 170, 34, 22, 6, C("2A3440"))
+    img.rrect(128, 170, 34, 22, 6, C("3A4350"))
     for r in range(2):
         for c in range(3):
-            img.ellipse(117 + c * 11, 164 + r * 11, 3, 3, C("8FF0FF", 190))
+            img.ellipse(117 + c * 11, 164 + r * 11, 3, 3, C("A8E4EE", 190))
     # 腿
     img.rrect(113, 199, 13, 26, 5, dark)
     img.rrect(143, 199, 13, 26, 5, dark)
-    img.rrect(113, 224, 17, 8, 3.5, C("3A424D"))
-    img.rrect(143, 224, 17, 8, 3.5, C("3A424D"))
+    img.rrect(113, 210, 17, 8, 3.5, C("3A424D"))
+    img.rrect(143, 210, 17, 8, 3.5, C("3A424D"))
     if state in ("typing", "commit"):
         holo(img, t if state == "typing" else 0.75)
         # 全息键盘平板（前方地面）
-        img.rrect(118, 200, 74, 14, 4, C("3FE0FF", 60))
+        img.rrect(118, 200, 74, 14, 4, C("6FD0E0", 60))
         for i in range(6):
-            img.line(90 + i * 11, 196, 90 + i * 11, 204, 1.2, C("8FF0FF", 120))
+            img.line(90 + i * 11, 196, 90 + i * 11, 204, 1.2, C("A8E4EE", 120))
         # 手臂：左手敲平板，右手指向屏幕
         img.line(101, 152, 112, 194 - pl * 5, 9, body_c)
         img.line(155, 152, 164, 176 - (1 - pl) * 4, 9, body_c)
-        img.ellipse(112, 196 - pl * 5, 7, 7, C("D6DEE7"))
-        img.ellipse(164, 178 - (1 - pl) * 4, 7, 7, C("D6DEE7"))
+        img.ellipse(112, 196 - pl * 5, 7, 7, C("DEE4EA"))
+        img.ellipse(164, 178 - (1 - pl) * 4, 7, 7, C("DEE4EA"))
         if happy:
             img.line(96, 148, 84, 134, 8, body_c)
             img.line(160, 148, 172, 134, 8, body_c)
@@ -479,31 +482,31 @@ def girl_face(img, blink=False, happy=False, lip="C8506A", lid="9FC8E8", tilt=0.
     """妩媚美人脸：白皙底、眼线挑飞、半阖眼波、眼影、挑眉、饱满唇。"""
     skin_shadow = C("F3C9AC", 90)
     # 眉（细挑眉）
-    img.line(96 + tilt, 88, 114 + tilt, 85.5, 1.7, C("4A3040", 210))
-    img.line(140 + tilt, 85.5, 158 + tilt, 88, 1.7, C("4A3040", 210))
+    img.line(96 + tilt, 88, 114 + tilt, 85.5, 1.7, C("4A3A44", 210))
+    img.line(140 + tilt, 85.5, 158 + tilt, 88, 1.7, C("4A3A44", 210))
     for x, wing in ((106, -1), (150, 1)):
         wx = x + tilt
         if happy:
             # 弯月笑眼 + 睫毛
-            img.line(wx - 7, 102, wx, 96, 3.2, C("1A1420"))
-            img.line(wx, 96, wx + 7, 102, 3.2, C("1A1420"))
+            img.line(wx - 7, 102, wx, 96, 3.2, C("2A2028"))
+            img.line(wx, 96, wx + 7, 102, 3.2, C("2A2028"))
         elif blink:
             # 阖眼：下弯睫毛线
-            img.line(wx - 6.5, 99, wx, 103, 2.6, C("1A1420"))
-            img.line(wx, 103, wx + 6.5, 99, 2.6, C("1A1420"))
+            img.line(wx - 6.5, 99, wx, 103, 2.6, C("2A2028"))
+            img.line(wx, 103, wx + 6.5, 99, 2.6, C("2A2028"))
         else:
             # 眼影
             img.ellipse(wx, 98.6, 7.4, 4, C(lid, 70))
             # 眼白 + 眼珠（眼波微抬）
-            img.ellipse(wx, 101, 6.4, 7.4, C("FFFFFF"))
-            img.ellipse(wx + wing * 1.4, 101.6, 4.1, 6.1, C("38202F"))
-            img.ellipse(wx + wing * 2.1, 103.4, 1.7, 2.2, C("FFFFFF"))
+            img.ellipse(wx, 101, 6.4, 7.4, C("FFFDFB"))
+            img.ellipse(wx + wing * 1.4, 101.6, 4.1, 6.1, C("3E2C3A"))
+            img.ellipse(wx + wing * 2.1, 103.4, 1.7, 2.2, C("FFFDFB"))
             img.ellipse(wx - wing * 1.6, 98.4, 1.2, 1.6, C("6A4A6A"))
             # 上睑线 + 眼尾挑飞
-            img.line(wx - 6.4, 96.4, wx + 6.4, 96.4, 2.3, C("1A1420"))
-            img.line(wx + wing * 5.6, 96.8, wx + wing * 10, 93.6, 2.3, C("1A1420"))
+            img.line(wx - 6.4, 96.4, wx + 6.4, 96.4, 2.3, C("2A2028"))
+            img.line(wx + wing * 5.6, 96.8, wx + wing * 10, 93.6, 2.3, C("2A2028"))
             # 下睫毛（淡）
-            img.line(wx - wing * 3.4, 107.6, wx + wing * 1.2, 108.2, 1.1, C("1A1420", 110))
+            img.line(wx - wing * 3.4, 107.6, wx + wing * 1.2, 108.2, 1.1, C("2A2028", 110))
     # 腮红（淡）
     img.ellipse(93 + tilt, 112, 8, 4.2, C("FFB4BC", 90))
     img.ellipse(163 + tilt, 112, 8, 4.2, C("FFB4BC", 90))
@@ -568,7 +571,7 @@ def draw_oriental(img, state, t):
     img.polygon([(108, 148), (148, 148), (158, 176), (120, 208), (100, 200)], skin_line)
     img.polygon([(110, 148), (146, 148), (155, 175), (118, 205), (102, 198)], dress)
     # 开衩边缘金线
-    img.line(152, 172, 116, 203, 2.2, C("E8C46A"))
+    img.line(152, 172, 116, 203, 2.2, C("DCC080"))
     # 腿：侧坐向右伸，右腿前、左腿后，脚尖交叠（在琴上方，不被挡）
     _glam_legs(img, (124, 190), (172, 208), (206, 219), back=True)
     _glam_legs(img, (120, 194), (170, 212), (202, 223))
@@ -576,7 +579,7 @@ def draw_oriental(img, state, t):
     img.polygon([(200, 221), (212, 227), (202, 229)], C("7E2438"))
     # 抹胸上衣（肩臂全露）
     img.rrect(128, 152, 40, 22, 8, dress)
-    img.line(110, 158, 146, 158, 2.2, C("E8C46A"))
+    img.line(110, 158, 146, 158, 2.2, C("DCC080"))
     img.ellipse(128, 144, 9, 5, skin)  # 颈胸
     # 手臂：左手抚弦、右手（idle 提于发侧 / typing 点弦 / commit 抬腕翻袖）
     img.line(112, 158, 116, 172, 8.5, skin)
@@ -591,15 +594,15 @@ def draw_oriental(img, state, t):
     img.ellipse(hx - 44, hy - 4, 12, 27, hair)
     img.ellipse(hx + 44, hy - 4, 12, 27, hair)
     # 发簪坠
-    img.line(hx + 22, hy - 40, hx + 44, hy - 48, 3, C("E8C46A"))
+    img.line(hx + 22, hy - 40, hx + 44, hy - 48, 3, C("DCC080"))
     img.ellipse(hx + 46, hy - 49, 3.5, 3.5, C("E85D8A"))
-    img.line(hx + 46, hy - 46, hx + 47, hy - 38, 1.2, C("E8C46A"))
+    img.line(hx + 46, hy - 46, hx + 47, hy - 38, 1.2, C("DCC080"))
     img.ellipse(hx + 47, hy - 36, 2.4, 2.4, C("E85D8A"))
     # 脸
     girl_face(img, blink=blink, happy=happy, tilt=tilt)
     # 耳坠
-    img.ellipse(hx - 42, hy + 12, 2.6, 2.6, C("E8C46A"))
-    img.ellipse(hx + 42, hy + 12, 2.6, 2.6, C("E8C46A"))
+    img.ellipse(hx - 42, hy + 12, 2.6, 2.6, C("DCC080"))
+    img.ellipse(hx + 42, hy + 12, 2.6, 2.6, C("DCC080"))
     # 手（最后画，落在弦上）
     if state in ("typing", "commit"):
         guzheng(img)
@@ -619,7 +622,7 @@ def draw_oriental(img, state, t):
 
 def draw_western(img, state, t):
     """金发淑女：高挑白皙、抹胸高开衩黑礼裙、大波浪金发、长腿直伸弹钢琴。"""
-    skin, hair, dress = C("FFEAD9"), C("E9C76B"), C("1E1E28")
+    skin, hair, dress = C("FFEAD9"), C("D9BC77"), C("1E1E28")
     skin_line = C("E0B49A")
     blink = state == "idle" and t >= 0.5
     happy = state == "commit"

@@ -21,6 +21,21 @@ final class PetWindowController {
     private static let enabledKey = "InputFlowPetEnabled"
     private static let originKey = "InputFlowPetOrigin"
     private static let packKey = "InputFlowPetPackId"
+    private static let emojiKey = "InputFlowPetEmoji"
+
+    /// 内置 emoji 形象（未选形象包时使用）。默认猫。
+    static var builtinEmoji: String {
+        get { UserDefaults.standard.string(forKey: emojiKey) ?? "🐱" }
+        set {
+            UserDefaults.standard.set(newValue, forKey: emojiKey)
+            // emoji 形象与形象包互斥：清掉形象包
+            UserDefaults.standard.set("", forKey: packKey)
+            shared.rebuild()
+            if isEnabled {
+                shared.show()
+            }
+        }
+    }
 
     static var isEnabled: Bool {
         UserDefaults.standard.bool(forKey: enabledKey)
@@ -63,6 +78,7 @@ final class PetWindowController {
     private var particleEmitter: CAEmitterLayer?
     private var resetWorkItem: DispatchWorkItem?
     private var modeButton: PetQuickButton?
+    private var statsButton: PetQuickButton?
     /// 鼠标追踪：30fps 轮询（无权限需求），只在包声明 follow_cursor 时启动。
     private var mouseTimer: Timer?
 
@@ -157,14 +173,13 @@ final class PetWindowController {
 
     /// 形象包切换 / 数据目录变化时重建窗口内容。
     func rebuild() {
-        guard let panel else {
-            return
-        }
         stopMouseTracking()
-        panel.orderOut(nil)
+        stopAnimTimer()
+        panel?.orderOut(nil)
         self.panel = nil
         imageView = nil
         particleEmitter = nil
+        loadPack()
         if Self.isEnabled {
             show()
         }
@@ -186,6 +201,17 @@ final class PetWindowController {
         stopMouseTracking()
         stopAnimTimer()
         panel?.orderOut(nil)
+    }
+
+    /// 开发用：把当前桌宠渲染为 PNG（离屏快照，便于检查形象与排版）。
+    func snapshot(to path: String) {
+        guard let view = panel?.contentView else { return }
+        view.layoutSubtreeIfNeeded()
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        if let data = rep.representation(using: .png, properties: [:]) {
+            try? data.write(to: URL(fileURLWithPath: path))
+        }
     }
 
     // MARK: - 帧动画状态机
@@ -263,14 +289,15 @@ final class PetWindowController {
             }
             return
         }
-        // 内置表情猫
+        // 内置表情（emoji 形象）：干净、可放大，作为默认推荐
         switch state {
         case .idle:
-            face.stringValue = "🐱"
+            face.stringValue = Self.builtinEmoji
         case .composing:
-            face.stringValue = "🙀"
+            face.stringValue = Self.builtinEmoji
+            pulse(scale: 1.08, duration: 0.16)
         case .commit:
-            face.stringValue = "😻"
+            face.stringValue = Self.builtinEmoji
             pulse(scale: 1.22, duration: 0.34)
             emitSparks()
             let item = DispatchWorkItem { [weak self] in self?.react(.idle) }
@@ -281,9 +308,8 @@ final class PetWindowController {
 
     private func makePanel() -> NSPanel {
         let size = pack?.size ?? 84
-        let panelHeight = size + 30  // 底部快启动条
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: size, height: panelHeight),
+            contentRect: NSRect(x: 0, y: 0, width: size, height: size),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -292,18 +318,13 @@ final class PetWindowController {
         panel.level = .floating
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
+        panel.hasShadow = false
         panel.isMovableByWindowBackground = true
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
-        let background = PetBackgroundView(frame: NSRect(x: 0, y: 30, width: size, height: size))
-        background.material = .hudWindow
-        background.blendingMode = .behindWindow
-        background.state = .active
-        background.wantsLayer = true
-        background.layer?.cornerRadius = size * 0.28
-        background.layer?.masksToBounds = true
+        // 角色直接悬浮在桌面上：无托盘、无材质背景，只有角色本体
+        let background = PetBackgroundView(frame: NSRect(x: 0, y: 0, width: size, height: size))
         background.onClick = { [weak self] in self?.tapBody() }
         background.onHover = { [weak self] hovering in
             self?.hoverBody(hovering)
@@ -320,7 +341,8 @@ final class PetWindowController {
             background.addSubview(view)
             imageView = view
         } else {
-            face.font = .systemFont(ofSize: size * 0.5)
+            face.stringValue = Self.builtinEmoji
+            face.font = .systemFont(ofSize: size * 0.62)
             face.alignment = .center
             face.translatesAutoresizingMaskIntoConstraints = false
             background.addSubview(face)
@@ -329,18 +351,8 @@ final class PetWindowController {
                 face.centerYAnchor.constraint(equalTo: background.centerYAnchor),
             ])
         }
-        // 容器分层：上 = 宠物背景（互动区），下 = 快启动台
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: size, height: panelHeight))
-        container.wantsLayer = true
-        container.addSubview(background)
-        panel.contentView = container
 
-        // 快速启动台：[中/EN] [📊]
-        let dock = NSStackView(frame: NSRect(x: 0, y: 0, width: size, height: 30))
-        dock.orientation = .horizontal
-        dock.alignment = .centerY
-        dock.distribution = .fillEqually
-        dock.edgeInsets = NSEdgeInsets(top: 2, left: 10, bottom: 2, right: 10)
+        // 悬停时才出现的小圆钮，吸附在角色下沿
         let modeBtn = PetQuickButton(title: "中")
         modeBtn.toolTip = "切换中 / 英（左 Shift 同效）"
         modeBtn.handler = {
@@ -351,10 +363,25 @@ final class PetWindowController {
         statsBtn.handler = {
             NotificationCenter.default.post(name: .petShowStats, object: nil)
         }
-        dock.addArrangedSubview(modeBtn)
-        dock.addArrangedSubview(statsBtn)
+        let dock = NSStackView(views: [modeBtn, statsBtn])
+        dock.orientation = .horizontal
+        dock.spacing = 6
+        dock.translatesAutoresizingMaskIntoConstraints = false
+        background.addSubview(dock)
+        NSLayoutConstraint.activate([
+            dock.centerXAnchor.constraint(equalTo: background.centerXAnchor),
+            dock.bottomAnchor.constraint(equalTo: background.bottomAnchor, constant: -1),
+            modeBtn.widthAnchor.constraint(equalToConstant: 22),
+            modeBtn.heightAnchor.constraint(equalToConstant: 22),
+            statsBtn.widthAnchor.constraint(equalToConstant: 22),
+            statsBtn.heightAnchor.constraint(equalToConstant: 22),
+        ])
+        modeBtn.isHidden = true
+        statsBtn.isHidden = true
         modeButton = modeBtn
-        container.addSubview(dock)
+        statsButton = statsBtn
+
+        panel.contentView = background
 
         NotificationCenter.default.addObserver(
             forName: NSWindow.didMoveNotification,
@@ -374,8 +401,10 @@ final class PetWindowController {
         NotificationCenter.default.post(name: .petToggleLanguage, object: nil)
     }
 
-    /// 悬停 = 被摸头：轻晃 + 提示气泡（不刷屏，5 秒内只提示一次）。
+    /// 悬停 = 被摸头：轻晃 + 显示吸附按钮 + 提示气泡（不刷屏，5 秒内只提示一次）。
     private func hoverBody(_ hovering: Bool) {
+        modeButton?.isHidden = !hovering
+        statsButton?.isHidden = !hovering
         guard hovering else { return }
         pulse(scale: 1.06, duration: 0.16)
         let now = Date().timeIntervalSince1970
@@ -642,7 +671,8 @@ final class PetWindowController {
 // MARK: - 互动视图件
 
 /// 桌宠身体：区分「点按」与「拖动」，支持悬停与右键。
-private final class PetBackgroundView: NSVisualEffectView {
+/// 透明无背景，角色直接悬浮在桌面上。
+private final class PetBackgroundView: NSView {
     var onClick: (() -> Void)?
     var onHover: ((Bool) -> Void)?
     var onRightClick: ((NSEvent) -> Void)?
@@ -691,15 +721,20 @@ private final class PetBackgroundView: NSVisualEffectView {
     }
 }
 
-/// 快启动台小按钮：闭包回调。
+/// 悬停浮出的小圆钮：半透明深色底 + 白字，吸附在角色下沿。
 private final class PetQuickButton: NSButton {
     var handler: (() -> Void)?
 
     init(title: String) {
         super.init(frame: .zero)
         self.title = title
-        bezelStyle = .rounded
-        controlSize = .small
+        isBordered = false
+        wantsLayer = true
+        layer?.cornerRadius = 11
+        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.45).cgColor
+        layer?.borderWidth = 1
+        layer?.borderColor = NSColor.white.withAlphaComponent(0.18).cgColor
+        contentTintColor = .white
         font = .systemFont(ofSize: 11, weight: .semibold)
         target = self
         action = #selector(fire)

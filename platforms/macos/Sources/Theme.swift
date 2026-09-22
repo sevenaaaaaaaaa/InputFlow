@@ -139,8 +139,8 @@ enum PluginStore {
         catalog.packs.filter { $0.kind == kind }
     }
 
-    /// 把 app 内随包分发的示例插件（Resources/Plugins/*） seeding 到用户插件目录。
-    /// 已存在的目录不覆盖，用户自己的修改优先。
+    /// 把 app 内随包分发的示例插件（Resources/Plugins/*）seeding 到用户插件目录。
+    /// 未安装则复制；已安装但版本不同则更新（用户自建包不受影响）。
     static func seedBundledPacks() {
         guard let resources = Bundle.main.resourceURL else { return }
         let source = resources.appendingPathComponent("Plugins", isDirectory: true)
@@ -153,8 +153,21 @@ enum PluginStore {
             let target = pluginsDir.appendingPathComponent(item.lastPathComponent, isDirectory: true)
             if !fm.fileExists(atPath: target.path) {
                 try? fm.copyItem(at: item, to: target)
+                continue
+            }
+            if bundledVersion(of: item) != bundledVersion(of: target) {
+                try? fm.removeItem(at: target)
+                try? fm.copyItem(at: item, to: target)
             }
         }
+    }
+
+    private static func bundledVersion(of dir: URL) -> String? {
+        let url = dir.appendingPathComponent("plugin.json")
+        guard let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return json["version"] as? String
     }
 }
 
