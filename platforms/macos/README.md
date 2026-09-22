@@ -7,9 +7,32 @@ InputMethodKit 外壳 + Rust 内核静态库；候选窗在 macOS 26+ 使用系�
 ## 构建与安装
 
 ```bash
-./build.sh      # cargo 静态库 + swiftc + 手工 bundle + ad-hoc 签名
+./build.sh      # cargo 静态库 + swiftc + 手工 bundle + ad-hoc 签名 + 图形安装器
 ./install.sh    # 安装到 ~/Library/Input Methods，并准备数据目录
 ```
+
+## 图形安装器
+
+`build.sh` 会同时产出 `build/InputFlow 安装器.app`（内嵌 InputFlow.app 与 base.ifd）：
+
+- 向导：安装位置（用户级 / 系统级需管理员）、配置（默认模式、简繁输出、剪切板、
+  桌宠、按应用记忆、输入统计、标点策略）、签名诊断、安装、收录检测、卸载
+- 配置写入 `dev.inputflow.inputmethod` 域（与输入法本体的 UserDefaults 一致）
+- 打包 DMG 时把「InputFlow 安装器.app」与说明一起放入即可
+
+## 签名与系统收录（重要）
+
+macOS 26/27 的输入源扫描器会**拒绝 ad-hoc 签名**的第三方输入法（实测对照）：
+
+| 实验 | 结果 |
+|---|---|
+| Developer ID 签名的鼠须管（TeamID 28HU5A7B46） | 安装后立即可被收录（无需注销） |
+| 同一 bundle 重签为 ad-hoc | 完全不收录 |
+| 本项目 ad-hoc 构建（用户目录 / 系统目录、重启后） | 完全不收录 |
+
+结论：要在 macOS 26+ 上使用，必须用 **Developer ID 签名**（并公证）。`build.sh` 目前是
+ad-hoc 签名，安装器会明确提示这一点。拿到签名身份后，把 `codesign --sign -` 换成
+`codesign --sign "Developer ID Application: …" --options runtime` 并对 app 做 notarize 即可。
 
 `install.sh` 会调用输入法自带的注册命令（`--register-input-source`、`--enable-input-source`），
 等价于 Squirrel 的安装流程；这些命令也可以单独手动执行：
@@ -119,6 +142,7 @@ cp /tmp/base.ifd ~/Library/Application\ Support/InputFlow/base.ifd
 ## 开发说明
 
 - `Sources/Engine.swift`：C ABI 封装 + JSON 解码（组合态、候选、AI 目录）；
+- `installer/Installer.swift`：图形安装器（配置 / 安装 / 收录检测 / 卸载 / 签名诊断）；
 - `Sources/InputController.swift`：按键翻译、预编辑串、模式菜单、Shift 切换、剪切板上屏、双 `a` 手势；
 - `Sources/AppProfile.swift`：应用画像（代码/浏览器/聊天）与标点策略；
 - `Sources/PetWindow.swift`：桌宠（状态表情、拖动、位置记忆）；

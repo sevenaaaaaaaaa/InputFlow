@@ -16,7 +16,7 @@ BIN_DIR="$CONTENTS/MacOS"
 DEPLOY_TARGET="${MACOSX_DEPLOYMENT_TARGET:-13.0}"
 UNIVERSAL="${UNIVERSAL:-1}"
 
-echo "==> 1/4 构建 Rust 内核静态库"
+echo "==> 1/5 构建 Rust 内核静态库"
 mkdir -p "$ROOT/target/release"
 if [[ "$UNIVERSAL" == "1" ]]; then
     # 零 crates 依赖，两个 target 都能干净交叉编译
@@ -32,7 +32,7 @@ else
     cargo build --release --manifest-path "$ROOT/Cargo.toml" -p inputflow-ffi
 fi
 
-echo "==> 2/4 编译 Swift 外壳（目标 macOS ${DEPLOY_TARGET}）"
+echo "==> 2/5 编译 Swift 外壳（目标 macOS ${DEPLOY_TARGET}）"
 rm -rf "$BUNDLE"
 mkdir -p "$BIN_DIR" "$CONTENTS/Resources"
 # 显式链接静态库（避免链接到同目录的 .dylib，保证 app 自包含可分发）
@@ -72,7 +72,7 @@ fi
 cp "$HERE/Info.plist" "$CONTENTS/Info.plist"
 printf 'APPL????' > "$CONTENTS/PkgInfo"
 
-echo "==> 3/4 生成外部词典（base.ifd，20 万词条）"
+echo "==> 3/5 生成外部词典（base.ifd，20 万词条）"
 DICT_OUT="$HERE/build/base.ifd"
 DICT_SRC="$ROOT/crates/dict/data/base-large.tsv"
 if [[ ! -f "$DICT_OUT" || "$DICT_SRC" -nt "$DICT_OUT" ]]; then
@@ -82,10 +82,31 @@ else
     echo "词典已是最新，跳过（源文件未变）"
 fi
 
-echo "==> 4/4 Ad-hoc 签名"
-codesign --force --sign - "$BUNDLE" >/dev/null 2>&1 \
+echo "==> 4/5 构建图形安装器"
+INSTALLER="$BUILD/InputFlow 安装器.app"
+INSTALLER_CONTENTS="$INSTALLER/Contents"
+INSTALLER_BIN="$INSTALLER_CONTENTS/MacOS"
+INSTALLER_RES="$INSTALLER_CONTENTS/Resources"
+rm -rf "$INSTALLER"
+mkdir -p "$INSTALLER_BIN" "$INSTALLER_RES"
+swiftc -O -wmo -parse-as-library \
+    -target "$(uname -m)-apple-macos${DEPLOY_TARGET}" \
+    -framework AppKit -framework Carbon \
+    -o "$INSTALLER_BIN/InputFlowInstaller" \
+    "$HERE/installer/Installer.swift"
+cp "$HERE/installer/Info.plist" "$INSTALLER_CONTENTS/Info.plist"
+printf 'APPL????' > "$INSTALLER_CONTENTS/PkgInfo"
+# 把输入法本体与词库作为安装包内嵌资源
+cp -R "$BUNDLE" "$INSTALLER_RES/InputFlow.app"
+cp "$HERE/build/base.ifd" "$INSTALLER_RES/base.ifd"
+
+echo "==> 5/5 Ad-hoc 签名"
+codesign --force --deep --sign - "$BUNDLE" >/dev/null 2>&1 \
     || echo "（签名失败不影响本地安装）"
+codesign --force --deep --sign - "$INSTALLER" >/dev/null 2>&1 \
+    || echo "（安装器签名失败不影响本地使用）"
 
 echo
 echo "完成: $BUNDLE"
-echo "下一步: ./install.sh"
+echo "安装器: $INSTALLER"
+echo "下一步: ./install.sh 或双击安装器"
