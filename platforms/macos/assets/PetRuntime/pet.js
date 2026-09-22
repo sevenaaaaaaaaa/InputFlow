@@ -17,6 +17,8 @@ window.addEventListener('unhandledrejection', (e) => {
 
 const params = new URLSearchParams(location.search);
 const modelURL = params.get('model') || './sample.vrm';
+const framing = params.get('framing') || 'full';   // full | bust
+const extraZoom = parseFloat(params.get('zoom') || '1') || 1;
 const canvas = document.getElementById('c');
 
 const renderer = new THREE.WebGLRenderer({
@@ -74,20 +76,32 @@ window.addEventListener('resize', resize);
 function fitCamera() {
   const box = new THREE.Box3().setFromObject(vrm.scene);
   const size = new THREE.Vector3();
-  const center = new THREE.Vector3();
   box.getSize(size);
-  box.getCenter(center);
-  headHeight = box.min.y + size.y * 0.82;      // 头部大致高度
-  // 半身构图：以头部为焦点
-  const focusY = box.min.y + size.y * 0.80;
-  const distance = size.y * 1.02;
-  camera.position.set(0, focusY + size.y * 0.04, distance);
-  camera.near = distance / 50;
-  camera.far = distance * 6;
+  headHeight = box.min.y + size.y * 0.90;
+
+  let focusY;
+  let distance;
+  if (framing === 'bust') {
+    focusY = box.min.y + size.y * 0.80;
+    distance = size.y * 1.02;
+    camera.position.set(0, focusY + size.y * 0.04, distance);
+  } else {
+    // 全身：略低机位（显高挑），按竖直画幅精确取景
+    const aspect = Math.max(0.35, camera.aspect);
+    const needV = size.y * 1.06;
+    const needH = Math.max(size.x, size.z) * 1.25;
+    const fovRad = (camera.fov * Math.PI) / 180;
+    distance = Math.max(needV / (2 * Math.tan(fovRad / 2)), needH / (2 * Math.tan(fovRad / 2) * aspect));
+    distance /= extraZoom;
+    focusY = box.min.y + size.y * 0.52;
+    camera.position.set(0, box.min.y + size.y * 0.44, distance);
+  }
+  camera.near = Math.max(0.05, distance / 200);
+  camera.far = distance * 8;
   camera.lookAt(0, focusY, 0);
   camera.updateProjectionMatrix();
-  lookTarget.position.set(0, focusY, distance * 0.5);
-  headTarget.set(0, focusY, 0);
+  lookTarget.position.set(0, headHeight, distance * 0.5);
+  headTarget.set(0, headHeight, 0);
 }
 
 function setExpression(name, value) {

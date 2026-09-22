@@ -22,6 +22,20 @@ final class PetWindowController {
     private static let originKey = "InputFlowPetOrigin"
     private static let packKey = "InputFlowPetPackId"
     private static let emojiKey = "InputFlowPetEmoji"
+    private static let framingKey = "InputFlowPetFraming"
+    private static let zoomKey = "InputFlowPetZoom"
+
+    /// 画幅：full（全身）/ bust（半身），菜单可改，覆盖形象包默认
+    static var framingOverride: String {
+        get { UserDefaults.standard.string(forKey: framingKey) ?? "full" }
+        set { UserDefaults.standard.set(newValue, forKey: framingKey); shared.rebuild() }
+    }
+
+    /// 缩放：0.8 / 1.0 / 1.25 / 1.5
+    static var zoomOverride: Double {
+        get { UserDefaults.standard.object(forKey: zoomKey) as? Double ?? 1.0 }
+        set { UserDefaults.standard.set(newValue, forKey: zoomKey); shared.rebuild() }
+    }
 
     /// 内置 emoji 形象（未选形象包时使用）。默认猫。
     static var builtinEmoji: String {
@@ -106,6 +120,12 @@ final class PetWindowController {
         /// 渲染器：emoji | sprites | rive | live2d | vrm（见 ADR-0007）
         var renderer: String = "emoji"
         var entry: String?
+        /// 画幅（宽×高）；缺省用 size 正方形
+        var width: CGFloat?
+        var height: CGFloat?
+        /// 构图：full（全身，默认）/ bust（半身）
+        var framing: String = "full"
+        var zoom: Double = 1.0
 
         static func load(dir: URL) -> PetPack? {
             guard
@@ -144,6 +164,10 @@ final class PetWindowController {
             if let p = json.prop, !p.isEmpty { pack.prop = p }
             if let r = json.renderer, !r.isEmpty { pack.renderer = r }
             pack.entry = json.entry
+            if let w = json.width, w >= 100, w <= 600 { pack.width = CGFloat(w) }
+            if let h = json.height, h >= 100, h <= 800 { pack.height = CGFloat(h) }
+            if let f = json.framing, !f.isEmpty { pack.framing = f }
+            if let z = json.zoom, z >= 0.4, z <= 2.0 { pack.zoom = z }
             if pack.renderer == "emoji" && pack.emoji == nil && !pack.idle.isEmpty {
                 pack.renderer = "sprites"
             }
@@ -167,6 +191,10 @@ final class PetWindowController {
             var prop: String?
             var renderer: String?
             var entry: String?
+            var width: Double?
+            var height: Double?
+            var framing: String?
+            var zoom: Double?
 
             struct StateFiles: Codable {
                 var idle: String?
@@ -436,8 +464,10 @@ final class PetWindowController {
 
     private func makePanel() -> NSPanel {
         let size = pack?.size ?? 84
+        let panelW = pack?.width ?? size
+        let panelH = pack?.height ?? size
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: size, height: size),
+            contentRect: NSRect(x: 0, y: 0, width: panelW, height: panelH),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -452,7 +482,7 @@ final class PetWindowController {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         // 角色直接悬浮在桌面上：无托盘、无材质背景，只有角色本体
-        let background = PetBackgroundView(frame: NSRect(x: 0, y: 0, width: size, height: size))
+        let background = PetBackgroundView(frame: NSRect(x: 0, y: 0, width: panelW, height: panelH))
         background.onClick = { [weak self] in self?.tapBody() }
         background.onHover = { [weak self] hovering in
             self?.hoverBody(hovering)
@@ -464,7 +494,12 @@ final class PetWindowController {
         if let pack, pack.renderer == "vrm" {
             // VRM 3D：WKWebView + three.js/three-vrm（注视/眨眼/物理/状态机）
             if let modelPath = PetRuntimeStore.modelPath(for: Self.activePackId, entry: pack.entry) {
-                let view = VRMPetView(frame: background.bounds, modelPath: modelPath)
+                let view = VRMPetView(
+                    frame: background.bounds,
+                    modelPath: modelPath,
+                    framing: Self.framingOverride,
+                    zoom: pack.zoom * Self.zoomOverride
+                )
                 view.autoresizingMask = [.width, .height]
                 view.onError = { [weak self] message in
                     self?.showToast("VRM 加载失败：\(message)", duration: 6)

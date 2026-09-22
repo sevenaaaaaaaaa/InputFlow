@@ -319,6 +319,29 @@ final class InputFlowInputController: IMKInputController {
             submenu.addItem(item)
         }
 
+        let framingMenu = NSMenu(title: "画幅")
+        for (title, value) in [("全身（显身材）", "full"), ("半身（看表情）", "bust")] {
+            let item = NSMenuItem(title: title, action: #selector(selectPetFraming(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = value
+            item.state = PetWindowController.framingOverride == value ? .on : .off
+            framingMenu.addItem(item)
+        }
+        let zoomMenu = NSMenu(title: "缩放")
+        for value in [0.8, 1.0, 1.25, 1.5] {
+            let item = NSMenuItem(title: String(format: "%.0f%%", value * 100), action: #selector(selectPetZoom(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = value
+            item.state = abs(PetWindowController.zoomOverride - value) < 0.01 ? .on : .off
+            zoomMenu.addItem(item)
+        }
+        let framingItem = NSMenuItem(title: "画幅", action: nil, keyEquivalent: "")
+        framingItem.submenu = framingMenu
+        submenu.addItem(framingItem)
+        let zoomItem = NSMenuItem(title: "缩放", action: nil, keyEquivalent: "")
+        zoomItem.submenu = zoomMenu
+        submenu.addItem(zoomItem)
+
         let importItem = NSMenuItem(title: "导入 VRM 模型…", action: #selector(importVRM(_:)), keyEquivalent: "")
         importItem.target = self
         submenu.addItem(importItem)
@@ -364,6 +387,22 @@ final class InputFlowInputController: IMKInputController {
             item.state = (item.representedObject as? String) == id ? .on : .off
         }
         PetWindowController.shared.showToast("已切换桌宠形象：\(sender.title)", duration: 2.5)
+    }
+
+    @objc private func selectPetFraming(_ sender: NSMenuItem) {
+        guard let value = sender.representedObject as? String else { return }
+        PetWindowController.framingOverride = value
+        for item in sender.menu?.items ?? [] {
+            item.state = (item.representedObject as? String) == value ? .on : .off
+        }
+    }
+
+    @objc private func selectPetZoom(_ sender: NSMenuItem) {
+        guard let value = sender.representedObject as? Double else { return }
+        PetWindowController.zoomOverride = value
+        for item in sender.menu?.items ?? [] {
+            item.state = abs(((item.representedObject as? Double) ?? -1) - value) < 0.01 ? .on : .off
+        }
     }
 
     /// 导入用户自己的 VRM 模型（VRoid Studio 可免费导出），生成 vrm-custom 形象包。

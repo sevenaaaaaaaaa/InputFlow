@@ -78,7 +78,7 @@ final class VRMPetView: WKWebView, WKScriptMessageHandler, WKNavigationDelegate 
     private var pendingState = "idle"
     private let runtimeDir: URL
 
-    init(frame: NSRect, modelPath: String) {
+    init(frame: NSRect, modelPath: String, framing: String = "full", zoom: Double = 1.0) {
         runtimeDir = PetRuntimeStore.ensure()
         let config = WKWebViewConfiguration()
         config.suppressesIncrementalRendering = false
@@ -99,7 +99,7 @@ final class VRMPetView: WKWebView, WKScriptMessageHandler, WKNavigationDelegate 
         setValue(false, forKey: "allowsMagnification")
 
         let page = runtimeDir.appendingPathComponent("pet.html")
-        let url = URL(string: "\(page.absoluteString)?model=\(modelPath)") ?? page
+        let url = URL(string: "\(page.absoluteString)?model=\(modelPath)&framing=\(framing)&zoom=\(zoom)") ?? page
         loadFileURL(url, allowingReadAccessTo: runtimeDir)
     }
 

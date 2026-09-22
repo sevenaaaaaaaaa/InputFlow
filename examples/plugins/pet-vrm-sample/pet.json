@@ -1,11 +1,15 @@
 {
   "renderer": "vrm",
-  "size": 220,
+  "size": 240,
   "fps": 6,
   "fps_idle": 30,
   "fps_typing": 60,
   "entry": "",
   "follow_cursor": false,
   "typing_bounce": true,
-  "commit_particles": true
+  "commit_particles": true,
+  "width": 240,
+  "height": 380,
+  "framing": "full",
+  "zoom": 1.0
 }
