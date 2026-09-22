@@ -13,12 +13,20 @@ InputMethodKit 外壳 + Rust 内核静态库；候选窗在 macOS 26+ 使用系�
 
 ## 图形安装器
 
-`build.sh` 会同时产出 `build/InputFlow 安装器.app`（内嵌 InputFlow.app 与 base.ifd）：
+`build.sh` 会同时产出 `build/InputFlow 安装器.app`（内嵌 InputFlow.app、base.ifd 与图标）：
 
-- 向导：安装位置（用户级 / 系统级需管理员）、配置（默认模式、简繁输出、剪切板、
-  桌宠、按应用记忆、输入统计、标点策略）、签名诊断、安装、收录检测、卸载
+- 侧栏三步向导：**安装位置**（用户级 / 系统级需管理员）→ **输入与隐私**（默认模式、
+  简繁输出、剪切板、桌宠、按应用记忆、输入统计、标点策略）→ **安装与验证**
+  （安装进度日志、收录状态实时检测、打开键盘设置、卸载）
 - 配置写入 `dev.inputflow.inputmethod` 域（与输入法本体的 UserDefaults 一致）
 - 打包 DMG 时把「InputFlow 安装器.app」与说明一起放入即可
+
+## 图标
+
+- 源文件：`tools/make-icons.swift`（程序化绘制，配色取自 `docs/design-tokens.json` 的 accent）
+- 生成：`swift tools/make-icons.swift` → `assets/InputFlow.icns`（光标 + 文字线）
+  与 `assets/InputFlowInstaller.icns`（下载箭头变体）
+- 已提交 icns，`build.sh` 直接复制进两个 bundle 的 `Contents/Resources`
 
 ## 签名与系统收录（重要）
 

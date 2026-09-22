@@ -71,6 +71,7 @@ fi
 
 cp "$HERE/Info.plist" "$CONTENTS/Info.plist"
 printf 'APPL????' > "$CONTENTS/PkgInfo"
+cp "$HERE/assets/InputFlow.icns" "$CONTENTS/Resources/InputFlow.icns"
 
 echo "==> 3/5 生成外部词典（base.ifd，20 万词条）"
 DICT_OUT="$HERE/build/base.ifd"
@@ -96,6 +97,8 @@ swiftc -O -wmo -parse-as-library \
     "$HERE/installer/Installer.swift"
 cp "$HERE/installer/Info.plist" "$INSTALLER_CONTENTS/Info.plist"
 printf 'APPL????' > "$INSTALLER_CONTENTS/PkgInfo"
+cp "$HERE/assets/InputFlowInstaller.icns" "$INSTALLER_RES/InputFlowInstaller.icns"
+cp "$HERE/assets/InputFlow.icns" "$INSTALLER_RES/InputFlow.icns"
 # 把输入法本体与词库作为安装包内嵌资源
 cp -R "$BUNDLE" "$INSTALLER_RES/InputFlow.app"
 cp "$HERE/build/base.ifd" "$INSTALLER_RES/base.ifd"

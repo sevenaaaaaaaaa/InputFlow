@@ -14,6 +14,8 @@
     <string>InputFlow 安装器</string>
     <key>CFBundleDisplayName</key>
     <string>InputFlow 安装器</string>
+    <key>CFBundleIconFile</key>
+    <string>InputFlowInstaller</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

@@ -1,15 +1,25 @@
 import AppKit
 import Carbon
 
-/// InputFlow 图形安装器：引导 + 配置 + 安装 + 收录检测 + 卸载。
+/// InputFlow 图形安装器：侧栏步骤向导（安装位置 → 配置 → 安装与验证）。
 ///
-/// 说明（ADR/实测）：macOS 26+ 的输入源扫描器会拒绝 ad-hoc 签名的第三方输入法，
-/// 必须使用 Developer ID 签名（并公证）才会出现在系统输入法列表。安装器会检测
-/// 内嵌的 InputFlow.app 签名状态并在首页给出明确诊断。
+/// 签名说明：macOS 26+ 的输入源扫描器会拒绝 ad-hoc 签名的第三方输入法，
+/// 必须 Developer ID 签名（并公证）才会出现在系统输入法列表；界面会给出诊断。
 final class InstallerWindowController: NSWindowController {
     private let imeBundleID = "dev.inputflow.inputmethod"
     private let userAppPath = NSHomeDirectory() + "/Library/Input Methods/InputFlow.app"
     private let systemAppPath = "/Library/Input Methods/InputFlow.app"
+    private let accent = NSColor.controlAccentColor
+
+    // 侧栏
+    private let stepBadges: [NSTextField]
+    private let stepTitles: [NSTextField]
+
+    // 页面
+    private let pageContainer = NSStackView()
+    private var pages: [NSView] = []
+    private var step = 0
+    private var installButton: NSButton?
 
     // 配置控件
     private let modePopup = NSPopUpButton()
@@ -19,13 +29,23 @@ final class InstallerWindowController: NSWindowController {
     private let appMemoryCheck = NSButton(checkboxWithTitle: "按应用记忆中英文输入状态", target: nil, action: nil)
     private let statsCheck = NSButton(checkboxWithTitle: "输入统计（仅本地）", target: nil, action: nil)
     private let halfPunctCheck = NSButton(checkboxWithTitle: "所有应用都强制半角标点", target: nil, action: nil)
-    private let locationPopup = NSPopUpButton()
 
-    // 状态
+    // 安装位置卡片
+    private let userCard = OptionCard(title: "仅当前用户", subtitle: "~/Library/Input Methods · 无需管理员密码")
+    private let systemCard = OptionCard(title: "所有用户", subtitle: "/Library/Input Methods · 需要管理员授权")
+    private var installSystemWide = false
+
+    // 页脚 / 状态
+    private let backButton = NSButton(title: "上一步", target: nil, action: nil)
+    private let nextButton = NSButton(title: "下一步", target: nil, action: nil)
+    private let signaturePill = NSTextField(labelWithString: "")
+    private let detectPill = NSTextField(labelWithString: "未检测")
+    private let summaryLabel = NSTextField(wrappingLabelWithString: "")
     private let statusText = NSTextView()
-    private let sigLabel = NSTextField(wrappingLabelWithString: "")
+    private let purgeCheck = NSButton(checkboxWithTitle: "同时删除用户数据与钥匙串密钥", target: nil, action: nil)
     private var progressTimer: Timer?
     private var pollCount = 0
+    private var hasInstalled = false
 
     private let modeOptions: [(String, String)] = [
         ("pinyin", "拼音（全拼，推荐）"),
@@ -37,144 +57,359 @@ final class InstallerWindowController: NSWindowController {
     ]
 
     init() {
+        stepBadges = (0..<3).map { _ in NSTextField(labelWithString: "") }
+        stepTitles = (0..<3).map { _ in NSTextField(labelWithString: "") }
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 660, height: 560),
-            styleMask: [.titled, .closable],
+            contentRect: NSRect(x: 0, y: 0, width: 780, height: 580),
+            styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
         window.title = "InputFlow 安装器"
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false
         window.center()
         super.init(window: window)
         buildUI()
+        switchStep(0)
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) 未实现")
     }
 
-    // MARK: - UI
+    // MARK: - 布局
 
     private func buildUI() {
         guard let window else { return }
+        userCard.setSelected(true)
+        userCard.onSelect = { [weak self] in self?.selectLocation(system: false) }
+        systemCard.onSelect = { [weak self] in self?.selectLocation(system: true) }
+
         let root = NSStackView()
-        root.orientation = .vertical
-        root.alignment = .leading
-        root.spacing = 12
-        root.edgeInsets = NSEdgeInsets(top: 20, left: 24, bottom: 18, right: 24)
+        root.orientation = .horizontal
+        root.spacing = 0
+        root.distribution = .fill
         root.translatesAutoresizingMaskIntoConstraints = false
+        window.contentView = root
 
-        let title = NSTextField(labelWithString: "InputFlow 安装向导")
-        title.font = .systemFont(ofSize: 22, weight: .semibold)
-        root.addArrangedSubview(title)
-
-        let subtitle = NSTextField(wrappingLabelWithString:
-            "隐私优先的本地输入法：引擎、词库、学习全部在本机，零服务器、零遥测。"
-            + "安装会写入配置并尝试注册输入法。")
-        subtitle.font = .systemFont(ofSize: 12)
-        subtitle.textColor = .secondaryLabelColor
-        subtitle.preferredMaxLayoutWidth = 600
-        root.addArrangedSubview(subtitle)
-
-        root.addArrangedSubview(section("① 安装位置"))
-        locationPopup.addItems(withTitles: [
-            "仅当前用户（~/Library/Input Methods，无需密码）",
-            "所有用户（/Library/Input Methods，需要管理员密码）",
+        root.addArrangedSubview(buildSidebar())
+        root.addArrangedSubview(buildContent())
+        NSLayoutConstraint.activate([
+            root.leadingAnchor.constraint(equalTo: window.contentView!.leadingAnchor),
+            root.trailingAnchor.constraint(equalTo: window.contentView!.trailingAnchor),
+            root.topAnchor.constraint(equalTo: window.contentView!.topAnchor),
+            root.bottomAnchor.constraint(equalTo: window.contentView!.bottomAnchor),
         ])
-        locationPopup.selectItem(at: 0)
-        root.addArrangedSubview(locationPopup)
+        refreshSignature()
+    }
 
-        root.addArrangedSubview(section("② 输入与隐私配置"))
+    private func buildSidebar() -> NSView {
+        let effect = NSVisualEffectView()
+        effect.material = .sidebar
+        effect.blendingMode = .behindWindow
+        effect.state = .active
+        effect.translatesAutoresizingMaskIntoConstraints = false
+        effect.widthAnchor.constraint(equalToConstant: 232).isActive = true
+
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        stack.edgeInsets = NSEdgeInsets(top: 52, left: 20, bottom: 20, right: 16)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        effect.addSubview(stack)
+
+        let icon = NSImageView()
+        icon.image = NSImage(named: "InputFlow") ?? NSImage(named: NSImage.applicationIconName)
+        icon.imageScaling = .scaleProportionallyUpOrDown
+        icon.widthAnchor.constraint(equalToConstant: 56).isActive = true
+        icon.heightAnchor.constraint(equalToConstant: 56).isActive = true
+        let name = NSTextField(labelWithString: "InputFlow")
+        name.font = .systemFont(ofSize: 16, weight: .semibold)
+        let version = NSTextField(labelWithString: "本地输入法 · v0.1.0")
+        version.font = .systemFont(ofSize: 11)
+        version.textColor = .secondaryLabelColor
+        let header = NSStackView(views: [icon, name, version])
+        header.orientation = .vertical
+        header.alignment = .leading
+        header.spacing = 4
+        stack.addArrangedSubview(header)
+        stack.setCustomSpacing(22, after: header)
+
+        let titles = ["安装位置", "输入与隐私", "安装与验证"]
+        for (index, title) in titles.enumerated() {
+            let badge = stepBadges[index]
+            badge.stringValue = "\(index + 1)"
+            badge.alignment = .center
+            badge.font = .systemFont(ofSize: 11, weight: .bold)
+            badge.wantsLayer = true
+            badge.layer?.cornerRadius = 10
+            badge.widthAnchor.constraint(equalToConstant: 20).isActive = true
+            badge.heightAnchor.constraint(equalToConstant: 20).isActive = true
+
+            let label = stepTitles[index]
+            label.stringValue = title
+            label.font = .systemFont(ofSize: 13, weight: .medium)
+
+            let row = NSStackView(views: [badge, label])
+            row.orientation = .horizontal
+            row.spacing = 10
+            stack.addArrangedSubview(row)
+        }
+        return effect
+    }
+
+    private func buildContent() -> NSView {
+        let content = NSStackView()
+        content.orientation = .vertical
+        content.alignment = .leading
+        content.spacing = 14
+        content.edgeInsets = NSEdgeInsets(top: 52, left: 26, bottom: 20, right: 26)
+        content.translatesAutoresizingMaskIntoConstraints = false
+
+        pageContainer.orientation = .vertical
+        pageContainer.alignment = .leading
+        pageContainer.spacing = 0
+        pageContainer.translatesAutoresizingMaskIntoConstraints = false
+        pageContainer.widthAnchor.constraint(equalToConstant: 460).isActive = true
+        pages = [buildLocationPage(), buildConfigPage(), buildInstallPage()]
+        for page in pages {
+            page.translatesAutoresizingMaskIntoConstraints = false
+            page.widthAnchor.constraint(equalToConstant: 460).isActive = true
+            pageContainer.addArrangedSubview(page)
+        }
+        content.addArrangedSubview(pageContainer)
+        pageContainer.heightAnchor.constraint(equalToConstant: 372).isActive = true
+
+        // 页脚
+        let spacer = NSView()
+        let footer = NSStackView(views: [signaturePill, spacer, backButton, nextButton])
+        footer.orientation = .horizontal
+        footer.spacing = 8
+        footer.alignment = .centerY
+        footer.widthAnchor.constraint(equalToConstant: 460).isActive = true
+        signaturePill.font = .systemFont(ofSize: 11)
+        signaturePill.wantsLayer = true
+        signaturePill.layer?.cornerRadius = 8
+        backButton.target = self
+        backButton.action = #selector(goBack)
+        backButton.bezelStyle = .rounded
+        nextButton.target = self
+        nextButton.action = #selector(goNext)
+        nextButton.bezelStyle = .rounded
+        content.addArrangedSubview(footer)
+        return content
+    }
+
+    // MARK: - 页面
+
+    private func pageTitle(_ text: String) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 19, weight: .semibold)
+        return label
+    }
+
+    private func buildLocationPage() -> NSView {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 10
+        stack.addArrangedSubview(pageTitle("选择安装位置"))
+        let hint = NSTextField(wrappingLabelWithString:
+            "系统级安装需要管理员授权；两种方式都会写入你的配置并注册输入法。")
+        hint.font = .systemFont(ofSize: 12)
+        hint.textColor = .secondaryLabelColor
+        hint.preferredMaxLayoutWidth = 460
+        stack.addArrangedSubview(hint)
+        stack.setCustomSpacing(16, after: hint)
+        userCard.widthAnchor.constraint(equalToConstant: 460).isActive = true
+        systemCard.widthAnchor.constraint(equalToConstant: 460).isActive = true
+        stack.addArrangedSubview(userCard)
+        stack.addArrangedSubview(systemCard)
+        return stack
+    }
+
+    private func buildConfigPage() -> NSView {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 10
+        stack.addArrangedSubview(pageTitle("输入与隐私"))
+
         modePopup.addItems(withTitles: modeOptions.map { $0.1 })
         modePopup.selectItem(at: 0)
-        let modeRow = NSStackView(views: [NSTextField(labelWithString: "默认输入模式："), modePopup])
-        modeRow.orientation = .horizontal
-        modeRow.spacing = 8
-        root.addArrangedSubview(modeRow)
-
         traditionalCheck.state = .off
         clipboardCheck.state = .off
         petCheck.state = .off
         appMemoryCheck.state = .on
         statsCheck.state = .on
         halfPunctCheck.state = .off
+
+        let form = NSStackView()
+        form.orientation = .vertical
+        form.alignment = .leading
+        form.spacing = 0
+        form.addArrangedSubview(formRow("默认输入模式", modePopup))
         for check in [traditionalCheck, clipboardCheck, petCheck, appMemoryCheck, statsCheck, halfPunctCheck] {
-            root.addArrangedSubview(check)
+            form.addArrangedSubview(formRow(nil, check))
         }
+        stack.addArrangedSubview(card(form))
+        return stack
+    }
 
-        root.addArrangedSubview(section("③ 签名诊断"))
-        sigLabel.font = .systemFont(ofSize: 11)
-        sigLabel.preferredMaxLayoutWidth = 600
-        root.addArrangedSubview(sigLabel)
+    private func buildInstallPage() -> NSView {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 10
+        stack.addArrangedSubview(pageTitle("安装与验证"))
 
-        root.addArrangedSubview(section("④ 安装与收录检测"))
-        let buttons = NSStackView()
-        buttons.orientation = .horizontal
-        buttons.spacing = 8
-        buttons.addArrangedSubview(button("保存配置", #selector(saveConfig)))
-        buttons.addArrangedSubview(button("安装 InputFlow", #selector(install)))
-        buttons.addArrangedSubview(button("检测收录状态", #selector(checkRegistration)))
-        buttons.addArrangedSubview(button("打开键盘设置", #selector(openKeyboardSettings)))
-        root.addArrangedSubview(buttons)
+        summaryLabel.font = .systemFont(ofSize: 12)
+        summaryLabel.textColor = .secondaryLabelColor
+        summaryLabel.preferredMaxLayoutWidth = 440
+        summaryLabel.stringValue = summaryText()
+        stack.addArrangedSubview(card(summaryLabel))
+
+        let installRow = NSStackView()
+        installRow.orientation = .horizontal
+        installRow.spacing = 8
+        let installButton = NSButton(title: "开始安装", target: self, action: #selector(install))
+        installButton.bezelStyle = .rounded
+        installButton.bezelColor = accent
+        self.installButton = installButton
+        let detectButton = NSButton(title: "检测收录", target: self, action: #selector(checkRegistration))
+        detectButton.bezelStyle = .rounded
+        let settingsButton = NSButton(title: "打开键盘设置", target: self, action: #selector(openKeyboardSettings))
+        settingsButton.bezelStyle = .rounded
+        installRow.addArrangedSubview(installButton)
+        installRow.addArrangedSubview(detectButton)
+        installRow.addArrangedSubview(settingsButton)
+        stack.addArrangedSubview(installRow)
+
+        detectPill.font = .systemFont(ofSize: 11, weight: .medium)
+        detectPill.wantsLayer = true
+        detectPill.layer?.cornerRadius = 8
+        detectPill.alignment = .center
+        detectPill.widthAnchor.constraint(equalToConstant: 220).isActive = true
+        stack.addArrangedSubview(detectPill)
+        setDetectPill("未检测", color: .tertiaryLabelColor)
+
+        let logScroll = NSScrollView()
+        logScroll.hasVerticalScroller = true
+        logScroll.borderType = .noBorder
+        logScroll.drawsBackground = false
+        statusText.isEditable = false
+        statusText.drawsBackground = false
+        statusText.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        statusText.textContainerInset = NSSize(width: 10, height: 10)
+        statusText.string = "点击「开始安装」后，这里会显示进度与结果。\n"
+        logScroll.documentView = statusText
+        logScroll.widthAnchor.constraint(equalToConstant: 452).isActive = true
+        logScroll.heightAnchor.constraint(equalToConstant: 150).isActive = true
+        stack.addArrangedSubview(card(logScroll))
 
         let uninstallRow = NSStackView()
         uninstallRow.orientation = .horizontal
         uninstallRow.spacing = 8
-        uninstallRow.addArrangedSubview(button("卸载 InputFlow", #selector(uninstall)))
-        let purgeCheck = NSButton(checkboxWithTitle: "同时删除用户数据与钥匙串密钥", target: nil, action: nil)
-        purgeCheck.identifier = NSUserInterfaceItemIdentifier("purge")
+        let uninstallButton = NSButton(title: "卸载 InputFlow", target: self, action: #selector(uninstall))
+        uninstallButton.bezelStyle = .rounded
+        uninstallRow.addArrangedSubview(uninstallButton)
         uninstallRow.addArrangedSubview(purgeCheck)
-        root.addArrangedSubview(uninstallRow)
+        stack.addArrangedSubview(uninstallRow)
+        return stack
+    }
 
-        let scroll = NSScrollView()
-        scroll.hasVerticalScroller = true
-        scroll.borderType = .bezelBorder
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-        scroll.documentView = statusText
-        statusText.isEditable = false
-        statusText.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-        statusText.string = ""
-        scroll.heightAnchor.constraint(equalToConstant: 150).isActive = true
-        scroll.widthAnchor.constraint(equalToConstant: 612).isActive = true
-        root.addArrangedSubview(scroll)
+    // MARK: - 小组件
 
-        window.contentView = root
+    private func formRow(_ title: String?, _ control: NSView) -> NSView {
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.spacing = 8
+        row.alignment = .centerY
+        row.edgeInsets = NSEdgeInsets(top: 6, left: 12, bottom: 6, right: 12)
+        let label = NSTextField(labelWithString: title ?? "")
+        label.font = .systemFont(ofSize: 13)
+        label.widthAnchor.constraint(equalToConstant: 150).isActive = true
+        row.addArrangedSubview(label)
+        row.addArrangedSubview(control)
+        row.widthAnchor.constraint(equalToConstant: 436).isActive = true
+        return row
+    }
+
+    private func card(_ content: NSView) -> NSView {
+        let box = NSView()
+        box.wantsLayer = true
+        box.layer?.cornerRadius = 12
+        box.layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.6).cgColor
+        box.layer?.borderWidth = 1
+        box.layer?.borderColor = NSColor.separatorColor.cgColor
+        box.translatesAutoresizingMaskIntoConstraints = false
+        content.translatesAutoresizingMaskIntoConstraints = false
+        box.addSubview(content)
         NSLayoutConstraint.activate([
-            root.leadingAnchor.constraint(equalTo: window.contentView!.leadingAnchor),
-            root.trailingAnchor.constraint(equalTo: window.contentView!.trailingAnchor),
-            root.topAnchor.constraint(equalTo: window.contentView!.topAnchor),
-            root.bottomAnchor.constraint(lessThanOrEqualTo: window.contentView!.bottomAnchor),
+            content.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 4),
+            content.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -4),
+            content.topAnchor.constraint(equalTo: box.topAnchor, constant: 4),
+            content.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -4),
         ])
-
-        refreshSignatureDiagnosis()
-        checkRegistration()
+        box.widthAnchor.constraint(equalToConstant: 460).isActive = true
+        return box
     }
 
-    private func section(_ text: String) -> NSTextField {
-        let label = NSTextField(labelWithString: text)
-        label.font = .systemFont(ofSize: 13, weight: .semibold)
-        return label
+    private func switchStep(_ index: Int) {
+        step = index
+        for (i, page) in pages.enumerated() {
+            page.isHidden = i != index
+        }
+        for (i, badge) in stepBadges.enumerated() {
+            let active = i <= index
+            badge.textColor = active ? .white : .secondaryLabelColor
+            badge.layer?.backgroundColor = (active ? accent : NSColor.quaternaryLabelColor).cgColor
+            stepTitles[i].textColor = i == index ? .labelColor : .secondaryLabelColor
+            stepTitles[i].font = .systemFont(ofSize: 13, weight: i == index ? .semibold : .medium)
+        }
+        backButton.isHidden = index == 0
+        nextButton.title = index == 2 ? "完成" : "下一步"
+        nextButton.keyEquivalent = "\r"
+        if index == 2 {
+            summaryLabel.stringValue = summaryText()
+        }
     }
 
-    private func button(_ title: String, _ action: Selector) -> NSButton {
-        let b = NSButton(title: title, target: self, action: action)
-        b.bezelStyle = .rounded
-        return b
+    @objc private func goBack() {
+        switchStep(max(0, step - 1))
     }
 
-    // MARK: - 路径
-
-    private var sourceApp: String {
-        Bundle.main.resourcePath.map { $0 + "/InputFlow.app" } ?? ""
+    @objc private func goNext() {
+        if step == 2 {
+            window?.close()
+            NSApp.terminate(nil)
+            return
+        }
+        if step == 1 {
+            saveConfig()
+        }
+        switchStep(step + 1)
     }
 
-    private var sourceDict: String {
-        Bundle.main.resourcePath.map { $0 + "/base.ifd" } ?? ""
+    private func selectLocation(system: Bool) {
+        installSystemWide = system
+        userCard.setSelected(!system)
+        systemCard.setSelected(system)
+        summaryLabel.stringValue = summaryText()
     }
 
-    private var userDataDir: String {
-        NSHomeDirectory() + "/Library/Application Support/InputFlow"
+    private func summaryText() -> String {
+        let location = installSystemWide ? "/Library/Input Methods（所有用户）" : "~/Library/Input Methods（当前用户）"
+        let mode = modeOptions[modePopup.indexOfSelectedItem].1
+        return "安装位置：\(location)\n默认模式：\(mode) · 繁体：\(onOff(traditionalCheck)) · "
+            + "剪切板：\(onOff(clipboardCheck)) · 桌宠：\(onOff(petCheck))"
+    }
+
+    private func onOff(_ button: NSButton) -> String {
+        button.state == .on ? "开" : "关"
     }
 
     // MARK: - 配置
@@ -193,37 +428,49 @@ final class InstallerWindowController: NSWindowController {
         defaults?.set(statsCheck.state == .on, forKey: "InputFlowStatsEnabled")
         defaults?.set(halfPunctCheck.state == .on, forKey: "InputFlowForceHalfPunctuation")
         defaults?.synchronize()
-        log("已保存配置：模式=\(mode)，繁体=\(onOff(traditionalCheck))，剪切板=\(onOff(clipboardCheck))，桌宠=\(onOff(petCheck))")
-    }
-
-    private func onOff(_ button: NSButton) -> String {
-        button.state == .on ? "开" : "关"
+        log("已保存配置：模式=\(mode) · 繁体=\(onOff(traditionalCheck)) · 剪切板=\(onOff(clipboardCheck)) · 桌宠=\(onOff(petCheck))")
     }
 
     // MARK: - 签名诊断
 
-    private func refreshSignatureDiagnosis() {
+    private var sourceApp: String {
+        Bundle.main.resourcePath.map { $0 + "/InputFlow.app" } ?? ""
+    }
+
+    private var sourceDict: String {
+        Bundle.main.resourcePath.map { $0 + "/base.ifd" } ?? ""
+    }
+
+    private var userDataDir: String {
+        NSHomeDirectory() + "/Library/Application Support/InputFlow"
+    }
+
+    private func refreshSignature() {
         let info = runShell("/usr/bin/codesign -dv --verbose=4 \"\(sourceApp)\" 2>&1")
         let adhoc = info.contains("Signature=adhoc")
-        let team = info.split(separator: "\n").first(where: { $0.hasPrefix("TeamIdentifier=") }).map(String.init) ?? "TeamIdentifier=?"
-        var text = "当前安装包内 InputFlow.app 的签名：\(adhoc ? "ad-hoc（无开发者身份）" : "有效签名") · \(team)\n"
         if adhoc {
-            text += "⚠️ macOS 26 及以上会拒绝收录 ad-hoc 签名的第三方输入法（实测：同目录下 Developer ID 签名的鼠须管可即时收录，ad-hoc 版不收录）。\n"
-            text += "安装流程仍会执行，但系统输入法列表里不会出现 InputFlow；需要 Developer ID 签名（并公证）后重新打包。"
-            sigLabel.textColor = .systemOrange
+            signaturePill.stringValue = "  签名：ad-hoc · 系统不会收录，需 Developer ID  "
+            signaturePill.textColor = .systemOrange
+            signaturePill.layer?.backgroundColor = NSColor.systemOrange.withAlphaComponent(0.14).cgColor
         } else {
-            text += "签名有效，安装后应能被系统收录。"
-            sigLabel.textColor = .systemGreen
+            signaturePill.stringValue = "  签名：有效 · 安装后应可被系统收录  "
+            signaturePill.textColor = .systemGreen
+            signaturePill.layer?.backgroundColor = NSColor.systemGreen.withAlphaComponent(0.14).cgColor
         }
-        sigLabel.stringValue = text
+    }
+
+    private func setDetectPill(_ text: String, color: NSColor) {
+        detectPill.stringValue = "  收录状态：\(text)  "
+        detectPill.textColor = color
+        detectPill.layer?.backgroundColor = color.withAlphaComponent(0.14).cgColor
     }
 
     // MARK: - 安装
 
     @objc private func install() {
         saveConfig()
-        if locationPopup.indexOfSelectedItem == 1 {
-            installSystemWide()
+        if installSystemWide {
+            installSystem()
         } else {
             installForUser()
         }
@@ -232,8 +479,8 @@ final class InstallerWindowController: NSWindowController {
     private func installForUser() {
         let fm = FileManager.default
         do {
+            let dest = userAppPath
             try fm.createDirectory(atPath: userDataDir, withIntermediateDirectories: true)
-            let dest = NSHomeDirectory() + "/Library/Input Methods/InputFlow.app"
             try? fm.removeItem(atPath: dest)
             try fm.createDirectory(atPath: NSHomeDirectory() + "/Library/Input Methods", withIntermediateDirectories: true)
             try fm.copyItem(atPath: sourceApp, toPath: dest)
@@ -246,6 +493,7 @@ final class InstallerWindowController: NSWindowController {
             runShell("\"\(dest)/Contents/MacOS/InputFlow\" --register-input-source")
             runShell("\"\(dest)/Contents/MacOS/InputFlow\" --enable-input-source")
             runShell("/usr/bin/killall TextInputMenuAgent imklaunchagent")
+            hasInstalled = true
             log("✅ 已安装到 \(dest)")
             schedulePoll()
         } catch {
@@ -253,7 +501,7 @@ final class InstallerWindowController: NSWindowController {
         }
     }
 
-    private func installSystemWide() {
+    private func installSystem() {
         let user = NSUserName()
         let script = """
         #!/bin/bash
@@ -280,14 +528,15 @@ final class InstallerWindowController: NSWindowController {
             log("❌ 无法写入安装脚本：\(error.localizedDescription)")
             return
         }
-        let apple = "do shell script \"/bin/bash \(path)\" with administrator privileges"
         var error: NSDictionary?
-        NSAppleScript(source: apple)?.executeAndReturnError(&error)
+        NSAppleScript(source: "do shell script \"/bin/bash \(path)\" with administrator privileges")?
+            .executeAndReturnError(&error)
         if let error {
             log("❌ 系统级安装失败或已取消：\(error[NSAppleScript.errorMessage] ?? error)")
             return
         }
         runShell("/usr/bin/killall TextInputMenuAgent imklaunchagent")
+        hasInstalled = true
         log("✅ 已安装到 \(systemAppPath)")
         schedulePoll()
     }
@@ -295,28 +544,32 @@ final class InstallerWindowController: NSWindowController {
     // MARK: - 收录检测
 
     @objc private func checkRegistration() {
-        let paths = [userAppPath, systemAppPath]
-        let installed = paths.filter { FileManager.default.fileExists(atPath: $0) }
+        let installed = [userAppPath, systemAppPath].filter { FileManager.default.fileExists(atPath: $0) }
         log("安装状态：\(installed.isEmpty ? "未安装" : installed.joined(separator: "、"))")
         if isRegistered() {
             log("✅ 系统已收录 InputFlow（可在 系统设置 → 键盘 → 文字输入 → 输入法 中添加）")
+            setDetectPill("已收录", color: .systemGreen)
             progressTimer?.invalidate()
         } else {
-            log("⏳ 系统暂未收录 InputFlow。若签名诊断显示 ad-hoc，这是预期结果；否则可注销重登后再试。")
+            log("⏳ 系统暂未收录。若签名为 ad-hoc，这是预期结果；有效签名可注销重登后再试。")
+            setDetectPill("未收录", color: .systemOrange)
         }
     }
 
     private func schedulePoll() {
         progressTimer?.invalidate()
         pollCount = 0
+        setDetectPill("检测中…", color: .systemBlue)
         let timer = Timer(timeInterval: 1.5, repeats: true) { [weak self] _ in
             guard let self else { return }
             self.pollCount += 1
             if self.isRegistered() {
                 self.log("✅ 系统已收录 InputFlow")
+                self.setDetectPill("已收录", color: .systemGreen)
                 self.progressTimer?.invalidate()
             } else if self.pollCount >= 20 {
                 self.log("⏳ 等待超时：系统未收录（ad-hoc 签名被拒属预期；有效签名请注销重登）")
+                self.setDetectPill("未收录", color: .systemOrange)
                 self.progressTimer?.invalidate()
             }
         }
@@ -341,14 +594,12 @@ final class InstallerWindowController: NSWindowController {
     // MARK: - 卸载
 
     @objc private func uninstall() {
-        let purge = findPurgeCheck()?.state == .on
-
+        let purge = purgeCheck.state == .on
         runShell("/usr/bin/killall InputFlow")
         for path in [userAppPath, systemAppPath] where FileManager.default.fileExists(atPath: path) {
             if path.hasPrefix("/Library") {
-                let script = "#!/bin/bash\nrm -rf \"\(path)\"\n"
                 let tmp = NSTemporaryDirectory() + "inputflow-uninstall.sh"
-                try? script.write(toFile: tmp, atomically: true, encoding: .utf8)
+                try? "#!/bin/bash\nrm -rf \"\(path)\"\n".write(toFile: tmp, atomically: true, encoding: .utf8)
                 var error: NSDictionary?
                 NSAppleScript(source: "do shell script \"/bin/bash \(tmp)\" with administrator privileges")?
                     .executeAndReturnError(&error)
@@ -359,26 +610,13 @@ final class InstallerWindowController: NSWindowController {
             log("已移除 \(path)")
         }
         if purge {
-            let defaults = UserDefaults(suiteName: imeBundleID)
-            defaults?.removePersistentDomain(forName: imeBundleID)
+            UserDefaults(suiteName: imeBundleID)?.removePersistentDomain(forName: imeBundleID)
             runShell("/usr/bin/security delete-generic-password -s \(imeBundleID) -a userdata-key")
             try? FileManager.default.removeItem(atPath: userDataDir)
             log("已删除用户数据与钥匙串密钥")
         }
+        setDetectPill("未检测", color: .tertiaryLabelColor)
         checkRegistration()
-    }
-
-    private func findPurgeCheck() -> NSButton? {
-        func search(_ view: NSView) -> NSButton? {
-            if let check = view as? NSButton, check.identifier?.rawValue == "purge" {
-                return check
-            }
-            for sub in view.subviews {
-                if let found = search(sub) { return found }
-            }
-            return nil
-        }
-        return window?.contentView.flatMap(search)
     }
 
     // MARK: - 其他
@@ -386,6 +624,18 @@ final class InstallerWindowController: NSWindowController {
     @objc private func openKeyboardSettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension") {
             NSWorkspace.shared.open(url)
+        }
+    }
+
+    /// 离屏快照（`InputFlowInstaller --snapshot <前缀>`），用于开发时检查界面。
+    func snapshotStep(_ index: Int, to path: String) {
+        switchStep(index)
+        guard let view = window?.contentView else { return }
+        view.layoutSubtreeIfNeeded()
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        if let data = rep.representation(using: .png, properties: [:]) {
+            try? data.write(to: URL(fileURLWithPath: path))
         }
     }
 
@@ -416,15 +666,78 @@ final class InstallerWindowController: NSWindowController {
     }
 }
 
+/// 可点选的安装位置卡片。
+final class OptionCard: NSView {
+    var onSelect: (() -> Void)?
+    private let titleLabel: NSTextField
+    private let subtitleLabel: NSTextField
+    private var selected = false
+    private let accent = NSColor.controlAccentColor
+
+    init(title: String, subtitle: String) {
+        titleLabel = NSTextField(labelWithString: title)
+        subtitleLabel = NSTextField(labelWithString: subtitle)
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 12
+        layer?.borderWidth = 1.5
+        titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
+        subtitleLabel.font = .systemFont(ofSize: 11)
+        subtitleLabel.textColor = .secondaryLabelColor
+        let stack = NSStackView(views: [titleLabel, subtitleLabel])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 2
+        stack.edgeInsets = NSEdgeInsets(top: 10, left: 14, bottom: 10, right: 14)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        updateAppearance()
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) 未实现")
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        onSelect?()
+    }
+
+    func setSelected(_ on: Bool) {
+        selected = on
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        layer?.borderColor = (selected ? accent : NSColor.separatorColor).cgColor
+        layer?.backgroundColor = (selected ? accent.withAlphaComponent(0.10) : NSColor.controlBackgroundColor.withAlphaComponent(0.5)).cgColor
+    }
+}
+
 @main
 struct InstallerApp {
     static func main() {
-        _ = NSApplication.shared
         let app = NSApplication.shared
+        let args = CommandLine.arguments
+        if args.count > 2, args[1] == "--snapshot" {
+            app.setActivationPolicy(.accessory)
+            let controller = InstallerWindowController()
+            controller.showWindow(nil)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.8))
+            for step in 0..<3 {
+                controller.snapshotStep(step, to: "\(args[2])-\(step).png")
+            }
+            exit(0)
+        }
         app.setActivationPolicy(.regular)
         let controller = InstallerWindowController()
         controller.showWindow(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        app.activate(ignoringOtherApps: true)
         app.run()
     }
 }
