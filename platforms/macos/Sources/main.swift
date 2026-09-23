@@ -216,7 +216,12 @@ if installArgs.count > 1 {
         PetWindowController.activePackId = packId
         PetWindowController.setEnabled(true)
         let out = installArgs.count > 3 ? installArgs[3] : "/tmp/pet-demo.png"
-        RunLoop.main.run(until: Date().addingTimeInterval(5.0))
+        let state = installArgs.count > 4 ? installArgs[4] : ""
+        RunLoop.main.run(until: Date().addingTimeInterval(state.isEmpty ? 5.0 : 3.5))
+        if !state.isEmpty {
+            PetWindowController.shared.debugApplyState(state)
+            RunLoop.main.run(until: Date().addingTimeInterval(1.2))
+        }
         PetWindowController.shared.snapshotAsync(to: out) { ok in
             print("pack=\(packId.isEmpty ? "builtin" : packId) -> \(out) ok=\(ok)")
             exit(0)

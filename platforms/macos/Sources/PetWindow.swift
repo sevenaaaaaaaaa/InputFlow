@@ -94,6 +94,9 @@ final class PetWindowController {
     private var unsupportedRenderer: String?
     private var vrmView: VRMPetView?
     private var gazeTick = 0
+    /// 最后一次输入/互动时间：长时间无输入就让桌宠发呆睡着
+    private var lastActivity = Date()
+    private var greetedPeriod = ""
     private var particleEmitter: CAEmitterLayer?
     private var resetWorkItem: DispatchWorkItem?
     private var modeButton: PetQuickButton?
@@ -251,6 +254,8 @@ final class PetWindowController {
         startMouseTrackingIfNeeded()
         startAnimTimerIfNeeded()
         react(.idle)
+        vrmView?.setMood(moodLevel())
+        greetedPeriod = ""
         if let renderer = unsupportedRenderer {
             showToast("该形象包需要 \(renderer.uppercased()) 渲染器（尚未接入，见 ADR-0007）", duration: 5)
         }
@@ -273,6 +278,36 @@ final class PetWindowController {
         }
     }
 
+    /// 今天的输入量 → 心情等级 0..3（仅本机统计，不上传）。
+    private func moodLevel() -> Int {
+        let chars = PetStats.shared.today.chars
+        switch chars {
+        case ..<200: return 0
+        case ..<1_000: return 1
+        case ..<5_000: return 2
+        default: return 3
+        }
+    }
+
+    /// 按时间段问候（每天每段只问候一次；VRM 走页面台词，其他渲染器用气泡）。
+    private func greetIfNeeded() {
+        let hour = Calendar.current.component(.hour, from: Date())
+        let period = hour < 11 ? "morning" : (hour < 18 ? "afternoon" : "evening")
+        guard period != greetedPeriod else { return }
+        greetedPeriod = period
+        if let vrmView {
+            vrmView.greet(period)
+        } else {
+            let text = period == "morning" ? "早上好呀" : (period == "afternoon" ? "下午好" : "晚上好")
+            showToast(text, duration: 3.5)
+        }
+    }
+
+    /// 摸头/上屏的庆祝特效（供 VRM 页面上报 hearts 时调用）。
+    func celebrate() {
+        emitSparks()
+    }
+
     /// 把桌宠移到「输入所在屏幕」：保持相对位置，跟随光标/输入焦点跨屏。
     func moveToScreen(containing point: NSPoint) {
         guard let panel, panel.isVisible else { return }
@@ -291,6 +326,19 @@ final class PetWindowController {
         origin.x = min(max(origin.x, tv.minX + 8), tv.maxX - panel.frame.width - 8)
         origin.y = min(max(origin.y, tv.minY + 8), tv.maxY - panel.frame.height - 8)
         panel.setFrameOrigin(origin)
+    }
+
+    /// 开发用：强制进入某个状态（便于截图核对姿态）。
+    func debugApplyState(_ name: String) {
+        lastActivity = Date()
+        switch name {
+        case "typing": react(.composing)
+        case "commit": react(.commit)
+        case "petted", "happy": vrmView?.petted()
+        case "sleepy": vrmView?.setSleepy(true)
+        case "drag": vrmView?.setDragging(true)
+        default: react(.idle)
+        }
     }
 
     /// 开发用：抓取 VRM 画面到 PNG。
@@ -372,6 +420,11 @@ final class PetWindowController {
         guard panel?.isVisible == true else { return }
         // VRM：状态给 JS 处理；这里只按鼠标更新注视（约 20fps 节流）
         if let vrmView {
+            // 90 秒无输入 → 发呆打盹；有输入时 react() 会唤醒
+            if Date().timeIntervalSince(lastActivity) > 90 {
+                vrmView.setSleepy(true)
+            }
+            greetIfNeeded()
             gazeTick += 1
             if gazeTick % 3 == 0, let panel {
                 let mouse = NSEvent.mouseLocation
@@ -417,6 +470,10 @@ final class PetWindowController {
     func react(_ state: State) {
         guard let panel, panel.isVisible else { return }
         resetWorkItem?.cancel()
+        if state == .composing || state == .commit {
+            lastActivity = Date()
+            vrmView?.setSleepy(false)
+        }
         // 形象包：切状态、帧归零、按状态换帧率
         if let pack, let imageView {
             currentState = state
@@ -497,7 +554,7 @@ final class PetWindowController {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
-        panel.isMovableByWindowBackground = true
+        panel.isMovableByWindowBackground = false   // 拖动由 PetBackgroundView 手动处理（需要上报状态）
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
@@ -509,6 +566,10 @@ final class PetWindowController {
         }
         background.onRightClick = { [weak self] event in
             self?.presentPetMenu(event)
+        }
+        background.onDragChanged = { [weak self] dragging in
+            self?.lastActivity = Date()
+            self?.vrmView?.setDragging(dragging)
         }
 
         if let pack, pack.renderer == "vrm" {
@@ -630,16 +691,26 @@ final class PetWindowController {
 
     // MARK: - 互动（悬停 / 点按 / 右键）
 
-    /// 左键点按身体 = 中英切换（与左 Shift 同效）。
+    /// 左键点按身体 = 摸头：桌宠开心弹跳 + 台词；中英切换改由快捷圆钮/右键菜单。
     private func tapBody() {
         pulse(scale: 1.12, duration: 0.2)
-        NotificationCenter.default.post(name: .petToggleLanguage, object: nil)
+        lastActivity = Date()
+        if let vrmView {
+            vrmView.petted()
+        } else {
+            showToast(pickPetLine(["嘿嘿～", "好舒服", "再摸一下嘛", "我在呢"]), duration: 2.5)
+        }
+    }
+
+    private func pickPetLine(_ lines: [String]) -> String {
+        lines.randomElement() ?? lines[0]
     }
 
     /// 悬停 = 被摸头：轻晃 + 显示吸附按钮 + 提示气泡（不刷屏，5 秒内只提示一次）。
     private func hoverBody(_ hovering: Bool) {
         modeButton?.isHidden = !hovering
         statsButton?.isHidden = !hovering
+        vrmView?.setHover(hovering)
         guard hovering else { return }
         pulse(scale: 1.06, duration: 0.16)
         let now = Date().timeIntervalSince1970
@@ -911,9 +982,13 @@ private final class PetBackgroundView: NSView {
     var onClick: (() -> Void)?
     var onHover: ((Bool) -> Void)?
     var onRightClick: ((NSEvent) -> Void)?
+    /// 拖动状态变化（true = 正在被拎起来）
+    var onDragChanged: ((Bool) -> Void)?
     private var trackingArea: NSTrackingArea?
     private var downLocation: NSPoint = .zero
     private var downAt: TimeInterval = 0
+    private var grabOffset: NSPoint = .zero
+    private var dragging = false
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -940,16 +1015,40 @@ private final class PetBackgroundView: NSView {
     override func mouseDown(with event: NSEvent) {
         downLocation = NSEvent.mouseLocation
         downAt = ProcessInfo.processInfo.systemUptime
+        dragging = false
+        if let origin = window?.frame.origin {
+            grabOffset = NSPoint(
+                x: downLocation.x - origin.x,
+                y: downLocation.y - origin.y
+            )
+        }
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        let current = NSEvent.mouseLocation
+        if !dragging,
+           hypot(current.x - downLocation.x, current.y - downLocation.y) > 4 {
+            dragging = true
+            onDragChanged?(true)
+        }
+        guard dragging, let window else { return }
+        window.setFrameOrigin(NSPoint(
+            x: current.x - grabOffset.x,
+            y: current.y - grabOffset.y
+        ))
     }
 
     override func mouseUp(with event: NSEvent) {
-        // 只有「短按且几乎没移动」才算点按：避免拖桌宠时误触中英切换
+        // 只有「短按且几乎没移动」才算点按：避免拖动桌宠被当成摸头
         let moved = hypot(
             NSEvent.mouseLocation.x - downLocation.x,
             NSEvent.mouseLocation.y - downLocation.y
         )
         let held = ProcessInfo.processInfo.systemUptime - downAt
-        if moved < 3, held < 0.35 {
+        if dragging {
+            dragging = false
+            onDragChanged?(false)
+        } else if moved < 3, held < 0.35 {
             onClick?()
         }
     }

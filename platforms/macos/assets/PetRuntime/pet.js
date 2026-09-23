@@ -150,29 +150,121 @@ function applyBasePose() {
   if (rl) rl.rotation.z = 0.22;
 }
 
+// ───────────────── 姿态库（状态 + 随机小动作） ─────────────────
+
+let idleAction = null;
+let idleUntil = 0;
+let nextIdleAt = 2.5;
+let nextSayAt = 14;
+let moodLevel = 0;       // 0..3，来自本机输入统计（不上传）
+let pettedUntil = 0;
+let hovered = false;
+let dragging = false;
+let sleepy = false;
+
+const LINES = {
+  morning: ['早上好呀', '今天也要加油哦'],
+  afternoon: ['下午好', '摸会儿鱼也没关系'],
+  evening: ['晚上好', '记得早点休息'],
+  petted: ['嘿嘿～', '好舒服', '再摸一下嘛', '我在呢'],
+  idle: ['你打字真快', '看我看我', '这段写得不错', '要不要喝口水'],
+  sleepy: ['有点困了…', '呼…'],
+  wake: ['我醒了！', '继续吧'],
+  level: ['今天打了好多字呀', '继续保持！'],
+};
+function pick(list) { return list[Math.floor(Math.random() * list.length)]; }
+function say(list) {
+  const now = performance.now();
+  if (now < nextSayAt * 1000) return;
+  nextSayAt = now / 1000 + 22 + Math.random() * 25;
+  post({ say: pick(list) });
+}
+
+function node(name) {
+  return vrm && vrm.humanoid ? vrm.humanoid.getNormalizedBoneNode(name) : null;
+}
+
+function resetPose() {
+  const chest = node('chest');
+  const head = node('head');
+  const hip = node('hips');
+  if (chest) chest.rotation.set(0, 0, 0);
+  if (head) head.rotation.set(0, 0, 0);
+  if (hip) hip.rotation.set(0, 0, 0);
+}
+
 function poseIdle(t) {
-  const humanoid = vrm.humanoid;
-  const chest = humanoid.getNormalizedBoneNode('chest');
-  const head = humanoid.getNormalizedBoneNode('head');
-  if (chest) chest.rotation.x = Math.sin(t * 1.15) * 0.022;      // 呼吸
-  if (head) head.rotation.y = Math.sin(t * 0.55) * 0.05;         // 轻微左右看
-  vrm.scene.position.y = Math.sin(t * 1.6) * 0.004;              // 整体浮动
+  const chest = node('chest');
+  const head = node('head');
+  if (chest) chest.rotation.x = Math.sin(t * 1.15) * 0.022;        // 呼吸
+  if (head) head.rotation.y = Math.sin(t * 0.55) * 0.05;           // 轻微左右看
+  vrm.scene.position.y = Math.sin(t * 1.6) * 0.004;
+  // 随机小动作
+  if (idleAction === 'lookAround' && head) {
+    head.rotation.y = Math.sin(t * 3.2) * 0.42;
+  } else if (idleAction === 'tilt' && head) {
+    head.rotation.z = Math.sin(t * 2.4) * 0.22;
+  } else if (idleAction === 'hop') {
+    vrm.scene.position.y = Math.abs(Math.sin(t * 5.5)) * 0.05;
+  } else if (idleAction === 'stretch') {
+    const l = node('leftUpperArm');
+    const r = node('rightUpperArm');
+    const k = Math.sin(Math.min(1, t / 1.2) * Math.PI);
+    if (l) l.rotation.z = -1.16 - k * 0.7;
+    if (r) r.rotation.z = 1.16 + k * 0.7;
+  } else if (idleAction === 'wave') {
+    const r = node('rightUpperArm');
+    const rl = node('rightLowerArm');
+    if (r) r.rotation.z = 1.16 - 0.9;
+    if (rl) rl.rotation.z = 0.22 + Math.sin(t * 9) * 0.5;
+  }
 }
 
 function poseTyping(t) {
-  const humanoid = vrm.humanoid;
-  const chest = humanoid.getNormalizedBoneNode('chest');
-  const head = humanoid.getNormalizedBoneNode('head');
-  if (chest) chest.rotation.x = 0.06 + Math.sin(t * 9) * 0.012;  // 前倾 + 跟手颤动
+  const chest = node('chest');
+  const head = node('head');
+  if (chest) chest.rotation.x = 0.06 + Math.sin(t * 9) * 0.012;    // 前倾 + 跟手颤动
   if (head) head.rotation.x = 0.05;
   vrm.scene.position.y = Math.abs(Math.sin(t * 9)) * 0.006;
 }
 
 function poseCommit(t) {
-  const humanoid = vrm.humanoid;
-  const chest = humanoid.getNormalizedBoneNode('chest');
+  const chest = node('chest');
   if (chest) chest.rotation.x = -0.05;
-  vrm.scene.position.y = Math.abs(Math.sin(t * 3.2)) * 0.05;     // 开心弹跳
+  vrm.scene.position.y = Math.abs(Math.sin(t * 3.2)) * 0.05;       // 开心弹跳
+}
+
+function posePetted(t) {
+  const head = node('head');
+  const chest = node('chest');
+  if (head) { head.rotation.z = Math.sin(t * 6) * 0.12; head.rotation.x = -0.08; }
+  if (chest) chest.rotation.x = -0.04;
+  vrm.scene.position.y = Math.abs(Math.sin(t * 7)) * 0.03;
+}
+
+function poseSleepy(t) {
+  const chest = node('chest');
+  const head = node('head');
+  if (chest) chest.rotation.x = 0.05 + Math.sin(t * 0.8) * 0.02;
+  if (head) { head.rotation.x = 0.28; head.rotation.z = 0.08; }
+  vrm.scene.position.y = Math.sin(t * 0.9) * 0.008;
+  setExpression('blink', 1);
+}
+
+function poseDrag(t) {
+  const l = node('leftUpperArm');
+  const r = node('rightUpperArm');
+  const ll = node('leftLowerArm');
+  const rl = node('rightLowerArm');
+  const hips = node('hips');
+  const head = node('head');
+  if (l) l.rotation.z = -2.85;      // 双臂高举（被拎起来）
+  if (r) r.rotation.z = 2.85;
+  if (ll) ll.rotation.z = -0.5;
+  if (rl) rl.rotation.z = 0.5;
+  if (hips) hips.rotation.z = Math.sin(t * 5) * 0.12;
+  if (head) { head.rotation.x = -0.1; head.rotation.z = Math.sin(t * 5) * 0.1; }
+  vrm.scene.position.y = Math.abs(Math.sin(t * 5)) * 0.02;         // 被拎起来晃动
 }
 
 function updateGaze() {
@@ -202,10 +294,32 @@ function step() {
   const dt = Math.min(clock.getDelta(), 0.05);
   elapsed += dt;
   if (vrm) {
-    if (state === 'typing') poseTyping(elapsed);
-    else if (state === 'commit') poseCommit(elapsed);
-    else poseIdle(elapsed);
-    updateBlink(dt);
+    resetPose();
+    const nowMs = performance.now();
+    if (dragging) {
+      poseDrag(elapsed);
+    } else if (sleepy) {
+      poseSleepy(elapsed);
+    } else if (nowMs < pettedUntil) {
+      posePetted(elapsed);
+    } else if (state === 'typing') {
+      poseTyping(elapsed);
+    } else if (state === 'commit') {
+      poseCommit(elapsed);
+    } else {
+      // idle：随机小动作调度（3.5–7.5s 一次，持续约 1.4s）
+      if (idleAction && nowMs > idleUntil) {
+        idleAction = null;
+        nextIdleAt = nowMs / 1000 + 3.5 + Math.random() * 4;
+      } else if (!idleAction && nowMs / 1000 > nextIdleAt) {
+        idleAction = pick(['lookAround', 'tilt', 'hop', 'stretch', 'wave']);
+        idleUntil = nowMs + 1400;
+      }
+      poseIdle(elapsed);
+      if (moodLevel >= 2 && Math.random() < 0.002) say(LINES.level);
+      else if (Math.random() < 0.0008) say(LINES.idle);
+    }
+    if (!sleepy) updateBlink(dt);
     updateGaze();
     vrm.update(dt);
   }
@@ -269,6 +383,33 @@ window.petSetState = (value) => {
     setExpression('happy', 1);
     setTimeout(() => setExpression('happy', 0), 900);
   }
+};
+window.petPetted = () => {
+  pettedUntil = performance.now() + 1200;
+  setExpression('happy', 1);
+  setTimeout(() => setExpression('happy', 0), 1200);
+  post({ hearts: true });
+  say(LINES.petted);
+};
+window.petHover = (on) => {
+  hovered = !!on;
+};
+window.petSetDrag = (on) => {
+  dragging = !!on;
+  if (!dragging) { pettedUntil = performance.now() + 500; }
+};
+window.petSetSleepy = (on) => {
+  if (sleepy !== !!on) {
+    sleepy = !!on;
+    if (sleepy) { say(LINES.sleepy); }
+    else { setExpression('blink', 0); say(LINES.wake); }
+  }
+};
+window.petSetMood = (level) => {
+  moodLevel = Math.max(0, Math.min(3, level | 0));
+};
+window.petGreet = (period) => {
+  say(LINES[period] || LINES.idle);
 };
 window.petSetGaze = (x, y) => {
   gaze.x = Math.max(-1, Math.min(1, x));

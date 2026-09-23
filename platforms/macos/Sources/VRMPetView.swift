@@ -113,6 +113,32 @@ final class VRMPetView: WKWebView, WKScriptMessageHandler, WKNavigationDelegate 
         evaluateJavaScript("window.petSetState && window.petSetState('\(state)')") { _, _ in }
     }
 
+    // MARK: - 看板娘式互动（全部转发到页面内状态机）
+
+    func petted() {
+        evaluateJavaScript("window.petPetted && window.petPetted()") { _, _ in }
+    }
+
+    func setHover(_ on: Bool) {
+        evaluateJavaScript("window.petHover && window.petHover(\(on))") { _, _ in }
+    }
+
+    func setDragging(_ on: Bool) {
+        evaluateJavaScript("window.petSetDrag && window.petSetDrag(\(on))") { _, _ in }
+    }
+
+    func setSleepy(_ on: Bool) {
+        evaluateJavaScript("window.petSetSleepy && window.petSetSleepy(\(on))") { _, _ in }
+    }
+
+    func setMood(_ level: Int) {
+        evaluateJavaScript("window.petSetMood && window.petSetMood(\(level))") { _, _ in }
+    }
+
+    func greet(_ period: String) {
+        evaluateJavaScript("window.petGreet && window.petGreet('\(period)')") { _, _ in }
+    }
+
     func setGaze(dx: Double, dy: Double) {
         evaluateJavaScript("window.petSetGaze && window.petSetGaze(\(dx), \(dy))") { _, _ in }
     }
@@ -127,6 +153,16 @@ final class VRMPetView: WKWebView, WKScriptMessageHandler, WKNavigationDelegate 
         }
         if let error = body["error"] as? String {
             onError?(error)
+        }
+        if let line = body["say"] as? String {
+            DispatchQueue.main.async {
+                PetWindowController.shared.showToast(line, duration: 3.5)
+            }
+        }
+        if body["hearts"] as? Bool == true {
+            DispatchQueue.main.async {
+                PetWindowController.shared.celebrate()
+            }
         }
     }
 
