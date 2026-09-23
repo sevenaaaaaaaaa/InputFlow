@@ -24,3 +24,7 @@ target/
 
 # 本机开发用的 bundle id 覆盖
 platforms/macos/.bundle-id
+
+# 发布产物
+/dist/
+platforms/macos/build/

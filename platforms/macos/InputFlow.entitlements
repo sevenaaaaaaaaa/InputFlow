@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Hardened Runtime 的最小 entitlements：输入法不联网、无沙箱、无敏感 API，
+	  保持空集是审计最友好的形态。将来若公证后某能力被硬运行时拦截，
+	  在这里逐条加并写明理由（例：com.apple.security.cs.allow-dyld-environment-variables 仅调试用）。
+	-->
+</dict>
+</plist>
