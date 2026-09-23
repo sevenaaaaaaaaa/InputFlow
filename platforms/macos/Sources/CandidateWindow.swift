@@ -134,7 +134,12 @@ final class CandidateWindowController {
         let side = theme.current
         for (offset, candidate) in slice.enumerated() {
             let cell = CandidateCell(index: offset + 1, side: side)
-            cell.configure(candidate)
+            cell.configure(candidate, isFirst: offset == 0)
+            if offset == 0 {
+                cell.layer?.borderWidth = 1
+                cell.layer?.borderColor = (side.accent ?? .controlAccentColor)
+                    .withAlphaComponent(0.35).cgColor
+            }
             cell.onClick = { [weak self] in
                 self?.onPick?(start + offset)
             }
@@ -165,6 +170,14 @@ final class CandidateWindowController {
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 panel.animator().alphaValue = 1
             }
+            // 轻微弹入（0.97 → 1），Liquid Glass 的“出现感”
+            let spring = CASpringAnimation(keyPath: "transform.scale")
+            spring.fromValue = 0.97
+            spring.toValue = 1.0
+            spring.damping = 18
+            spring.stiffness = 240
+            spring.duration = spring.settlingDuration
+            panel.contentView?.layer?.add(spring, forKey: "pop")
         }
     }
 
@@ -232,8 +245,10 @@ private final class CandidateCell: NSView {
     private var baseBackground: CGColor = NSColor.clear.cgColor
     private let hoverAccent: NSColor
     private let baseFontSize: CGFloat
+    private let side: CandidateTheme.Side
 
     init(index: Int, side: CandidateTheme.Side) {
+        self.side = side
         hoverAccent = side.accent ?? .controlAccentColor
         baseFontSize = side.fontSize ?? 17
         super.init(frame: .zero)
@@ -241,9 +256,8 @@ private final class CandidateCell: NSView {
         layer?.cornerRadius = (side.radius ?? 18) * 0.55
 
         indexLabel.stringValue = "\(index)"
-        indexLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
-        indexLabel.textColor = side.comment ?? .tertiaryLabelColor
-        indexLabel.alignment = .right
+        indexLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .semibold)
+        indexLabel.alignment = .center
 
         textLabel.font = .systemFont(ofSize: baseFontSize, weight: .regular)
         textLabel.textColor = side.text ?? .labelColor
@@ -268,7 +282,8 @@ private final class CandidateCell: NSView {
         addSubview(column)
         NSLayoutConstraint.activate([
             indexLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            indexLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 10),
+            indexLabel.widthAnchor.constraint(equalToConstant: 16),
+            indexLabel.heightAnchor.constraint(equalToConstant: 14),
             indexLabel.firstBaselineAnchor.constraint(equalTo: textLabel.firstBaselineAnchor),
             column.leadingAnchor.constraint(equalTo: indexLabel.trailingAnchor, constant: 6),
             column.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
@@ -279,7 +294,20 @@ private final class CandidateCell: NSView {
 
     required init?(coder: NSCoder) { nil }
 
-    func configure(_ candidate: Candidate) {
+    func configure(_ candidate: Candidate, isFirst: Bool = false) {
+        indexLabel.wantsLayer = true
+        indexLabel.layer?.cornerRadius = 6
+        indexLabel.layer?.backgroundColor = (isFirst
+            ? (side.accent ?? .controlAccentColor).withAlphaComponent(0.18)
+            : NSColor.quaternaryLabelColor.withAlphaComponent(0.35)).cgColor
+        indexLabel.textColor = isFirst
+            ? (side.accent ?? .controlAccentColor)
+            : (side.comment ?? .tertiaryLabelColor)
+        baseBackground = isFirst
+            ? (side.accent ?? .controlAccentColor).withAlphaComponent(0.10).cgColor
+            : (candidate.kind == "literal"
+                ? NSColor.quaternaryLabelColor.withAlphaComponent(0.10).cgColor
+                : NSColor.clear.cgColor)
         textLabel.stringValue = candidate.text
         textLabel.font = candidate.kind == "emoji"
             ? .systemFont(ofSize: baseFontSize + 9)
@@ -291,9 +319,6 @@ private final class CandidateCell: NSView {
             commentLabel.stringValue = ""
             commentLabel.isHidden = true
         }
-        baseBackground = candidate.kind == "literal"
-            ? NSColor.quaternaryLabelColor.withAlphaComponent(0.10).cgColor
-            : NSColor.clear.cgColor
         layer?.backgroundColor = baseBackground
     }
 

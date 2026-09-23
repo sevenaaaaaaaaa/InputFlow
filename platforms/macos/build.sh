@@ -69,7 +69,8 @@ SWIFT_SOURCES=("$HERE/Sources/main.swift" "$HERE/Sources/Engine.swift" \
     "$HERE/Sources/PermissionCenter.swift" "$HERE/Sources/PetStats.swift" \
     "$HERE/Sources/VRMPetView.swift" \
     "$HERE/Sources/PetCatalog.swift" \
-    "$HERE/Sources/PetCatalogWindow.swift")
+    "$HERE/Sources/PetCatalogWindow.swift" \
+    "$HERE/Sources/VoiceInput.swift")
 if [[ "$UNIVERSAL" == "1" ]]; then
     SWIFT_ARCHS=(arm64 x86_64)
 else
@@ -81,6 +82,7 @@ for arch in "${SWIFT_ARCHS[@]}"; do
         -import-objc-header "$ROOT/crates/ffi/include/inputflow.h" \
         "$RUST_LIB" \
         -framework AppKit -framework InputMethodKit -framework Carbon -framework WebKit \
+        -framework Speech -framework AVFoundation \
         -o "$BIN_DIR/$APP.$arch" \
         "${SWIFT_SOURCES[@]}"
 done

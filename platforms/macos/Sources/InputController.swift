@@ -11,6 +11,8 @@ final class InputFlowInputController: IMKInputController {
     private let window = CandidateWindowController()
     private let store = EncryptedStore.shared
     private let clipboard = ClipboardMonitor.shared
+    private let voice = VoiceInputController.shared
+    private var voicePartial = ""
     private weak var currentClient: IMKTextInput?
     private var page = 0
     private var shiftArmed = false
@@ -133,6 +135,15 @@ final class InputFlowInputController: IMKInputController {
         trad.target = self
         trad.state = engine.isTraditional ? .on : .off
         menu.addItem(trad)
+
+        let voiceItem = NSMenuItem(
+            title: voice.isListening ? "停止语音输入" : "语音输入（端上识别）",
+            action: #selector(toggleVoice(_:)),
+            keyEquivalent: ""
+        )
+        voiceItem.target = self
+        voiceItem.state = voice.isListening ? .on : .off
+        menu.addItem(voiceItem)
         let backup = NSMenuItem(title: "备份与恢复", action: nil, keyEquivalent: "")
         backup.submenu = backupSubmenu()
         menu.addItem(backup)
@@ -417,6 +428,42 @@ final class InputFlowInputController: IMKInputController {
         }
     }
 
+    /// 语音输入：按住菜单开始，实时文本进候选条，结束自动上屏；Esc 取消。
+    @objc private func toggleVoice(_ sender: NSMenuItem) {
+        if voice.isListening {
+            voice.stop()
+            voicePartial = ""
+            window.hide()
+            sender.state = .off
+            sender.title = "语音输入（端上识别）"
+            return
+        }
+        sender.state = .on
+        sender.title = "停止语音输入"
+        voice.onPartial = { [weak self] text in
+            guard let self else { return }
+            self.voicePartial = text
+            self.window.presentHint(
+                "🎤 " + text,
+                near: self.currentClient.flatMap { self.caretRect($0) }
+            )
+        }
+        voice.onFinal = { [weak self] text in
+            guard let self else { return }
+            self.voicePartial = ""
+            self.window.hide()
+            if let client = self.currentClient, !text.isEmpty {
+                client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+                PetWindowController.shared.showToast("已上屏：\(text)", duration: 3)
+            }
+            self.menu()?.item(withTitle: "停止语音输入")?.title = "语音输入（端上识别）"
+        }
+        voice.onStatus = { message in
+            PetWindowController.shared.showToast(message, duration: 4)
+        }
+        voice.start()
+    }
+
     @objc private func openPetCatalog(_ sender: Any) {
         PetCatalogWindowController.shared.show()
     }
@@ -643,6 +690,12 @@ final class InputFlowInputController: IMKInputController {
 
         switch keyCode {
         case 53: // Esc
+            if voice.isListening {
+                voice.stop()
+                voicePartial = ""
+                window.hide()
+                return true
+            }
             if engine.mode == "emoji" {
                 exitEmojiMode(client: client)
                 return true
@@ -944,12 +997,22 @@ final class InputFlowInputController: IMKInputController {
             // 表情模式的精选列表：不产生预编辑串，只展示候选窗
             clearMarkedText(client)
         } else {
-            let attributes: [NSAttributedString.Key: Any] = [
-                .underlineStyle: NSUnderlineStyle.single.rawValue,
-                .underlineColor: NSColor.secondaryLabelColor,
-                .foregroundColor: NSColor.labelColor,
-            ]
-            let marked = NSAttributedString(string: display, attributes: attributes)
+            // 预编辑：当前正在拼的音节用强调色 + 加粗，其余常规下划线
+            let pieces = display.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
+            let marked = NSMutableAttributedString()
+            for (index, piece) in pieces.enumerated() {
+                let active = index == pieces.count - 1 && pieces.count > 1
+                let attributes: [NSAttributedString.Key: Any] = [
+                    .underlineStyle: NSUnderlineStyle.single.rawValue,
+                    .underlineColor: active ? NSColor.controlAccentColor : NSColor.secondaryLabelColor,
+                    .foregroundColor: active ? NSColor.controlAccentColor : NSColor.labelColor,
+                    .font: NSFont.systemFont(ofSize: 15, weight: active ? .semibold : .regular),
+                ]
+                marked.append(NSAttributedString(string: piece, attributes: attributes))
+                if index < pieces.count - 1 {
+                    marked.append(NSAttributedString(string: " "))
+                }
+            }
             client.setMarkedText(
                 marked,
                 selectionRange: NSRange(location: marked.length, length: 0),

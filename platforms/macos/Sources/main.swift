@@ -181,6 +181,12 @@ if installArgs.count > 1 {
         }
         exit(0)
 
+    case "--voice-check":
+        let avail = VoiceInputController.availability()
+        print("端上语音识别可用: \(avail.onDevice)")
+        print("语音识别授权状态: \(avail.authorized.rawValue)（0=未决 1=受限 2=拒绝 3=已授权）")
+        exit(0)
+
     case "--pet-catalog-window":
         PetCatalogWindowController.shared.show()
         NSApplication.shared.run()
