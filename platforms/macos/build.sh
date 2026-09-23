@@ -67,7 +67,8 @@ SWIFT_SOURCES=("$HERE/Sources/main.swift" "$HERE/Sources/Engine.swift" \
     "$HERE/Sources/SettingsWindow.swift" "$HERE/Sources/InputController.swift" \
     "$HERE/Sources/AppModeMemory.swift" "$HERE/Sources/Theme.swift" \
     "$HERE/Sources/PermissionCenter.swift" "$HERE/Sources/PetStats.swift" \
-    "$HERE/Sources/VRMPetView.swift")
+    "$HERE/Sources/VRMPetView.swift" \
+    "$HERE/Sources/PetModelInstaller.swift")
 if [[ "$UNIVERSAL" == "1" ]]; then
     SWIFT_ARCHS=(arm64 x86_64)
 else

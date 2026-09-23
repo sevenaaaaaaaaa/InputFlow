@@ -161,7 +161,6 @@ impl AppModeMemory {
         self.entries.clear();
     }
 
-
     /// 导出为 TSV（应用\t中文票\t英文票\t上屏天\t上屏票\t更新时间）。
     pub fn export_tsv(&self) -> String {
         let mut out = String::new();

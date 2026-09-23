@@ -273,6 +273,26 @@ final class PetWindowController {
         }
     }
 
+    /// 把桌宠移到「输入所在屏幕」：保持相对位置，跟随光标/输入焦点跨屏。
+    func moveToScreen(containing point: NSPoint) {
+        guard let panel, panel.isVisible else { return }
+        guard let target = NSScreen.screens.first(where: { $0.frame.contains(point) })
+            ?? NSScreen.main else { return }
+        if let current = panel.screen, current == target { return }
+        let from = panel.screen ?? target
+        let fv = from.visibleFrame
+        let fracX = (panel.frame.minX - fv.minX) / max(1, fv.width)
+        let fracY = (panel.frame.minY - fv.minY) / max(1, fv.height)
+        let tv = target.visibleFrame
+        var origin = NSPoint(
+            x: tv.minX + fracX * tv.width,
+            y: tv.minY + fracY * tv.height
+        )
+        origin.x = min(max(origin.x, tv.minX + 8), tv.maxX - panel.frame.width - 8)
+        origin.y = min(max(origin.y, tv.minY + 8), tv.maxY - panel.frame.height - 8)
+        panel.setFrameOrigin(origin)
+    }
+
     /// 开发用：抓取 VRM 画面到 PNG。
     func captureVrmPNG(to path: String, completion: @escaping (Bool) -> Void) {
         guard let vrmView else {

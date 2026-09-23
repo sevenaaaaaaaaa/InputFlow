@@ -10,7 +10,7 @@ use crate::scheme::{Codes, MAX_SYLLABLE_LEN};
 /// 一条词边最多覆盖的音节数。
 pub const MAX_WORD_SYLLABLES: usize = 6;
 /// 切分路径上限（防止长串在歧义处指数爆炸）。
-pub const MAX_PATHS: usize = 64;
+pub const MAX_PATHS: usize = 256;
 /// 单次解码允许的最大输入字符数。
 pub const MAX_INPUT_CHARS: usize = 64;
 /// 尾部无法成音节的残余最多按这么长当作未输完的尾巴保留。
@@ -22,9 +22,19 @@ const PASS_THROUGH_PENALTY: f64 = -40.0;
 /// 候选排序中每个音节的长度加成（覆盖输入越多越靠前）。
 const LEN_BONUS: f64 = 1.8;
 /// 选择最佳切分时每个输入字符的覆盖加成（避免用更短的切分胜出）。
-const COVERAGE_BONUS: f64 = 1.0;
+const COVERAGE_BONUS: f64 = 4.0;
 /// 未输完音节时，补全候选每个已按键字符的加成（让 `nih`→你好 压过 `ni`→你）。
 const COMPLETION_BONUS: f64 = 3.0;
+/// 每个模糊/纠错代价的扣分（保证精确拼写优先）。
+const FUZZY_PENALTY: f64 = 1.6;
+/// 单音节完整输入时，词组前缀候选的降权（优先单字）。
+const SINGLE_SYLLABLE_PREFIX_PENALTY: f64 = 3.5;
+/// 单次解码参与打分/解码的路径数上限（按覆盖音节数取前 N 条）。
+const MAX_RANKED_PATHS: usize = 32;
+/// 参与词候选（decode_path）的路径数上限。
+const MAX_DECODE_PATHS: usize = 64;
+/// 启用拼写纠错的最大输入长度（长句不纠错，保证性能）。
+const MAX_FUZZY_INPUT: usize = 12;
 /// 前缀查询单次扫描上限（防止首字母输入扫描过大）。
 const PREFIX_SCAN_LIMIT: usize = 8192;
 /// 前缀查询时同一 key 下取多少条词条（是/时/事/使…）。
@@ -58,6 +68,8 @@ struct Seg {
     syl: Option<String>,
     /// 归一化字符序列中的区间终点（起点即上一段的终点）
     end: usize,
+    /// 纠错代价：0 = 精确拼写；>0 = 模糊音 / 编辑距离纠错（每个代价扣 FUZZY_PENALTY）
+    fuzzy: f64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -68,6 +80,8 @@ struct Hyp {
     sum_ln: f64,
     /// 由真实词典词覆盖的音节数（旁路音节不计入长度加成）
     matched: usize,
+    /// 旁路（未成词、原样保留）的音节数
+    garbage: usize,
     text: String,
     pinyin: Vec<String>,
 }
@@ -112,8 +126,46 @@ impl PinyinDecoder {
         let ends_complete = paths.iter().any(|p| p.iter().all(|s| s.syl.is_some()));
         let mut out: Vec<Candidate> = Vec::new();
         let mut best: Option<(Hyp, usize, usize)> = None;
-        for path in &paths {
-            self.decode_path(orig, path, &mut out);
+        // 只处理覆盖最好的前 N 条路径：路径数上限放宽后仍保持性能
+        // （长输入会产生大量等价切分，全部跑 Viterbi 会拖慢到毫秒级）
+        let mut ranked: Vec<(usize, usize, f64)> = paths
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let used = p.iter().take_while(|s| s.syl.is_some()).count();
+                let cost: f64 = p.iter().map(|s| s.fuzzy).sum();
+                (i, used, cost)
+            })
+            .collect();
+        ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.2.total_cmp(&b.2)));
+        let by_coverage: Vec<usize> = ranked.iter().map(|(idx, _, _)| *idx).collect();
+        // 正常取覆盖最高的前 N 条；再额外补上「纠错代价最小」的几条，
+        // 否则 zhuan→zhun 这类覆盖面较小的纠错路径会被覆盖更高的垃圾切分挤出
+        let mut chosen: Vec<usize> = ranked
+            .iter()
+            .take(MAX_RANKED_PATHS)
+            .map(|(idx, _, _)| *idx)
+            .collect();
+        ranked.sort_by(|a, b| a.2.total_cmp(&b.2).then(b.1.cmp(&a.1)));
+        for (idx, _, _) in ranked.iter().filter(|(_, _, c)| *c > 0.0).take(8) {
+            if !chosen.contains(idx) {
+                chosen.push(*idx);
+            }
+        }
+        // 词候选：覆盖前 64 条 + 纠错筛选条（每条最多 6 次字典查询），
+        // 保证纠错词能露出，同时避免长输入的全部路径都生成候选
+        let mut decode_set: Vec<usize> =
+            by_coverage.iter().take(MAX_DECODE_PATHS).copied().collect();
+        for idx in &chosen {
+            if !decode_set.contains(idx) {
+                decode_set.push(*idx);
+            }
+        }
+        for idx in decode_set {
+            self.decode_path(orig, &paths[idx], &mut out);
+        }
+        for idx in chosen {
+            let path = &paths[idx];
             let usable: Vec<&Seg> = path.iter().take_while(|s| s.syl.is_some()).collect();
             if usable.is_empty() {
                 continue;
@@ -142,7 +194,9 @@ impl PinyinDecoder {
             } else {
                 CandidateKind::Sentence
             };
-            let score = hyp.sum_ln + LEN_BONUS * hyp.matched as f64 + 1.0;
+            // 旁路音节重罚：避免「词 + 未成词残字」凑出的伪整句（如 专区+du）压过真词
+            let score =
+                hyp.sum_ln + LEN_BONUS * hyp.matched as f64 + 1.0 - hyp.garbage as f64 * 30.0;
             let mut c = Candidate::new(hyp.text, consumed, kind, score);
             if !hyp.pinyin.is_empty() {
                 c = c.with_comment(hyp.pinyin.join(" "));
@@ -155,7 +209,9 @@ impl PinyinDecoder {
             CandidateKind::Literal,
             -1000.0,
         ));
-        self.push_prefix_candidates(chars, orig, !ends_complete, &mut out);
+        let single_complete =
+            ends_complete && paths.iter().any(|p| p.len() == 1 && p[0].syl.is_some());
+        self.push_prefix_candidates(chars, orig, !ends_complete, single_complete, &mut out);
         self.push_abbreviation_candidates(chars, orig, full_cover, &mut out);
         dedupe_and_sort(&mut out);
         out.truncate(30);
@@ -220,6 +276,7 @@ impl PinyinDecoder {
         chars: &[char],
         orig: &[usize],
         partial_tail: bool,
+        single_complete: bool,
         out: &mut Vec<Candidate>,
     ) {
         let query = self.prefix_query(chars);
@@ -236,6 +293,10 @@ impl PinyinDecoder {
             let extends = hit.entry.letters as usize > query.len();
             if partial_tail && extends {
                 score += COMPLETION_BONUS * consumed as f64;
+            }
+            // 单个完整音节：词组前缀降权，保证单字候选优先（输入「xi」先给 西/希，而不是 希望）
+            if single_complete && extends {
+                score -= SINGLE_SYLLABLE_PREFIX_PENALTY;
             }
             let kind = if hit.entry.syls <= 1 {
                 CandidateKind::Char
@@ -331,13 +392,15 @@ impl PinyinDecoder {
             key.push_str(usable[k - 1].syl.as_deref().unwrap_or_default());
             let consumed = orig[usable[k - 1].end - 1] + 1;
             let display = key.replace('\'', " ");
+            let fuzzy_cost: f64 = usable[..k].iter().map(|s| s.fuzzy).sum();
             for e in self.dict.lookup(&key) {
                 let kind = if e.syls <= 1 {
                     CandidateKind::Char
                 } else {
                     CandidateKind::Word
                 };
-                let score = (e.freq as f64).ln() + LEN_BONUS * f64::from(e.syls);
+                let score = (e.freq as f64).ln() + LEN_BONUS * f64::from(e.syls)
+                    - fuzzy_cost * FUZZY_PENALTY;
                 out.push(
                     Candidate::new(e.word.clone(), consumed, kind, score)
                         .with_comment(display.clone()),
@@ -361,6 +424,7 @@ impl PinyinDecoder {
                     }
                     key.push_str(s.syl.as_deref().unwrap_or_default());
                 }
+                let fuzzy_cost: f64 = segs[i..i + k].iter().map(|s| s.fuzzy).sum();
                 let entries = self.dict.lookup(&key);
                 let (text, wscore, sum_ln, matched, pys) = if entries.is_empty() {
                     if k == 1 {
@@ -382,10 +446,12 @@ impl PinyinDecoder {
                 };
                 let mut pinyin = base.pinyin.clone();
                 pinyin.extend(pys);
+                let pass_through = entries.is_empty();
                 let cand = Hyp {
-                    score: base.score + wscore,
+                    score: base.score + wscore - fuzzy_cost * FUZZY_PENALTY,
                     sum_ln: base.sum_ln + sum_ln,
                     matched: base.matched + matched,
+                    garbage: base.garbage + usize::from(pass_through),
                     text: format!("{}{}", base.text, text),
                     pinyin,
                 };
@@ -447,8 +513,15 @@ pub fn normalize(input: &str) -> (Vec<char>, Vec<usize>) {
 fn segment_full(chars: &[char]) -> Vec<Vec<Seg>> {
     let mut out: Vec<Vec<Seg>> = Vec::new();
     let mut cur: Vec<Seg> = Vec::new();
-    go_full(0, chars, &mut cur, &mut out);
-    fn go_full(i: usize, chars: &[char], cur: &mut Vec<Seg>, out: &mut Vec<Vec<Seg>>) {
+    let mut fuzzy_budget: usize = 96; // 纠错尝试总预算，防止长串爆炸
+    go_full(0, chars, &mut cur, &mut out, &mut fuzzy_budget);
+    fn go_full(
+        i: usize,
+        chars: &[char],
+        cur: &mut Vec<Seg>,
+        out: &mut Vec<Vec<Seg>>,
+        fuzzy_budget: &mut usize,
+    ) {
         let n = chars.len();
         if out.len() >= MAX_PATHS {
             return;
@@ -457,14 +530,41 @@ fn segment_full(chars: &[char]) -> Vec<Vec<Seg>> {
             out.push(cur.clone());
             return;
         }
-        for len in 1..=MAX_SYLLABLE_LEN.min(n - i) {
+        // 逐长度交错探索：同一长度先精确、再纠错，保证 zhuan→zhun 这类路径
+        // 不会因为精确路径先占满 MAX_PATHS 而永远生成不出来。
+        // 长音节优先：更自然的切分（zhuan+que+du）先被探索，
+        // 避免短音节组合占满路径上限导致纠错路径无法生成
+        for len in (1..=MAX_SYLLABLE_LEN.min(n - i)).rev() {
             let s: String = chars[i..i + len].iter().collect();
+            // 同一长度：精确音节优先，紧随其后试纠错变体，
+            // 保证 zhuan→zhun 这类路径不会被其它长度的组合先占满上限
+            let unfinished_prefix = !is_syllable(&s) && is_syllable_prefix(&s);
+            let mut alts: Vec<(String, f64)> = Vec::new();
             if is_syllable(&s) {
+                alts.push((s.clone(), 0.0));
+            }
+            // 纠错只对较短输入开放（长句场景不划算，且极少整句错拼）
+            if len >= 2 && *fuzzy_budget > 0 && !unfinished_prefix && n <= MAX_FUZZY_INPUT {
+                for (canon, cost) in fuzzy_variants(&s) {
+                    if is_syllable(&s) && canon == s {
+                        continue;
+                    }
+                    alts.push((canon, f64::from(cost)));
+                }
+            }
+            for (canon, cost) in alts {
+                if cost > 0.0 {
+                    if *fuzzy_budget == 0 {
+                        return;
+                    }
+                    *fuzzy_budget -= 1;
+                }
                 cur.push(Seg {
-                    syl: Some(s),
+                    syl: Some(canon),
                     end: i + len,
+                    fuzzy: cost,
                 });
-                go_full(i + len, chars, cur, out);
+                go_full(i + len, chars, cur, out, fuzzy_budget);
                 cur.pop();
                 if out.len() >= MAX_PATHS {
                     return;
@@ -473,11 +573,79 @@ fn segment_full(chars: &[char]) -> Vec<Vec<Seg>> {
         }
         let rest: String = chars[i..].iter().collect();
         if !is_syllable(&rest) && (is_syllable_prefix(&rest) || rest.len() <= MAX_GARBAGE_TAIL) {
-            cur.push(Seg { syl: None, end: n });
+            cur.push(Seg {
+                syl: None,
+                end: n,
+                fuzzy: 0.0,
+            });
             out.push(cur.clone());
             cur.pop();
         }
     }
+    out
+}
+
+/// 生成纠错候选音节（代价 1）：相邻换位、单字符删除、n↔ng、常见声母/韵母混淆。
+fn fuzzy_variants(chunk: &str) -> Vec<(String, u8)> {
+    let chars: Vec<char> = chunk.chars().collect();
+    let mut out: Vec<(String, u8)> = Vec::new();
+    fn push(s: String, cost: u8, original: &str, out: &mut Vec<(String, u8)>) {
+        if s != original && is_syllable(&s) {
+            out.push((s, cost));
+        }
+    }
+    for i in 0..chars.len().saturating_sub(1) {
+        let mut v = chars.clone();
+        v.swap(i, i + 1);
+        push(v.iter().collect(), 1, chunk, &mut out);
+    }
+    // 只允许删除元音（zhuan→zhun 这类多打了一个元音）；
+    // 删除辅音多半是「n/h/s 还没输完」（nih、nhao、wos），交给前缀补全
+    for (i, c) in chars.iter().enumerate() {
+        if !matches!(c, 'a' | 'e' | 'i' | 'o' | 'u' | 'v') {
+            continue;
+        }
+        let mut v = chars.clone();
+        v.remove(i);
+        push(v.iter().collect(), 1, chunk, &mut out);
+    }
+    if chunk.ends_with('n') {
+        push(format!("{chunk}g"), 1, chunk, &mut out);
+    }
+    if chunk.ends_with("ng") {
+        push(chunk[..chunk.len() - 1].to_string(), 1, chunk, &mut out);
+    }
+    const PAIRS: [(&str, &str); 14] = [
+        ("zh", "z"),
+        ("ch", "c"),
+        ("sh", "s"),
+        ("n", "l"),
+        ("l", "n"),
+        ("f", "h"),
+        ("r", "l"),
+        ("an", "ang"),
+        ("en", "eng"),
+        ("in", "ing"),
+        ("ian", "iang"),
+        ("uan", "uang"),
+        ("ong", "eng"),
+        ("ong", "iong"),
+    ];
+    for (a, b) in PAIRS {
+        if let Some(pos) = chunk.find(a) {
+            let mut t = chunk.to_string();
+            t.replace_range(pos..pos + a.len(), b);
+            push(t, 1, chunk, &mut out);
+        }
+        if let Some(pos) = chunk.find(b) {
+            let mut t = chunk.to_string();
+            t.replace_range(pos..pos + b.len(), a);
+            push(t, 1, chunk, &mut out);
+        }
+    }
+    out.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.len().cmp(&a.0.len())));
+    out.dedup_by(|a, b| a.0 == b.0);
+    out.truncate(6);
     out
 }
 
@@ -500,6 +668,7 @@ fn segment_shuangpin(chars: &[char], codes: &Codes) -> Vec<Vec<Seg>> {
                 cur.push(Seg {
                     syl: Some(syl.to_string()),
                     end: i + 2,
+                    fuzzy: 0.0,
                 });
                 go_sp(i + 2, chars, codes, cur, out);
                 cur.pop();
@@ -509,7 +678,11 @@ fn segment_shuangpin(chars: &[char], codes: &Codes) -> Vec<Vec<Seg>> {
             }
         }
         if n - i == 1 {
-            cur.push(Seg { syl: None, end: n });
+            cur.push(Seg {
+                syl: None,
+                end: n,
+                fuzzy: 0.0,
+            });
             out.push(cur.clone());
             cur.pop();
         }
@@ -683,6 +856,65 @@ mod tests {
         assert!(
             shi.iter().any(|c| c.text == "时候"),
             "时候应作为前缀候选出现"
+        );
+    }
+
+    fn fuzzy_dict() -> Arc<Dictionary> {
+        let mut d = Dictionary::new();
+        d.insert("zhun'que'du", "准确度", 200_000);
+        d.insert("zhun'que", "准确", 250_000);
+        d.insert("zhuan'qu", "专区", 300_000);
+        d.insert("ying", "应", 500_000);
+        d.insert("yin", "因", 400_000);
+        d.insert("zhuang", "装", 400_000);
+        d.insert("zhuan", "转", 500_000);
+        d.insert("shuang'pin", "双拼", 100_000);
+        Arc::new(d)
+    }
+
+    #[test]
+    fn fuzzy_edit_distance_correction() {
+        // 用户示例：zhunquedu 误打成 zhuanquedu（多打了一个 a）
+        let d = PinyinDecoder::new(fuzzy_dict(), Layout::Full);
+        let c = d.candidates("zhuanquedu");
+        assert_eq!(c[0].text, "准确度", "{c:?}");
+        assert_eq!(c[0].comment.as_deref(), Some("zhun que du"));
+    }
+
+    #[test]
+    fn fuzzy_adjacent_transposition() {
+        // ing 打成 ign（n/g 反了）；uang 打成 uagn
+        let d = PinyinDecoder::new(fuzzy_dict(), Layout::Full);
+        let exact = d.candidates("ying");
+        let typo = d.candidates("yign");
+        assert!(
+            typo.iter().any(|c| c.text == exact[0].text),
+            "yign 应纠回 {}: {typo:?}",
+            exact[0].text
+        );
+        assert_eq!(
+            d.candidates("zhuang")[0].text,
+            d.candidates("zhuagn")[0].text
+        );
+    }
+
+    #[test]
+    fn fuzzy_keeps_exact_first() {
+        let d = PinyinDecoder::new(fuzzy_dict(), Layout::Full);
+        assert_eq!(d.candidates("zhuang")[0].text, "装");
+        assert_eq!(d.candidates("zhuan")[0].text, "转");
+        assert_eq!(d.candidates("shuangpin")[0].text, "双拼");
+    }
+
+    #[test]
+    fn single_syllable_prefers_char() {
+        let d = PinyinDecoder::new(dict(), Layout::Full);
+        let xi = d.candidates("xi");
+        assert_eq!(xi[0].kind, CandidateKind::Char, "单音节应先给单字: {xi:?}");
+        assert_eq!(xi[0].consumed, 2);
+        assert!(
+            xi.iter().any(|c| c.kind == CandidateKind::Word),
+            "词组仍应出现在后面"
         );
     }
 

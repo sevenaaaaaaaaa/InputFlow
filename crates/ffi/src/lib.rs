@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use inputflow_core::Mode;
 use inputflow_dict::Dictionary;
-use inputflow_engine::app_mode::AppModeMemory;
 use inputflow_engine::Session;
+use inputflow_engine::app_mode::AppModeMemory;
 use inputflow_plugin::Pack as PluginPack;
 
 pub struct InputFlowSession {
@@ -516,9 +516,7 @@ pub unsafe extern "C" fn inputflow_app_mode_forget_all(memory: *mut InputFlowApp
 
 /// 导出学习结果 TSV（前端负责持久化；只含 bundle id 与票数，无按键内容）。
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_app_mode_export(
-    memory: *mut InputFlowAppMode,
-) -> *mut c_char {
+pub unsafe extern "C" fn inputflow_app_mode_export(memory: *mut InputFlowAppMode) -> *mut c_char {
     if memory.is_null() {
         return std::ptr::null_mut();
     }
@@ -682,7 +680,10 @@ mod tests {
             );
 
             // 非法应用 id 被忽略
-            assert_eq!(inputflow_app_mode_observe(mem, c"".as_ptr(), 1, 1, 1_000), 0);
+            assert_eq!(
+                inputflow_app_mode_observe(mem, c"".as_ptr(), 1, 1, 1_000),
+                0
+            );
             assert_eq!(
                 inputflow_app_mode_observe(mem, c"a\tb".as_ptr(), 1, 1, 1_000),
                 0
@@ -715,11 +716,23 @@ mod tests {
     #[test]
     fn app_mode_null_and_bad_args_are_safe() {
         unsafe {
-            assert_eq!(inputflow_app_mode_observe(std::ptr::null_mut(), c"a".as_ptr(), 1, 1, 0), 0);
-            assert_eq!(inputflow_app_mode_decide(std::ptr::null_mut(), c"a".as_ptr(), 0), -1);
-            assert_eq!(inputflow_app_mode_forget(std::ptr::null_mut(), c"a".as_ptr()), 0);
+            assert_eq!(
+                inputflow_app_mode_observe(std::ptr::null_mut(), c"a".as_ptr(), 1, 1, 0),
+                0
+            );
+            assert_eq!(
+                inputflow_app_mode_decide(std::ptr::null_mut(), c"a".as_ptr(), 0),
+                -1
+            );
+            assert_eq!(
+                inputflow_app_mode_forget(std::ptr::null_mut(), c"a".as_ptr()),
+                0
+            );
             assert!(inputflow_app_mode_export(std::ptr::null_mut()).is_null());
-            assert_eq!(inputflow_app_mode_import(std::ptr::null_mut(), c"x".as_ptr()), -1);
+            assert_eq!(
+                inputflow_app_mode_import(std::ptr::null_mut(), c"x".as_ptr()),
+                -1
+            );
             inputflow_app_mode_free(std::ptr::null_mut());
         }
     }

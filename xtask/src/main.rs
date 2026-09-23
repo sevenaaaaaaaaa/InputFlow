@@ -54,7 +54,13 @@ fn plugin_cmd(args: &[String]) -> Result<(), String> {
             };
             match Pack::from_dir(Path::new(dir)) {
                 Ok(p) => {
-                    println!("✓ {dir}: {} v{}（{}）入口 {}", p.name, p.version, p.kind.id(), p.entry);
+                    println!(
+                        "✓ {dir}: {} v{}（{}）入口 {}",
+                        p.name,
+                        p.version,
+                        p.kind.id(),
+                        p.entry
+                    );
                     if !p.permissions.is_empty() {
                         println!("  权限: {:?}", p.permissions);
                     }
@@ -102,7 +108,11 @@ fn plugin_new(args: &[String]) -> Result<(), String> {
     let entry = match kind.as_str() {
         "skin" => "theme.json",
         "pet" => "pet.json",
-        other => return Err(format!("--kind 只支持 skin|pet（dict 用 xtask dict build 生成）: {other}")),
+        other => {
+            return Err(format!(
+                "--kind 只支持 skin|pet（dict 用 xtask dict build 生成）: {other}"
+            ));
+        }
     };
     let dir = if out.is_empty() {
         PathBuf::from(format!("plugins/{id}"))
@@ -127,8 +137,7 @@ fn plugin_new(args: &[String]) -> Result<(), String> {
 }}
 "#
     );
-    std::fs::write(dir.join("plugin.json"), &manifest)
-        .map_err(|e| format!("写清单失败: {e}"))?;
+    std::fs::write(dir.join("plugin.json"), &manifest).map_err(|e| format!("写清单失败: {e}"))?;
 
     match kind.as_str() {
         "skin" => std::fs::write(
@@ -176,8 +185,17 @@ fn plugin_new(args: &[String]) -> Result<(), String> {
 
     // 用内核校验回读，确保骨架天生合规
     let pack = Pack::from_dir(&dir).map_err(|e| format!("生成的包未通过内核校验: {e}"))?;
-    println!("已生成 {}（{} v{}）", dir.display(), pack.name, pack.version);
-    println!("下一步：编辑 {} 与图片/颜色数据，然后用 `xtask plugin check {}` 复验", entry, dir.display());
+    println!(
+        "已生成 {}（{} v{}）",
+        dir.display(),
+        pack.name,
+        pack.version
+    );
+    println!(
+        "下一步：编辑 {} 与图片/颜色数据，然后用 `xtask plugin check {}` 复验",
+        entry,
+        dir.display()
+    );
     Ok(())
 }
 

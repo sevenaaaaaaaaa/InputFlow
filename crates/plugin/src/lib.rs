@@ -240,7 +240,9 @@ fn utf8_width(b: u8) -> usize {
 fn valid_id(id: &str) -> bool {
     let bytes = id.as_bytes();
     (2..=64).contains(&bytes.len())
-        && bytes.first().is_some_and(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+        && bytes
+            .first()
+            .is_some_and(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
         && bytes
             .iter()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'-')
@@ -249,7 +251,10 @@ fn valid_id(id: &str) -> bool {
 fn valid_version(v: &str) -> bool {
     // 宽松 semver：三段数字即可
     let parts: Vec<&str> = v.split('.').collect();
-    parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+    parts.len() == 3
+        && parts
+            .iter()
+            .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
 }
 
 impl Pack {
@@ -289,15 +294,20 @@ impl Pack {
 
         let id = id.ok_or_else(|| PackError("缺少 id".into()))?;
         if !valid_id(&id) {
-            return Err(PackError(format!("id 非法（小写字母/数字/连字符，2-64 位）: {id}")));
+            return Err(PackError(format!(
+                "id 非法（小写字母/数字/连字符，2-64 位）: {id}"
+            )));
         }
         let name = name.ok_or_else(|| PackError("缺少 name".into()))?;
         let version = version.ok_or_else(|| PackError("缺少 version".into()))?;
         if !valid_version(&version) {
-            return Err(PackError(format!("version 需要是三段数字（如 1.0.0）: {version}")));
+            return Err(PackError(format!(
+                "version 需要是三段数字（如 1.0.0）: {version}"
+            )));
         }
         let kind = PackKind::from_id(
-            kind.as_deref().ok_or_else(|| PackError("缺少 kind".into()))?,
+            kind.as_deref()
+                .ok_or_else(|| PackError("缺少 kind".into()))?,
         )
         .ok_or_else(|| PackError("kind 只能是 skin / pet / dict".into()))?;
 
@@ -309,7 +319,9 @@ impl Pack {
             }
         }
         if kind != PackKind::Dict && !permissions.is_empty() {
-            return Err(PackError("只有 dict 包可以声明 read:plain-text-dict".into()));
+            return Err(PackError(
+                "只有 dict 包可以声明 read:plain-text-dict".into(),
+            ));
         }
 
         let entry = entry.unwrap_or_else(|| kind.default_entry().to_string());
@@ -463,7 +475,7 @@ mod tests {
         let (packs, errors) = Pack::scan(&root);
         assert!(packs.is_empty());
         assert_eq!(errors.len(), 1);
-        assert!(errors[0].1 .0.contains("未知权限"), "{}", errors[0].1);
+        assert!(errors[0].1.0.contains("未知权限"), "{}", errors[0].1);
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -516,10 +528,10 @@ mod tests {
         let (packs, errors) = Pack::scan(&root);
         assert!(packs.is_empty());
         assert_eq!(errors.len(), 4);
-        assert!(errors[0].1 .0.contains("id 非法"));
-        assert!(errors[1].1 .0.contains("version"));
-        assert!(errors[2].1 .0.contains("kind"));
-        assert!(errors[3].1 .0.contains("entry"));
+        assert!(errors[0].1.0.contains("id 非法"));
+        assert!(errors[1].1.0.contains("version"));
+        assert!(errors[2].1.0.contains("kind"));
+        assert!(errors[3].1.0.contains("entry"));
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -549,7 +561,7 @@ mod tests {
         std::fs::create_dir_all(root.join("empty")).unwrap();
         let (packs, errors) = Pack::scan(&root);
         assert!(packs.is_empty());
-        assert!(errors[0].1 .0.contains("缺少或读不了"));
+        assert!(errors[0].1.0.contains("缺少或读不了"));
         let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -80,8 +80,14 @@ impl Digest {
     pub fn to_json(&self) -> String {
         format!(
             "{{\"speed_cpm\":{:.1},\"accuracy\":{:.1},\"kcal\":{:.2},\"saved_keys\":{},\"voice_chars\":{},\"deletes\":{},\"enters\":{},\"stare_max_secs\":{}}}",
-            self.speed_cpm, self.accuracy, self.kcal,
-            self.saved_keys, self.voice_chars, self.deletes, self.enters, self.stare_max_secs,
+            self.speed_cpm,
+            self.accuracy,
+            self.kcal,
+            self.saved_keys,
+            self.voice_chars,
+            self.deletes,
+            self.enters,
+            self.stare_max_secs,
         )
     }
 }
@@ -101,33 +107,53 @@ mod tests {
 
     #[test]
     fn speed_uses_active_time_only() {
-        let s = DayStats { chars: 120, active_secs: 120, ..Default::default() };
+        let s = DayStats {
+            chars: 120,
+            active_secs: 120,
+            ..Default::default()
+        };
         assert!((Digest::compute(&s).speed_cpm - 60.0).abs() < 1e-9);
     }
 
     #[test]
     fn accuracy_counts_deletes_against_chars() {
-        let s = DayStats { chars: 90, deletes: 10, ..Default::default() };
+        let s = DayStats {
+            chars: 90,
+            deletes: 10,
+            ..Default::default()
+        };
         assert!((Digest::compute(&s).accuracy - 90.0).abs() < 1e-9);
     }
 
     #[test]
     fn kcal_scales_with_active_minutes() {
-        let s = DayStats { active_secs: 600, ..Default::default() };
+        let s = DayStats {
+            active_secs: 600,
+            ..Default::default()
+        };
         assert!((Digest::compute(&s).kcal - 9.0).abs() < 1e-9);
     }
 
     #[test]
     fn stare_is_capped() {
-        let s = DayStats { stare_max_secs: 100_000, ..Default::default() };
+        let s = DayStats {
+            stare_max_secs: 100_000,
+            ..Default::default()
+        };
         assert_eq!(Digest::compute(&s).stare_max_secs, STARE_CAP_SECS);
     }
 
     #[test]
     fn json_roundtrip_shape() {
         let s = DayStats {
-            chars: 100, keys: 300, deletes: 4, enters: 12, saved_keys: 88,
-            voice_chars: 6, active_secs: 120, stare_max_secs: 42,
+            chars: 100,
+            keys: 300,
+            deletes: 4,
+            enters: 12,
+            saved_keys: 88,
+            voice_chars: 6,
+            active_secs: 120,
+            stare_max_secs: 42,
         };
         let json = Digest::compute(&s).to_json();
         assert!(json.contains("\"speed_cpm\":50.0"), "{json}");

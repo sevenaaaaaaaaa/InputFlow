@@ -24,6 +24,12 @@ fn main() {
             vec![
                 "n",
                 "ni",
+                "xi",
+                "zhuanquedu",
+                "woshi",
+                "yign",
+                "zhuang",
+                "shuangpin",
                 "nih",
                 "nihao",
                 "nh",

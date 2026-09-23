@@ -181,6 +181,19 @@ if installArgs.count > 1 {
         }
         exit(0)
 
+    case "--pet-fetch-seed":
+        PetModelInstaller.install(PetModelCatalog.seedSan, onProgress: { _ in }) { result in
+            switch result {
+            case .success:
+                print("seed-san 安装成功")
+            case .failure(let error):
+                print("seed-san 失败: \(error.localizedDescription)")
+            }
+            exit(0)
+        }
+        RunLoop.main.run()
+        exit(0)
+
     case "--pet-vrm-check":
         PluginStore.seedBundledPacks()
         PetWindowController.activePackId = "pet-vrm-sample"

@@ -342,6 +342,14 @@ final class InputFlowInputController: IMKInputController {
         zoomItem.submenu = zoomMenu
         submenu.addItem(zoomItem)
 
+        let seedItem = NSMenuItem(
+            title: "下载官方样例 Seed-san（VRM Public License 1.0）…",
+            action: #selector(downloadSeedSan(_:)),
+            keyEquivalent: ""
+        )
+        seedItem.target = self
+        submenu.addItem(seedItem)
+
         let importItem = NSMenuItem(title: "导入 VRM 模型…", action: #selector(importVRM(_:)), keyEquivalent: "")
         importItem.target = self
         submenu.addItem(importItem)
@@ -403,6 +411,29 @@ final class InputFlowInputController: IMKInputController {
         for item in sender.menu?.items ?? [] {
             item.state = abs(((item.representedObject as? Double) ?? -1) - value) < 0.01 ? .on : .off
         }
+    }
+
+    /// 一键下载官方样例 VRM（用户点击才联网，sha256 校验后才安装）。
+    @objc private func downloadSeedSan(_ sender: Any) {
+        PetWindowController.shared.showToast("开始下载 Seed-san（约 10MB，VRM 官方样例）…", duration: 5)
+        PetModelInstaller.install(
+            PetModelCatalog.seedSan,
+            onProgress: { _ in },
+            completion: { result in
+                DispatchQueue.main.async {
+                    switch result {
+                    case .success:
+                        PetWindowController.activePackId = PetModelCatalog.seedSan.id
+                        if !PetWindowController.isEnabled {
+                            PetWindowController.setEnabled(true)
+                        }
+                        PetWindowController.shared.showToast("Seed-san 已就绪（sha256 校验通过）", duration: 4)
+                    case .failure(let error):
+                        PetWindowController.shared.showToast("下载失败：\(error.localizedDescription)", duration: 6)
+                    }
+                }
+            }
+        )
     }
 
     /// 导入用户自己的 VRM 模型（VRoid Studio 可免费导出），生成 vrm-custom 形象包。
@@ -912,6 +943,12 @@ final class InputFlowInputController: IMKInputController {
             )
         }
         let caret = caretRect(client)
+        if let caret {
+            // 输入法在哪块屏幕工作，桌宠就在哪块屏幕互动
+            PetWindowController.shared.moveToScreen(
+                containing: NSPoint(x: caret.midX, y: caret.midY)
+            )
+        }
         window.present(candidates: comp.candidates, page: page, near: caret) { [weak self, weak client] index in
             guard let self, let client else { return }
             self.select(index: index, client: client)
