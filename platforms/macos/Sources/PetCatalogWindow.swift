@@ -45,7 +45,8 @@ final class PetCatalogWindowController: NSWindowController {
 
         let hint = NSTextField(wrappingLabelWithString:
             "只下载你信任且有权使用的模型；内置条目带 sha256 校验，自加来源会在首次下载后记录校验和。"
-            + "所有下载都由你点击触发，应用不会后台上传或遥测。")
+            + "所有下载都由你点击触发，应用不会后台上传或遥测。"
+            + "VRoid Hub / BOOTH 需要登录或购买，且各自有使用条款，因此这里只提供跳转，不代为抓取。")
         hint.font = .systemFont(ofSize: 11)
         hint.textColor = .secondaryLabelColor
         hint.preferredMaxLayoutWidth = 580
@@ -79,9 +80,31 @@ final class PetCatalogWindowController: NSWindowController {
         buttons.orientation = .horizontal
         buttons.spacing = 8
         buttons.addArrangedSubview(button("添加来源…", #selector(addSource)))
+        buttons.addArrangedSubview(button("导入下载目录里最新的 VRM", #selector(importLatestFromDownloads)))
         buttons.addArrangedSubview(button("打开目录文件", #selector(openCatalogFile)))
         buttons.addArrangedSubview(button("刷新", #selector(refreshAction)))
         root.addArrangedSubview(buttons)
+
+        // 默认来源入口（一键跳转挑选，不代抓）
+        let sources = NSTextField(labelWithString: "默认来源（点开挑选，下载后用上面的「导入」）")
+        sources.font = .systemFont(ofSize: 11, weight: .semibold)
+        sources.textColor = .secondaryLabelColor
+        root.addArrangedSubview(sources)
+        let sourceRow = NSStackView()
+        sourceRow.orientation = .horizontal
+        sourceRow.spacing = 8
+        let hubs: [(String, String)] = [
+            ("VRoid Hub（CC0/CC-BY 可下载）", "https://hub.vroid.com/search?licenses=cc0%2Ccc_by"),
+            ("VRoid Studio（免费建模）", "https://vroid.com/en/studio"),
+            ("BOOTH（创作者模型，注意许可）", "https://booth.pm/ja/search/VRM"),
+        ]
+        for (title, link) in hubs {
+            let b = NSButton(title: title, target: self, action: #selector(openDiscovery(_:)))
+            b.identifier = NSUserInterfaceItemIdentifier(link)
+            b.bezelStyle = .rounded
+            sourceRow.addArrangedSubview(b)
+        }
+        root.addArrangedSubview(sourceRow)
 
         window.contentView = root
         NSLayoutConstraint.activate([
@@ -224,6 +247,69 @@ final class PetCatalogWindowController: NSWindowController {
             try? PetCatalogStore.removeUserEntry(id: "")
         }
         NSWorkspace.shared.open(url)
+    }
+
+    @objc private func openDiscovery(_ sender: NSButton) {
+        guard let link = sender.identifier?.rawValue, let url = URL(string: link) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    /// 扫描 ~/Downloads，导入最新的 .vrm（从 VRoid Hub / BOOTH 下载后一键接入）。
+    @objc private func importLatestFromDownloads() {
+        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        let candidates = (try? FileManager.default.contentsOfDirectory(
+            at: downloads ?? URL(fileURLWithPath: NSHomeDirectory()),
+            includingPropertiesForKeys: [.contentModificationDateKey]
+        )) ?? []
+        let newest = candidates
+            .filter { $0.pathExtension.lowercased() == "vrm" }
+            .sorted {
+                let a = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                let b = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                return a > b
+            }
+            .first
+        guard let source = newest else {
+            PetWindowController.shared.showToast("下载目录里没有 .vrm 文件", duration: 5)
+            return
+        }
+        let base = source.deletingPathExtension().lastPathComponent
+        let slug = "pet-custom-" + base.lowercased()
+            .replacingOccurrences(of: " ", with: "-")
+            .filter { $0.isLetter || $0.isNumber || $0 == "-" }
+        let entry = PetCatalogEntry(
+            id: slug, name: base, url: "", sha256: nil, bytes: nil,
+            license: "请自行确认（来自下载目录）", author: nil, homepage: nil,
+            tags: ["imported"], note: "从下载目录导入：\(source.lastPathComponent)"
+        )
+        // 直接复制为形象包（不联网）
+        let dest = PluginStore.pluginsDir.appendingPathComponent(entry.id, isDirectory: true)
+        do {
+            let fm = FileManager.default
+            try fm.createDirectory(at: dest, withIntermediateDirectories: true)
+            let model = dest.appendingPathComponent("model.vrm")
+            try? fm.removeItem(at: model)
+            try fm.copyItem(at: source, to: model)
+            let plugin = """
+            {"id":"\(entry.id)","name":"\(entry.name)","version":"1.0.0","kind":"pet",\
+            "authors":["imported"],"description":"从下载目录导入","license":"请自行确认","permissions":[]}
+            """
+            let pet = """
+            {"renderer":"vrm","size":240,"width":240,"height":380,"framing":"full","zoom":1.0,\
+            "fps":30,"fps_idle":30,"fps_typing":60,"entry":"model.vrm",\
+            "follow_cursor":false,"typing_bounce":true,"commit_particles":true}
+            """
+            try plugin.data(using: .utf8)?.write(to: dest.appendingPathComponent("plugin.json"))
+            try pet.data(using: .utf8)?.write(to: dest.appendingPathComponent("pet.json"))
+            refresh()
+            PetWindowController.activePackId = entry.id
+            if !PetWindowController.isEnabled {
+                PetWindowController.setEnabled(true)
+            }
+            PetWindowController.shared.showToast("已导入：\(source.lastPathComponent)", duration: 4)
+        } catch {
+            PetWindowController.shared.showToast("导入失败：\(error.localizedDescription)", duration: 6)
+        }
     }
 
     /// 添加来源：名称 / URL / 许可（sha256 可选，留空则首次下载后记录）。
