@@ -102,7 +102,13 @@ fi
 
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Contents/Info.plist" 2>/dev/null || echo 0.0.0)"
 BUILD_NUM="$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$APP/Contents/Info.plist" 2>/dev/null || echo 1)"
-DMG_NAME="InputFlow-${VERSION}-universal.dmg"
+ARCHS="$(lipo -archs "$APP/Contents/MacOS/InputFlow" 2>/dev/null | tr ' ' '-')"
+[[ -n "$ARCHS" ]] || ARCHS="$(uname -m)"
+case "$ARCHS" in
+    *x86_64*arm64*|*arm64*x86_64*) SLUG="universal" ;;
+    *) SLUG="$ARCHS" ;;
+esac
+DMG_NAME="InputFlow-${VERSION}-${SLUG}.dmg"
 DMG="$OUT/$DMG_NAME"
 mkdir -p "$OUT"
 

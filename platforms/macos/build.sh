@@ -15,6 +15,14 @@ CONTENTS="$BUNDLE/Contents"
 BIN_DIR="$CONTENTS/MacOS"
 DEPLOY_TARGET="${MACOSX_DEPLOYMENT_TARGET:-13.0}"
 UNIVERSAL="${UNIVERSAL:-1}"
+# 交叉目标不可用时自动降级为单架构（例如 Homebrew Rust 未装 x86_64 标准库）
+if [[ "$UNIVERSAL" == "1" ]]; then
+    X86_LIB="$(rustc --print target-libdir --target x86_64-apple-darwin 2>/dev/null || true)"
+    if [[ -z "$X86_LIB" || ! -d "$X86_LIB" ]]; then
+        echo "⚠ 缺少 x86_64-apple-darwin 标准库，退回单架构 $(uname -m)"
+        UNIVERSAL=0
+    fi
+fi
 # 签名身份：优先 CODESIGN_IDENTITY，其次自动选用钥匙串里的 Apple Development，最后退回 ad-hoc。
 # macOS 26+ 只收录有效签名（Apple 签发、带 Team ID）的第三方输入法，ad-hoc 不会出现。
 CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null \
