@@ -537,6 +537,13 @@ final class InputFlowInputController: IMKInputController {
         persist(mode: next)
         recordModeSignal(strong: true)
         window.hide()
+        // 明确反馈：避免「以为还能打中文、其实已切英文」的困惑
+        PetWindowController.shared.showToast(
+            next == .en
+                ? "已切到 English（再单按左 Shift 或点桌宠切回中文）"
+                : "已切回中文输入",
+            duration: 3
+        )
     }
 
     /// 当前前台应用 bundle id（用于每应用中英记忆）。

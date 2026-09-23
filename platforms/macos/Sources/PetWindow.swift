@@ -913,6 +913,7 @@ private final class PetBackgroundView: NSView {
     var onRightClick: ((NSEvent) -> Void)?
     private var trackingArea: NSTrackingArea?
     private var downLocation: NSPoint = .zero
+    private var downAt: TimeInterval = 0
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -938,15 +939,17 @@ private final class PetBackgroundView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         downLocation = NSEvent.mouseLocation
+        downAt = ProcessInfo.processInfo.systemUptime
     }
 
     override func mouseUp(with event: NSEvent) {
-        // 拖动距离小于阈值才算点按，拖动留给窗口移动
+        // 只有「短按且几乎没移动」才算点按：避免拖桌宠时误触中英切换
         let moved = hypot(
             NSEvent.mouseLocation.x - downLocation.x,
             NSEvent.mouseLocation.y - downLocation.y
         )
-        if moved < 4 {
+        let held = ProcessInfo.processInfo.systemUptime - downAt
+        if moved < 3, held < 0.35 {
             onClick?()
         }
     }
