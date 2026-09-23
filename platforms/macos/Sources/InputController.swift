@@ -423,11 +423,10 @@ final class InputFlowInputController: IMKInputController {
                 DispatchQueue.main.async {
                     switch result {
                     case .success:
-                        PetWindowController.activePackId = PetModelCatalog.seedSan.id
-                        if !PetWindowController.isEnabled {
-                            PetWindowController.setEnabled(true)
-                        }
-                        PetWindowController.shared.showToast("Seed-san 已就绪（sha256 校验通过）", duration: 4)
+                        PetWindowController.shared.showToast(
+                            "Seed-san 已下载（sha256 校验通过）；在「桌宠形象」里可选",
+                            duration: 5
+                        )
                     case .failure(let error):
                         PetWindowController.shared.showToast("下载失败：\(error.localizedDescription)", duration: 6)
                     }

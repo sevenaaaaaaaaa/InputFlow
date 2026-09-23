@@ -37,12 +37,16 @@ const camera = new THREE.PerspectiveCamera(26, 1, 0.05, 50);
 const lookTarget = new THREE.Object3D();
 scene.add(lookTarget);
 
-scene.add(new THREE.AmbientLight(0xffffff, 0.85));
-const key = new THREE.DirectionalLight(0xffffff, 1.15);
-key.position.set(0.6, 1.6, 1.2);
+// 三点打光：主光暖一点、补光柔、轮廓光偏冷，肤色更通透
+scene.add(new THREE.AmbientLight(0xfff4ec, 0.75));
+const key = new THREE.DirectionalLight(0xfff0e0, 1.35);
+key.position.set(0.7, 1.8, 1.3);
 scene.add(key);
-const rim = new THREE.DirectionalLight(0xbcd4ff, 0.5);
-rim.position.set(-1.0, 1.2, -0.8);
+const fill = new THREE.DirectionalLight(0xdfe8ff, 0.45);
+fill.position.set(-1.2, 1.0, 1.1);
+scene.add(fill);
+const rim = new THREE.DirectionalLight(0xa9c4ff, 0.7);
+rim.position.set(-0.9, 1.5, -1.2);
 scene.add(rim);
 
 let vrm = null;
@@ -238,6 +242,13 @@ loader.load(
     applyBasePose();
     if (vrm.lookAt) vrm.lookAt.target = lookTarget;
     setExpression('blink', 0);
+    // 默认给一个放松/微笑的表情，避免面无表情
+    for (const name of ['relaxed', 'happy', 'Fun', 'Joy']) {
+        const em = vrm.expressionManager;
+        if (em && em.getExpression(name) && (name === 'relaxed')) {
+            em.setValue(name, name === 'relaxed' ? 0.6 : 0.3);
+        }
+    }
     ready = true;
     window.__petReady = true;
     step();
