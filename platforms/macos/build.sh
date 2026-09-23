@@ -68,7 +68,8 @@ SWIFT_SOURCES=("$HERE/Sources/main.swift" "$HERE/Sources/Engine.swift" \
     "$HERE/Sources/AppModeMemory.swift" "$HERE/Sources/Theme.swift" \
     "$HERE/Sources/PermissionCenter.swift" "$HERE/Sources/PetStats.swift" \
     "$HERE/Sources/VRMPetView.swift" \
-    "$HERE/Sources/PetModelInstaller.swift")
+    "$HERE/Sources/PetCatalog.swift" \
+    "$HERE/Sources/PetCatalogWindow.swift")
 if [[ "$UNIVERSAL" == "1" ]]; then
     SWIFT_ARCHS=(arm64 x86_64)
 else
@@ -93,6 +94,9 @@ fi
 cp "$HERE/Info.plist" "$CONTENTS/Info.plist"
 printf 'APPL????' > "$CONTENTS/PkgInfo"
 cp "$HERE/assets/InputFlow.icns" "$CONTENTS/Resources/InputFlow.icns"
+
+# 形象目录（内置可下载条目）
+cp "$HERE/assets/PetCatalog.json" "$CONTENTS/Resources/PetCatalog.json"
 
 # VRM 桌宠运行时（three.js + three-vrm，本地离线）
 rm -rf "$CONTENTS/Resources/PetRuntime"

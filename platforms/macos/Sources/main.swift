@@ -181,6 +181,18 @@ if installArgs.count > 1 {
         }
         exit(0)
 
+    case "--pet-catalog-window":
+        PetCatalogWindowController.shared.show()
+        NSApplication.shared.run()
+        exit(0)
+
+    case "--pet-catalog":
+        PluginStore.seedBundledPacks()
+        for entry in PetCatalogStore.entries() {
+            print("\(entry.id)\t\(entry.name)\t\(entry.license)\t\(entry.sizeText)\t\((entry.sha256 ?? "").isEmpty ? "无校验和" : "sha256")")
+        }
+        exit(0)
+
     case "--pet-fetch-seed":
         PetModelInstaller.install(PetModelCatalog.seedSan, onProgress: { _ in }) { result in
             switch result {

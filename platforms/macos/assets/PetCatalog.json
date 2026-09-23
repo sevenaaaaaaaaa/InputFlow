@@ -1,0 +1,16 @@
+{
+  "entries": [
+    {
+      "id": "pet-seed-san",
+      "name": "Seed-san（官方样例）",
+      "url": "https://raw.githubusercontent.com/vrm-c/vrm-specification/master/samples/Seed-san/vrm/Seed-san.vrm",
+      "sha256": "624d0d554bc205bbdc33e22a68a2c3c20edebb3e573011ead8878a65e5329b23",
+      "bytes": 10917800,
+      "license": "VRM Public License 1.0",
+      "author": "VRM Consortium",
+      "homepage": "https://github.com/vrm-c/vrm-specification",
+      "tags": ["official", "stylized"],
+      "note": "VRM Consortium 官方样例形象；3D 注视/眨眼/物理自动生效"
+    }
+  ]
+}

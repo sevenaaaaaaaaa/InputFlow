@@ -342,6 +342,10 @@ final class InputFlowInputController: IMKInputController {
         zoomItem.submenu = zoomMenu
         submenu.addItem(zoomItem)
 
+        let catalogItem = NSMenuItem(title: "形象目录…", action: #selector(openPetCatalog(_:)), keyEquivalent: "")
+        catalogItem.target = self
+        submenu.addItem(catalogItem)
+
         let seedItem = NSMenuItem(
             title: "下载官方样例 Seed-san（VRM Public License 1.0）…",
             action: #selector(downloadSeedSan(_:)),
@@ -411,6 +415,10 @@ final class InputFlowInputController: IMKInputController {
         for item in sender.menu?.items ?? [] {
             item.state = abs(((item.representedObject as? Double) ?? -1) - value) < 0.01 ? .on : .off
         }
+    }
+
+    @objc private func openPetCatalog(_ sender: Any) {
+        PetCatalogWindowController.shared.show()
     }
 
     /// 一键下载官方样例 VRM（用户点击才联网，sha256 校验后才安装）。
