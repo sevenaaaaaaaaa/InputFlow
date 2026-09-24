@@ -165,6 +165,90 @@ if installArgs.count > 1 {
         print("语音候选已渲染: \(out)")
         exit(0)
 
+    case "--translate-check":
+        let runtime = TranslateClient.findRuntime()
+        let model = TranslateClient.translateModelPath()
+        print("runtime=\(runtime ?? "未检测到（brew install llama.cpp）")")
+        print("model=\(model ?? "未安装（AI 增强下载 gemma-3-270m-it-q8）")")
+        exit(runtime != nil && model != nil ? 0 : 1)
+
+    case "--translate-demo":
+        guard TranslateClient.findRuntime() != nil else {
+            print("❌ 无运行时：brew install llama.cpp"); exit(1)
+        }
+        guard let modelPath = TranslateClient.translateModelPath() else {
+            print("❌ 无翻译模型：--ai-download gemma-3-270m-it-q8"); exit(1)
+        }
+        print("model=\(modelPath)")
+        let text = CommandLine.arguments.count > 2
+            ? CommandLine.arguments[2]
+            : "今天天气不错，我们去公园散步吧。"
+        let target = CommandLine.arguments.count > 3 ? CommandLine.arguments[3] : "en"
+        var result: String?
+        var failure: String?
+        var done = false
+        let started = Date()
+        TranslateClient.shared.translate(text, target: target) { outcome in
+            switch outcome {
+            case .success(let translated): result = translated
+            case .failure(let error): failure = error.localizedDescription
+            }
+            done = true
+        }
+        while !done, Date().timeIntervalSince(started) < 120 {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        }
+        TranslateClient.shared.stop()
+        // 给 stop() 的异步清理一点时间排空（≤2s），不等满超时窗
+        let drainUntil = Date().addingTimeInterval(2)
+        while Date() < drainUntil {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        }
+        if let result {
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            print("译文(\(target), \(ms)ms): \(result)")
+            exit(0)
+        }
+        print("❌ \(failure ?? "超时")")
+        exit(1)
+
+    case "--ai-download":
+        guard CommandLine.arguments.count > 2,
+              let model = AIModelStore.shared.catalog.first(where: { $0.id == CommandLine.arguments[2] })
+        else {
+            print("用法: --ai-download <model-id>；可用目录：")
+            for m in AIModelStore.shared.catalog {
+                print("  \(m.id)\t\(m.sizeText)\t\(m.kinds.joined(separator: ","))")
+            }
+            exit(2)
+        }
+        if AIModelStore.shared.isInstalled(model) {
+            print("已安装: \(model.id)"); exit(0)
+        }
+        print("开始下载 \(model.id)（\(model.sizeText) · 用户显式请求）…")
+        var failure: String?
+        var finished = false
+        var lastPercent = -1
+        AIModelStore.shared.onProgress = { _, progress in
+            let percent = Int(progress * 100)
+            if percent != lastPercent { lastPercent = percent; print("进度 \(percent)%") }
+        }
+        AIModelStore.shared.onFinish = { _, error in failure = error; finished = true }
+        AIModelStore.shared.download(model)
+        let deadline = Date().addingTimeInterval(60 * 60)
+        while !finished, Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+            if AIModelStore.shared.isInstalled(model) { finished = true }
+        }
+        if AIModelStore.shared.isInstalled(model) {
+            print("✅ 安装完成（sha256 校验通过）: \(model.id)")
+            AIModelStore.shared.onProgress = nil
+            AIModelStore.shared.onFinish = nil
+            exit(0)
+        }
+        print("❌ 失败: \(failure ?? "超时")")
+        exit(1)
+
     case "--clipboard-smoke":
         ClipboardMonitor.shared.setEnabled(true)
         let pasteboard = NSPasteboard.general

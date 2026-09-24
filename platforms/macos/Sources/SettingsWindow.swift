@@ -90,9 +90,12 @@ final class AISettingsWindowController: NSWindowController {
         contentStack.addArrangedSubview(separator())
         addDownloadSection()
 
+        let runtimeText = TranslateClient.findRuntime()
+           .map { "已检测到 \($0)" } ?? "未检测到——终端执行 brew install llama.cpp"
         let footnote = NSTextField(wrappingLabelWithString:
-            "神经模型推理运行时（llama.cpp / whisper.cpp）将在下一里程碑接入；"
-            + "接入前，下载的模型会安全存放在本地，内置统计模型已默认生效。")
+            "同声传译运行时（llama.cpp 独立进程）：\(runtimeText)；"
+            + "翻译只走 127.0.0.1 回环，原文与译文不离开设备。"
+            + "运行时由你自行安装（ADR-0004 不自动下载可执行文件），模型点击下载并 sha256 校验。")
         footnote.font = .systemFont(ofSize: 11)
         footnote.textColor = .tertiaryLabelColor
         footnote.preferredMaxLayoutWidth = 560

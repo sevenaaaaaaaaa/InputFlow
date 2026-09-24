@@ -15,6 +15,17 @@ final class InputFlowInputController: IMKInputController {
     private var voicePartial = ""
     /// 边说边落字：语音占用预编辑时为 true（update() 不得清、候选窗不得关）。
     private var voiceMarked = false
+    /// 同声传译目标（"en"/"ja"）；nil = 普通语音。武装后跨语句保持，直到关闭/纯语音启动。
+    private var translateTarget: String?
+    /// 识别 final 已到、原文待确认上屏（同传译文异步生成中/已生成）。
+    private var voiceSettledSource: String?
+    private var translatedText: String?
+    private var translateFailed = false
+    private var translateFailedOnce = false
+    private var translateGeneration = 0
+    private var translateWork: DispatchWorkItem?
+    /// 已定句段的译文缓存：长句流式时只重译尾段。
+    private var segmentCache: [String: String] = [:]
     private weak var currentClient: IMKTextInput?
     private var page = 0
     private var shiftArmed = false
@@ -146,6 +157,10 @@ final class InputFlowInputController: IMKInputController {
         voiceItem.target = self
         voiceItem.state = voice.isListening ? .on : .off
         menu.addItem(voiceItem)
+
+        let interp = NSMenuItem(title: "同声传译", action: nil, keyEquivalent: "")
+        interp.submenu = interpretSubmenu()
+        menu.addItem(interp)
         let backup = NSMenuItem(title: "备份与恢复", action: nil, keyEquivalent: "")
         backup.submenu = backupSubmenu()
         menu.addItem(backup)
@@ -430,18 +445,74 @@ final class InputFlowInputController: IMKInputController {
         }
     }
 
-    /// 语音输入：识别结果「边说边落字」（实时预编辑 + 候选 #1 融合）；
-    /// 空格 / 1 / 回车 / 点击候选上屏，Esc 取消，打字自动接管（先落字再拼拼音）。
-    @objc private func toggleVoice(_ sender: NSMenuItem) {
-        if voice.isListening {
-            stopVoice()
-            if voiceMarked, let client = activeClient() {
-                clearMarkedText(client)
-                voiceMarked = false
-            }
-            window.hide()
+    // MARK: - 同声传译
+
+    private func interpretSubmenu() -> NSMenu {
+        let submenu = NSMenu(title: "同声传译")
+        for (title, target) in [("译成英文", "en"), ("译成日文", "ja")] {
+            let item = NSMenuItem(title: title, action: #selector(selectInterpret(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = target
+            item.state = translateTarget == target ? .on : .off
+            submenu.addItem(item)
+        }
+        submenu.addItem(.separator())
+        let off = NSMenuItem(title: "关闭同传", action: #selector(selectInterpret(_:)), keyEquivalent: "")
+        off.target = self
+        off.representedObject = "off"
+        submenu.addItem(off)
+        return submenu
+    }
+
+    @objc private func selectInterpret(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String else { return }
+        if raw == "off" {
+            translateTarget = nil
+            TranslateClient.shared.stop()
+            cancelVoiceUtterance()
+            PetWindowController.shared.showToast("同声传译已关闭", duration: 2)
             return
         }
+        guard TranslateClient.findRuntime() != nil else {
+            PetWindowController.shared.showToast(
+                "未检测到 llama.cpp：终端执行 brew install llama.cpp 后重试", duration: 8
+            )
+            return
+        }
+        guard TranslateClient.translateModelPath() != nil else {
+            PetWindowController.shared.showToast(
+                "缺翻译模型：正在打开「AI 增强」，下载 Gemma 3 270M（约 278MB）", duration: 8
+            )
+            openAISettings(sender)
+            return
+        }
+        translateTarget = raw
+        translateFailed = false
+        translateFailedOnce = false
+        segmentCache.removeAll()
+        PetWindowController.shared.showToast(
+            raw == "ja" ? "同声传译 → 日文（端上）" : "同声传译 → 英文（端上）", duration: 2
+        )
+        if !voice.isListening {
+            startVoice()
+        }
+        TranslateClient.shared.warmup()
+    }
+
+    /// 语音输入菜单：停止=取消本次语句（同传武装保留）；启动=纯语音（解除武装）。
+    @objc private func toggleVoice(_ sender: NSMenuItem) {
+        if voice.isListening || voiceSettledSource != nil {
+            cancelVoiceUtterance()
+            return
+        }
+        if translateTarget != nil {
+            translateTarget = nil
+            TranslateClient.shared.stop()
+        }
+        startVoice()
+    }
+
+    private func startVoice() {
         voice.onPartial = { [weak self] text in
             guard let self, self.voice.isListening else { return }
             self.voicePartial = text
@@ -464,29 +535,38 @@ final class InputFlowInputController: IMKInputController {
                 replacementRange: NSRange(location: NSNotFound, length: 0)
             )
             self.voiceMarked = true
-            self.page = 0
-            // 语音候选融合：识别结果作为候选 #1，可点击或按 1 上屏
-            let voiceCandidate = Candidate(
-                text: text, consumed: 0, kind: "voice", comment: "语音"
-            )
-            self.window.present(
-                candidates: [voiceCandidate],
-                page: 0,
-                near: self.caretRect(client)
-            ) { [weak self, weak client] _ in
-                guard let self, let client else { return }
-                self.commitVoice(self.voicePartial, client: client)
-            }
+            self.presentVoiceCandidates(source: text, client: client)
+            self.scheduleTranslation()
         }
         voice.onFinal = { [weak self] text in
             guard let self, self.voice.isListening else { return }
-            guard !self.engine.hasComposition, let client = self.activeClient() else {
-                // 打字已接管或焦点已丢：不再抢上屏
-                self.stopVoice()
+            let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let source = value.isEmpty ? self.voicePartial : value
+            guard !source.isEmpty else {
+                if self.voice.isListening { self.voice.stop() }
+                self.voicePartial = ""
                 return
             }
-            let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            self.commitVoice(value.isEmpty ? self.voicePartial : value, client: client)
+            if self.translateTarget != nil {
+                // 同传：原文留在预编辑待确认，译文异步生成（VoiceInput 随后停麦）
+                self.voicePartial = source
+                self.voiceSettledSource = source
+                self.translatedText = nil
+                self.translateFailed = false
+                guard let client = self.activeClient() else {
+                    self.cancelVoiceUtterance()
+                    return
+                }
+                self.presentVoiceCandidates(source: source, client: client)
+                self.scheduleTranslation(immediate: true)
+                return
+            }
+            guard !self.engine.hasComposition, let client = self.activeClient() else {
+                if self.voice.isListening { self.voice.stop() }
+                self.voicePartial = ""
+                return
+            }
+            self.commitVoice(source, client: client)
         }
         voice.onStatus = { message in
             PetWindowController.shared.showToast(message, duration: 4)
@@ -498,16 +578,145 @@ final class InputFlowInputController: IMKInputController {
         currentClient ?? (client as? IMKTextInput)
     }
 
-    /// 停止监听并清掉未上屏的识别文本（菜单每次打开按状态重建，无需手改标题）。
-    private func stopVoice() {
+    /// 停听 + 清本次语句状态（不打断同传武装与热引擎）。
+    private func stopListeningAndVoiceState() {
         if voice.isListening { voice.stop() }
         voicePartial = ""
+        voiceSettledSource = nil
+        translatedText = nil
+        translateFailed = false
+        translateGeneration += 1          // 丢弃在途翻译回包
+        translateWork?.cancel()
+        translateWork = nil
+        segmentCache.removeAll()
     }
 
-    /// 统一的语音上屏：空格 / 1 / 回车 / 点击候选 / 识别结束都走这里。
+    /// 取消本次语句：停听、丢译文、清预编辑、关候选窗（同传武装保留）。
+    private func cancelVoiceUtterance() {
+        stopListeningAndVoiceState()
+        if voiceMarked, let client = activeClient() {
+            clearMarkedText(client)
+            voiceMarked = false
+        }
+        window.hide()
+    }
+
+    /// 候选呈现：同传 = [译文, 原文]；普通语音 = [原文]。空译文时标「翻译中…」。
+    private func presentVoiceCandidates(source: String, client: IMKTextInput) {
+        var candidates: [Candidate] = []
+        if translateTarget != nil, let translated = translatedText, !translated.isEmpty {
+            candidates.append(Candidate(
+                text: translated, consumed: 0, kind: "voice",
+                comment: translateTarget == "ja" ? "日译" : "英译"
+            ))
+            candidates.append(Candidate(text: source, consumed: 0, kind: "voice", comment: "原文"))
+        } else {
+            let comment: String
+            if translateTarget != nil {
+                comment = translateFailed ? "翻译不可用" : "翻译中…"
+            } else {
+                comment = "语音"
+            }
+            candidates.append(Candidate(text: source, consumed: 0, kind: "voice", comment: comment))
+        }
+        page = 0
+        window.present(candidates: candidates, page: 0, near: caretRect(client)) { [weak self, weak client] index in
+            guard let self, let client else { return }
+            _ = self.commitVoiceSelection(index: index, client: client)
+        }
+    }
+
+    // MARK: - 流式翻译（尾段重译 + 已定段缓存）
+
+    private func scheduleTranslation(immediate: Bool = false) {
+        guard translateTarget != nil else { return }
+        translateWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.runTranslation() }
+        translateWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + (immediate ? 0.05 : 0.5), execute: work)
+    }
+
+    private func runTranslation() {
+        guard let target = translateTarget else { return }
+        let source = voiceSettledSource ?? voicePartial
+        guard !source.isEmpty else { return }
+        translateGeneration += 1
+        let generation = translateGeneration
+
+        let pivot = source.lastIndex(where: { "。！？；，、\n".contains($0) })
+        let head = pivot.map { String(source[source.startIndex...$0]) } ?? ""
+        let tail = pivot.map { String(source[source.index(after: $0)...]) } ?? source
+
+        func finish(_ merged: String?) {
+            guard translateGeneration == generation else { return }
+            translatedText = merged.flatMap { $0.isEmpty ? nil : $0 }
+            if let client = activeClient(), !engine.hasComposition,
+               voice.isListening || voiceSettledSource != nil {
+                presentVoiceCandidates(source: source, client: client)
+            }
+        }
+
+        func translateTail(headTranslation: String?) {
+            let piece = tail.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !piece.isEmpty else {
+                finish(headTranslation)
+                return
+            }
+            TranslateClient.shared.translate(piece, target: target) { [weak self] result in
+                DispatchQueue.main.async {
+                    guard let self, self.translateGeneration == generation else { return }
+                    switch result {
+                    case .success(let translated):
+                        self.translateFailed = false
+                        let merged: String
+                        if let headTranslation, !headTranslation.isEmpty {
+                            merged = headTranslation + " " + translated
+                        } else {
+                            merged = translated
+                        }
+                        finish(merged)
+                    case .failure(let error):
+                        self.handleTranslateFailure(error)
+                        finish(headTranslation)
+                    }
+                }
+            }
+        }
+
+        let headTrimmed = head.trimmingCharacters(in: .whitespacesAndNewlines)
+        if headTrimmed.isEmpty {
+            translateTail(headTranslation: nil)
+        } else if let cached = segmentCache[headTrimmed] {
+            translateTail(headTranslation: cached)
+        } else {
+            TranslateClient.shared.translate(headTrimmed, target: target) { [weak self] result in
+                DispatchQueue.main.async {
+                    guard let self, self.translateGeneration == generation else { return }
+                    switch result {
+                    case .success(let translated):
+                        self.translateFailed = false
+                        self.segmentCache[headTrimmed] = translated
+                        translateTail(headTranslation: translated)
+                    case .failure(let error):
+                        self.handleTranslateFailure(error)
+                        translateTail(headTranslation: nil)
+                    }
+                }
+            }
+        }
+    }
+
+    private func handleTranslateFailure(_ error: Error) {
+        translateFailed = true
+        guard !translateFailedOnce else { return }
+        translateFailedOnce = true
+        PetWindowController.shared.showToast("同传引擎：\(error.localizedDescription)", duration: 6)
+    }
+
+    /// 统一的语音上屏：空格 / 数字 / 回车 / 点击候选 / 识别结束 / 打字接管都走这里。
     private func commitVoice(_ text: String, client: IMKTextInput) {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        stopVoice()
+        stopListeningAndVoiceState()
         if !value.isEmpty {
             // insertText 会替换当前 marked 区域（边说边落字的内容）
             client.insertText(value, replacementRange: NSRange(location: NSNotFound, length: 0))
@@ -524,21 +733,25 @@ final class InputFlowInputController: IMKInputController {
         window.hide()
     }
 
-    /// 语音让位给打字：先落下已识别文本再停监听（说→打无缝衔接）。
+    /// 按候选下标上屏：0 = 译文（就绪时），其余 = 原文；无译文时全部 = 原文。
+    /// 返回 false 表示没有可上屏内容（按键应直通）。
+    @discardableResult
+    private func commitVoiceSelection(index: Int, client: IMKTextInput) -> Bool {
+        let source = voiceSettledSource ?? voicePartial
+        guard !source.isEmpty else { return false }
+        if translateTarget != nil, let translated = translatedText, !translated.isEmpty {
+            commitVoice(index == 0 ? translated : source, client: client)
+        } else {
+            commitVoice(source, client: client)
+        }
+        return true
+    }
+
+    /// 语音/同传让位给打字：先落下顶部候选再停（说→打无缝衔接）。
     private func absorbVoice(client: IMKTextInput) {
-        let pending = voicePartial
-        stopVoice()
-        if !pending.isEmpty {
-            client.insertText(pending, replacementRange: NSRange(location: NSNotFound, length: 0))
-            voiceMarked = false
-            engine.recordCommit(pending)
-            persistUserModel()
-            stats.recordCommit(chars: pending.count, keys: 0)
-            recordModeSignal(strong: false)
-            PetWindowController.shared.react(.commit)
-        } else if voiceMarked {
-            clearMarkedText(client)
-            voiceMarked = false
+        guard commitVoiceSelection(index: 0, client: client) else {
+            cancelVoiceUtterance()
+            return
         }
     }
 
@@ -768,14 +981,8 @@ final class InputFlowInputController: IMKInputController {
 
         switch keyCode {
         case 53: // Esc
-            if voice.isListening {
-                let hadMarked = voiceMarked
-                stopVoice()
-                if hadMarked {
-                    clearMarkedText(client)
-                    voiceMarked = false
-                }
-                window.hide()
+            if voice.isListening || voiceSettledSource != nil {
+                cancelVoiceUtterance()
                 return true
             }
             if engine.mode == "emoji" {
@@ -788,8 +995,8 @@ final class InputFlowInputController: IMKInputController {
             update(client)
             return true
         case 36, 76: // Return
-            if voice.isListening, !voicePartial.isEmpty, !engine.hasComposition {
-                commitVoice(voicePartial, client: client)
+            if (voice.isListening || voiceSettledSource != nil), !engine.hasComposition,
+               commitVoiceSelection(index: 0, client: client) {
                 return true
             }
             guard engine.hasComposition else { return false }
@@ -805,8 +1012,8 @@ final class InputFlowInputController: IMKInputController {
             update(client)
             return true
         case 49: // Space
-            if voice.isListening, !voicePartial.isEmpty, !engine.hasComposition {
-                commitVoice(voicePartial, client: client)
+            if (voice.isListening || voiceSettledSource != nil), !engine.hasComposition,
+               commitVoiceSelection(index: 0, client: client) {
                 return true
             }
             guard engine.hasComposition || engine.mode == "emoji" else { return false }
@@ -844,17 +1051,18 @@ final class InputFlowInputController: IMKInputController {
             }
         }
 
-        // 语音候选只有一条：按 1 直接上屏（避免落进普通流程把 "1" 打出来）
-        if voice.isListening, !voicePartial.isEmpty, !engine.hasComposition,
-           event.charactersIgnoringModifiers == "1" {
-            commitVoice(voicePartial, client: client)
+        // 语音/同传候选：数字键直接上屏对应候选（1=译文，2=原文）
+        if (voice.isListening || voiceSettledSource != nil), !engine.hasComposition,
+           let voiceChars = event.charactersIgnoringModifiers, let num = Int(voiceChars),
+           (1...9).contains(num),
+           commitVoiceSelection(index: num - 1, client: client) {
             return true
         }
 
         guard let chars = event.charactersIgnoringModifiers else { return false }
 
-        // 语音进行中遇到普通按键：先落下已识别文本，再继续处理本键（说→打无缝衔接）
-        if voice.isListening {
+        // 语音进行中遇到普通按键：先落下顶部候选，再继续处理本键（说→打无缝衔接）
+        if voice.isListening || voiceSettledSource != nil {
             absorbVoice(client: client)
         }
 
@@ -911,7 +1119,7 @@ final class InputFlowInputController: IMKInputController {
     }
 
     override func commitComposition(_ sender: Any!) {
-        if voice.isListening, let voiceClient = sender as? IMKTextInput {
+        if voice.isListening || voiceSettledSource != nil, let voiceClient = sender as? IMKTextInput {
             absorbVoice(client: voiceClient)
         }
         if let client = sender as? IMKTextInput {
@@ -927,8 +1135,9 @@ final class InputFlowInputController: IMKInputController {
     }
 
     override func deactivateServer(_ sender: Any!) {
-        stopVoice()
+        stopListeningAndVoiceState()
         voiceMarked = false
+        window.hide()
         engine.clear()
         urlMode = false
         // 会话结束：截断发呆计时，避免跨应用间隙被误计
@@ -1093,9 +1302,9 @@ final class InputFlowInputController: IMKInputController {
     private func update(_ client: IMKTextInput) {
         let comp = engine.composition
         guard !comp.raw.isEmpty || !comp.candidates.isEmpty else {
-            // 语音正在「边说边落字」时，预编辑与候选窗归语音所有，不许清
+            // 语音「边说边落字」或同传待确认时，预编辑与候选窗归语音所有，不许清
             if !voiceMarked { clearMarkedText(client) }
-            if !voice.isListening { window.hide() }
+            if !voice.isListening && voiceSettledSource == nil { window.hide() }
             PetWindowController.shared.react(.idle)
             return
         }

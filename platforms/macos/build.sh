@@ -70,7 +70,8 @@ SWIFT_SOURCES=("$HERE/Sources/main.swift" "$HERE/Sources/Engine.swift" \
     "$HERE/Sources/VRMPetView.swift" \
     "$HERE/Sources/PetCatalog.swift" \
     "$HERE/Sources/PetCatalogWindow.swift" \
-    "$HERE/Sources/VoiceInput.swift")
+    "$HERE/Sources/VoiceInput.swift" \
+    "$HERE/Sources/TranslateClient.swift")
 if [[ "$UNIVERSAL" == "1" ]]; then
     SWIFT_ARCHS=(arm64 x86_64)
 else
