@@ -181,6 +181,19 @@ final class CandidateWindowController {
         }
     }
 
+    /// 开发用：打印每个候选格的 frame 与文本 intrinsic，定位截断。
+    func dumpLayout(prefix: String) {
+        panel.layoutIfNeeded()
+        for (i, v) in row.arrangedSubviews.enumerated() {
+            guard let cell = v as? CandidateCell else {
+                print("\(prefix)[\(i)] other frame=\(v.frame)")
+                continue
+            }
+            print(cell.diagLine(index: i, prefix: prefix))
+        }
+        print("\(prefix) panel=\(panel.frame.size) row=\(row.frame.size) fitting=\(row.fittingSize)")
+    }
+
     func hide() {
         if panel.isVisible {
             panel.alphaValue = 0
@@ -379,6 +392,19 @@ private final class CandidateCell: NSView {
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+    func diagLine(index: Int, prefix: String) -> String {
+        let tl = textLabel
+        let cl = commentLabel
+        let col = column
+        return "\(prefix)[\(index)] text=\(tl.stringValue.prefix(12)) cell=\(frame.width)"
+            + " col=\(col.frame.width) indexFrame=\(indexLabel.frame.width) indexIntrinsic=\(indexLabel.intrinsicContentSize.width)"
+            + " labelFrame=\(tl.frame.width) labelIntrinsic=\(tl.intrinsicContentSize.width)"
+            + " commentHidden=\(cl.isHidden) commentFrame=\(cl.isHidden ? 0 : cl.frame.width)"
+            + " commentIntrinsic=\(cl.isHidden ? 0 : cl.intrinsicContentSize.width)"
+            + " intrinsicCell=\(intrinsicContentSize.width)"
+            + (tl.frame.width + 0.5 < tl.intrinsicContentSize.width ? "  <<< SQUEEZED" : "")
+    }
+
     override var intrinsicContentSize: NSSize {
         let textWidth = min(
             max(
@@ -389,6 +415,6 @@ private final class CandidateCell: NSView {
         )
         let height = textLabel.intrinsicContentSize.height
             + (commentLabel.isHidden ? 0 : commentLabel.intrinsicContentSize.height + 1)
-        return NSSize(width: 8 + max(10, indexLabel.intrinsicContentSize.width) + 6 + textWidth + 10, height: height + 5)
+        return NSSize(width: 8 + 16 + 6 + textWidth + 10, height: height + 5)
     }
 }

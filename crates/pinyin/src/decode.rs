@@ -50,6 +50,21 @@ const MIXED_LIMIT: usize = 64;
 /// 超过这个长度的输入不再尝试混拼扫描（长串本来就是整句输入）。
 const MAX_MIXED_QUERY: usize = 8;
 
+/// 词库键形规范化：导入时 ü 行统一成 `v`（`lue`→`lve`、`nue`→`nve`），
+/// 运行时切分允许两种拼法，查词键前必须归一，否则 `shenglue` 永远查不到 `sheng'lve`。
+fn canon_syl(s: &str) -> &str {
+    match s {
+        "lue" => "lve",
+        "nue" => "nve",
+        _ => s,
+    }
+}
+
+/// 查询串同规（前缀 / 简拼按纯字母匹配词库）。
+fn canon_query(q: &str) -> String {
+    q.replace("lue", "lve").replace("nue", "nve")
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Layout {
     Full,
@@ -234,7 +249,7 @@ impl PinyinDecoder {
         if !matches!(self.layout, Layout::Full) || chars.len() < 2 {
             return;
         }
-        let query: String = chars.iter().collect();
+        let query = canon_query(&chars.iter().collect::<String>());
         let consumed = orig.last().map(|i| i + 1).unwrap_or(chars.len());
         let qlen = chars.len() as f64;
 
@@ -315,7 +330,7 @@ impl PinyinDecoder {
     /// 双拼按键先按两键一音节解回全拼；末尾落单或无法解码的部分原样保留。
     fn prefix_query(&self, chars: &[char]) -> String {
         match self.layout {
-            Layout::Full => chars.iter().collect(),
+            Layout::Full => canon_query(&chars.iter().collect::<String>()),
             Layout::Shuangpin(_) => {
                 let mut out = String::new();
                 let mut i = 0;
@@ -332,7 +347,7 @@ impl PinyinDecoder {
                 if i < chars.len() {
                     out.extend(chars[i..].iter());
                 }
-                out
+                canon_query(&out)
             }
         }
     }
@@ -389,7 +404,7 @@ impl PinyinDecoder {
             if k > 1 {
                 key.push('\'');
             }
-            key.push_str(usable[k - 1].syl.as_deref().unwrap_or_default());
+            key.push_str(canon_syl(usable[k - 1].syl.as_deref().unwrap_or_default()));
             let consumed = orig[usable[k - 1].end - 1] + 1;
             let display = key.replace('\'', " ");
             let fuzzy_cost: f64 = usable[..k].iter().map(|s| s.fuzzy).sum();
@@ -422,7 +437,7 @@ impl PinyinDecoder {
                     if j > 0 {
                         key.push('\'');
                     }
-                    key.push_str(s.syl.as_deref().unwrap_or_default());
+                    key.push_str(canon_syl(s.syl.as_deref().unwrap_or_default()));
                 }
                 let fuzzy_cost: f64 = segs[i..i + k].iter().map(|s| s.fuzzy).sum();
                 let entries = self.dict.lookup(&key);

@@ -141,6 +141,33 @@ if installArgs.count > 1 {
         print("候选数=\(comp.candidates.count)，已渲染: \(out)")
         exit(0)
 
+    case "--layout-diag":
+        // 布局诊断：候选格实际 frame vs 文本 intrinsic（找省略号截断根因）
+        let demoWindow = CandidateWindowController()
+        var cands: [Candidate] = [
+            Candidate(text: "省略", consumed: 6, kind: "word", comment: nil),
+            Candidate(text: "省", consumed: 3, kind: "char", comment: "sheng"),
+            Candidate(text: "省略号", consumed: 9, kind: "word", comment: "sheng lve hao"),
+            Candidate(text: "生了", consumed: 6, kind: "word", comment: "sheng le"),
+            Candidate(text: "过程", consumed: 4, kind: "word", comment: "guo cheng"),
+            Candidate(text: "输入", consumed: 4, kind: "word", comment: "shu ru"),
+            Candidate(text: "这是一个比较长的候选用来压宽度", consumed: 15, kind: "sentence", comment: "zhe shi yi ge bi jiao chang de hou xuan"),
+            Candidate(text: "好", consumed: 2, kind: "char", comment: nil),
+            Candidate(text: "的", consumed: 2, kind: "char", comment: "de"),
+        ]
+        demoWindow.present(
+            candidates: cands,
+            page: 0,
+            near: NSRect(x: 300, y: 300, width: 2, height: 18),
+            onPick: { _ in }
+        )
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        demoWindow.dumpLayout(prefix: "diag")
+        let out = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : "/tmp/layout-diag.png"
+        demoWindow.snapshot(to: out)
+        print("布局诊断已渲染: \(out)")
+        exit(0)
+
     case "--voice-demo":
         // 语音候选卡片快照（不启动麦克风）：验证融合候选的样式
         let demoWindow = CandidateWindowController()

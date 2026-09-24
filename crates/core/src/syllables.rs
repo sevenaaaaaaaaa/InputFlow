@@ -1,7 +1,7 @@
 //! 拼音音节表与声韵切分。全表按字典序排列，供二分查找。
 
 /// 有效音节（不含声调；ü 统一写作 v）。**必须保持字典序**（有测试校验）。
-pub const SYLLABLES: [&str; 409] = [
+pub const SYLLABLES: [&str; 411] = [
     "a", "ai", "an", "ang", "ao", "ba", "bai", "ban", "bang", "bao", "bei", "ben", "beng", "bi",
     "bian", "biao", "bie", "bin", "bing", "bo", "bu", "ca", "cai", "can", "cang", "cao", "ce",
     "cen", "ceng", "cha", "chai", "chan", "chang", "chao", "che", "chen", "cheng", "chi", "chong",
@@ -16,10 +16,12 @@ pub const SYLLABLES: [&str; 409] = [
     "juan", "jue", "jun", "ka", "kai", "kan", "kang", "kao", "ke", "ken", "keng", "kong", "kou",
     "ku", "kua", "kuai", "kuan", "kuang", "kui", "kun", "kuo", "la", "lai", "lan", "lang", "lao",
     "le", "lei", "leng", "li", "lia", "lian", "liang", "liao", "lie", "lin", "ling", "liu", "lo",
-    "long", "lou", "lu", "luan", "lun", "luo", "lv", "lve", "ma", "mai", "man", "mang", "mao",
+    "long", "lou", "lu", "luan", "lue", "lun", "luo", "lv", "lve", "ma", "mai", "man", "mang",
+    "mao",
     "me", "mei", "men", "meng", "mi", "mian", "miao", "mie", "min", "ming", "miu", "mo", "mou",
     "mu", "na", "nai", "nan", "nang", "nao", "ne", "nei", "nen", "neng", "ni", "nian", "niang",
-    "niao", "nie", "nin", "ning", "niu", "nong", "nou", "nu", "nuan", "nuo", "nv", "nve", "o",
+    "niao", "nie", "nin", "ning", "niu", "nong", "nou", "nu", "nuan", "nue", "nuo", "nv", "nve",
+    "o",
     "ou", "pa", "pai", "pan", "pang", "pao", "pei", "pen", "peng", "pi", "pian", "piao", "pie",
     "pin", "ping", "po", "pou", "pu", "qi", "qia", "qian", "qiang", "qiao", "qie", "qin", "qing",
     "qiong", "qiu", "qu", "quan", "que", "qun", "ran", "rang", "rao", "re", "ren", "reng", "ri",
@@ -84,6 +86,8 @@ mod tests {
         assert!(is_syllable("ni"));
         assert!(is_syllable("shuang"));
         assert!(is_syllable("lv"));
+        assert!(is_syllable("lue"));
+        assert!(is_syllable("nue"));
         assert!(is_syllable("er"));
         assert!(!is_syllable("n"));
         assert!(!is_syllable("xx"));
