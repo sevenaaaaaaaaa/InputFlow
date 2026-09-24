@@ -38,7 +38,7 @@ final class CandidateWindowController {
 
         row.orientation = .horizontal
         row.alignment = .centerY
-        row.spacing = 2
+        row.spacing = 4
         row.edgeInsets = NSEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
         row.autoresizingMask = [.width, .height]
 
@@ -72,15 +72,11 @@ final class CandidateWindowController {
         let side = theme.current
         if #available(macOS 26.0, *), let glass = background as? NSGlassEffectView {
             glass.contentView = row
-            if let surface = side.surface {
-                glass.tintColor = surface
-            }
+            glass.tintColor = side.surface
         } else {
             background.addSubview(row)
-            if let surface = side.surface {
-                background.wantsLayer = true
-                background.layer?.backgroundColor = surface.cgColor
-            }
+            background.wantsLayer = true
+            background.layer?.backgroundColor = side.surface?.cgColor ?? NSColor.clear.cgColor
         }
     }
 
@@ -90,16 +86,21 @@ final class CandidateWindowController {
             let glass = NSGlassEffectView()
             glass.cornerRadius = radius
             glass.style = .regular
-            glass.tintColor = side.surface ?? NSColor.windowBackgroundColor.withAlphaComponent(0.25)
+            // 不默认染色：系统输入法同款素玻璃，皮肤包才覆盖 tint
+            glass.tintColor = side.surface
             return glass
         }
         let effect = NSVisualEffectView()
-        effect.material = .hudWindow
+        effect.material = .underWindowBackground
         effect.blendingMode = .behindWindow
         effect.state = .active
         effect.wantsLayer = true
         effect.layer?.cornerRadius = radius
         effect.layer?.masksToBounds = true
+        if let surface = side.surface {
+            effect.wantsLayer = true
+            effect.layer?.backgroundColor = surface.cgColor
+        }
         return effect
     }
 
@@ -135,11 +136,6 @@ final class CandidateWindowController {
         for (offset, candidate) in slice.enumerated() {
             let cell = CandidateCell(index: offset + 1, side: side)
             cell.configure(candidate, isFirst: offset == 0)
-            if offset == 0 {
-                cell.layer?.borderWidth = 1
-                cell.layer?.borderColor = (side.accent ?? .controlAccentColor)
-                    .withAlphaComponent(0.35).cgColor
-            }
             cell.onClick = { [weak self] in
                 self?.onPick?(start + offset)
             }
@@ -256,16 +252,17 @@ private final class CandidateCell: NSView {
     private let column = NSStackView()
     private var trackingArea: NSTrackingArea?
     private var baseBackground: CGColor = NSColor.clear.cgColor
-    private let hoverAccent: NSColor
+    private let accent: NSColor
     private let baseFontSize: CGFloat
     private let side: CandidateTheme.Side
+    private var isFirstCell = false
     /// 语音长句：允许两行换行展示（其余候选仍单行截断）。
     private var wraps = false
     private var wrapConstraint: NSLayoutConstraint?
 
     init(index: Int, side: CandidateTheme.Side) {
         self.side = side
-        hoverAccent = side.accent ?? .controlAccentColor
+        accent = side.accent ?? .controlAccentColor
         baseFontSize = side.fontSize ?? 17
         super.init(frame: .zero)
         wantsLayer = true
@@ -311,19 +308,20 @@ private final class CandidateCell: NSView {
     required init?(coder: NSCoder) { nil }
 
     func configure(_ candidate: Candidate, isFirst: Bool = false) {
+        isFirstCell = isFirst
+        // 系统输入法同款：选中格实心 highlight + 白字；未选中纯文字无底
         indexLabel.wantsLayer = true
         indexLabel.layer?.cornerRadius = 6
-        indexLabel.layer?.backgroundColor = (isFirst
-            ? (side.accent ?? .controlAccentColor).withAlphaComponent(0.18)
-            : NSColor.quaternaryLabelColor.withAlphaComponent(0.35)).cgColor
-        indexLabel.textColor = isFirst
-            ? (side.accent ?? .controlAccentColor)
-            : (side.comment ?? .tertiaryLabelColor)
-        baseBackground = isFirst
-            ? (side.accent ?? .controlAccentColor).withAlphaComponent(0.10).cgColor
-            : (candidate.kind == "literal"
-                ? NSColor.quaternaryLabelColor.withAlphaComponent(0.10).cgColor
+        indexLabel.layer?.backgroundColor = NSColor.clear.cgColor
+        if isFirst {
+            baseBackground = accent.cgColor
+            indexLabel.textColor = .white
+        } else {
+            baseBackground = (candidate.kind == "literal"
+                ? NSColor.quaternaryLabelColor.withAlphaComponent(0.12).cgColor
                 : NSColor.clear.cgColor)
+            indexLabel.textColor = side.comment ?? .tertiaryLabelColor
+        }
         textLabel.stringValue = candidate.text
         textLabel.font = candidate.kind == "emoji"
             ? .systemFont(ofSize: baseFontSize + 9)
@@ -355,6 +353,12 @@ private final class CandidateCell: NSView {
             commentLabel.stringValue = ""
             commentLabel.isHidden = true
         }
+        textLabel.textColor = isFirst
+            ? .white
+            : (side.text ?? .labelColor)
+        commentLabel.textColor = isFirst
+            ? NSColor.white.withAlphaComponent(0.72)
+            : (side.comment ?? .secondaryLabelColor)
         layer?.backgroundColor = baseBackground
     }
 
@@ -374,7 +378,10 @@ private final class CandidateCell: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        layer?.backgroundColor = hoverAccent.withAlphaComponent(0.14).cgColor
+        // 未选中悬停用中性灰（系统列表同款），不用 accent 蓝
+        layer?.backgroundColor = isFirstCell
+            ? accent.withAlphaComponent(0.88).cgColor
+            : NSColor.labelColor.withAlphaComponent(0.07).cgColor
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -382,12 +389,14 @@ private final class CandidateCell: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        layer?.backgroundColor = hoverAccent.withAlphaComponent(0.24).cgColor
+        layer?.backgroundColor = isFirstCell
+            ? accent.cgColor
+            : NSColor.labelColor.withAlphaComponent(0.14).cgColor
         onClick?()
     }
 
     override func mouseUp(with event: NSEvent) {
-        layer?.backgroundColor = hoverAccent.withAlphaComponent(0.14).cgColor
+        mouseEntered(with: event)
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
