@@ -165,6 +165,25 @@ if installArgs.count > 1 {
         print("语音候选已渲染: \(out)")
         exit(0)
 
+    case "--punct-demo":
+        // 标点二次确认候选快照（不启动麦克风）：[原样, 。, ，, ！, ？]
+        let demoWindow = CandidateWindowController()
+        let labels = ["原样", "。", "，", "！", "？"]
+        let cands = labels.map {
+            Candidate(text: $0, consumed: 0, kind: "voice", comment: nil)
+        }
+        demoWindow.present(
+            candidates: cands,
+            page: 0,
+            near: NSRect(x: 300, y: 300, width: 2, height: 18),
+            onPick: { _ in }
+        )
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        let out = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : "/tmp/punct-demo.png"
+        demoWindow.snapshot(to: out)
+        print("标点确认候选已渲染: \(out)")
+        exit(0)
+
     case "--translate-check":
         let runtime = TranslateClient.findRuntime()
         let model = TranslateClient.translateModelPath()

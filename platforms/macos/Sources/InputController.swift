@@ -26,6 +26,10 @@ final class InputFlowInputController: IMKInputController {
     private var translateWork: DispatchWorkItem?
     /// 已定句段的译文缓存：长句流式时只重译尾段。
     private var segmentCache: [String: String] = [:]
+    /// 普通语音 final 后的标点二次确认原文；nil = 无待确认（同传不走此状态）。
+    private var voicePunctPending: String?
+    /// 标点候选标签：下标 0 = 原样（不加标点），1... = 实际标点。
+    private static let voicePunctLabels = ["原样", "。", "，", "！", "？"]
     private weak var currentClient: IMKTextInput?
     private var page = 0
     private var shiftArmed = false
@@ -486,6 +490,7 @@ final class InputFlowInputController: IMKInputController {
             openAISettings(sender)
             return
         }
+        cancelVoiceUtterance()
         translateTarget = raw
         translateFailed = false
         translateFailedOnce = false
@@ -513,6 +518,7 @@ final class InputFlowInputController: IMKInputController {
     }
 
     private func startVoice() {
+        voicePunctPending = nil
         voice.onPartial = { [weak self] text in
             guard let self, self.voice.isListening else { return }
             self.voicePartial = text
@@ -566,7 +572,11 @@ final class InputFlowInputController: IMKInputController {
                 self.voicePartial = ""
                 return
             }
-            self.commitVoice(source, client: client)
+            // 标点二次确认：候选 [原样, 。, ，, ！, ?]，空格/回车=原样，数字选标点
+            self.voicePunctPending = source
+            self.voiceSettledSource = source
+            self.voicePartial = source
+            self.presentVoiceCandidates(source: source, client: client)
         }
         voice.onStatus = { message in
             PetWindowController.shared.showToast(message, duration: 4)
@@ -583,6 +593,7 @@ final class InputFlowInputController: IMKInputController {
         if voice.isListening { voice.stop() }
         voicePartial = ""
         voiceSettledSource = nil
+        voicePunctPending = nil
         translatedText = nil
         translateFailed = false
         translateGeneration += 1          // 丢弃在途翻译回包
@@ -604,7 +615,11 @@ final class InputFlowInputController: IMKInputController {
     /// 候选呈现：同传 = [译文, 原文]；普通语音 = [原文]。空译文时标「翻译中…」。
     private func presentVoiceCandidates(source: String, client: IMKTextInput) {
         var candidates: [Candidate] = []
-        if translateTarget != nil, let translated = translatedText, !translated.isEmpty {
+        if voicePunctPending != nil {
+            candidates = Self.voicePunctLabels.map {
+                Candidate(text: $0, consumed: 0, kind: "voice", comment: nil)
+            }
+        } else if translateTarget != nil, let translated = translatedText, !translated.isEmpty {
             candidates.append(Candidate(
                 text: translated, consumed: 0, kind: "voice",
                 comment: translateTarget == "ja" ? "日译" : "英译"
@@ -739,7 +754,17 @@ final class InputFlowInputController: IMKInputController {
     private func commitVoiceSelection(index: Int, client: IMKTextInput) -> Bool {
         let source = voiceSettledSource ?? voicePartial
         guard !source.isEmpty else { return false }
-        if translateTarget != nil, let translated = translatedText, !translated.isEmpty {
+        if voicePunctPending != nil {
+            // 0 = 原样；1... = 追加对应标点
+            let labels = Self.voicePunctLabels
+            let value: String
+            if index > 0, labels.indices.contains(index) {
+                value = source + labels[index]
+            } else {
+                value = source
+            }
+            commitVoice(value, client: client)
+        } else if translateTarget != nil, let translated = translatedText, !translated.isEmpty {
             commitVoice(index == 0 ? translated : source, client: client)
         } else {
             commitVoice(source, client: client)
