@@ -141,6 +141,30 @@ if installArgs.count > 1 {
         print("候选数=\(comp.candidates.count)，已渲染: \(out)")
         exit(0)
 
+    case "--voice-demo":
+        // 语音候选卡片快照（不启动麦克风）：验证融合候选的样式
+        let demoWindow = CandidateWindowController()
+        let voiceText = CommandLine.arguments.count > 3
+            ? CommandLine.arguments[3]
+            : "帮我把这段代码改成异步"
+        let voiceCand = Candidate(
+            text: voiceText,
+            consumed: 0,
+            kind: "voice",
+            comment: "语音"
+        )
+        demoWindow.present(
+            candidates: [voiceCand],
+            page: 0,
+            near: NSRect(x: 300, y: 300, width: 2, height: 18),
+            onPick: { _ in }
+        )
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        let out = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : "/tmp/voice-demo.png"
+        demoWindow.snapshot(to: out)
+        print("语音候选已渲染: \(out)")
+        exit(0)
+
     case "--clipboard-smoke":
         ClipboardMonitor.shared.setEnabled(true)
         let pasteboard = NSPasteboard.general

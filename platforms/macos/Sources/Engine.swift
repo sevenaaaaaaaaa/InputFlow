@@ -111,6 +111,12 @@ final class InputFlowEngine {
         return Int(tsv.withCString { inputflow_user_import(h, $0) })
     }
 
+    /// 外部上屏（语音识别结果）的学习：记词 + 二元组上下文，与打字共享一套学习。
+    func recordCommit(_ text: String) {
+        guard let h = handle, !text.isEmpty else { return }
+        _ = text.withCString { inputflow_record_commit(h, $0) }
+    }
+
     /// 导出备份包（明文 TSV + 版本头 + CRC32）；加密由 `BackupManager` 负责。
     func exportBackup() -> String {
         guard let h = handle, let s = takeString(inputflow_backup_export(h)) else { return "" }

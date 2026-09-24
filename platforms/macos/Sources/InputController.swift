@@ -13,6 +13,8 @@ final class InputFlowInputController: IMKInputController {
     private let clipboard = ClipboardMonitor.shared
     private let voice = VoiceInputController.shared
     private var voicePartial = ""
+    /// 边说边落字：语音占用预编辑时为 true（update() 不得清、候选窗不得关）。
+    private var voiceMarked = false
     private weak var currentClient: IMKTextInput?
     private var page = 0
     private var shiftArmed = false
@@ -428,40 +430,116 @@ final class InputFlowInputController: IMKInputController {
         }
     }
 
-    /// 语音输入：按住菜单开始，实时文本进候选条，结束自动上屏；Esc 取消。
+    /// 语音输入：识别结果「边说边落字」（实时预编辑 + 候选 #1 融合）；
+    /// 空格 / 1 / 回车 / 点击候选上屏，Esc 取消，打字自动接管（先落字再拼拼音）。
     @objc private func toggleVoice(_ sender: NSMenuItem) {
         if voice.isListening {
-            voice.stop()
-            voicePartial = ""
+            stopVoice()
+            if voiceMarked, let client = activeClient() {
+                clearMarkedText(client)
+                voiceMarked = false
+            }
             window.hide()
-            sender.state = .off
-            sender.title = "语音输入（端上识别）"
             return
         }
-        sender.state = .on
-        sender.title = "停止语音输入"
         voice.onPartial = { [weak self] text in
-            guard let self else { return }
+            guard let self, self.voice.isListening else { return }
             self.voicePartial = text
-            self.window.presentHint(
-                "🎤 " + text,
-                near: self.currentClient.flatMap { self.caretRect($0) }
+            guard let client = self.activeClient() else { return }
+            if self.engine.hasComposition {
+                // 打字优先：不抢拼音的预编辑，只在旁边提示
+                self.window.presentHint("🎤 " + text, near: self.caretRect(client))
+                return
+            }
+            // 边说边落字：实时写进预编辑（强调色下划线）
+            let attributed = NSAttributedString(string: text, attributes: [
+                .underlineStyle: NSUnderlineStyle.single.rawValue,
+                .underlineColor: NSColor.controlAccentColor,
+                .foregroundColor: NSColor.labelColor,
+                .font: NSFont.systemFont(ofSize: 15, weight: .medium),
+            ])
+            client.setMarkedText(
+                attributed,
+                selectionRange: NSRange(location: attributed.length, length: 0),
+                replacementRange: NSRange(location: NSNotFound, length: 0)
             )
+            self.voiceMarked = true
+            self.page = 0
+            // 语音候选融合：识别结果作为候选 #1，可点击或按 1 上屏
+            let voiceCandidate = Candidate(
+                text: text, consumed: 0, kind: "voice", comment: "语音"
+            )
+            self.window.present(
+                candidates: [voiceCandidate],
+                page: 0,
+                near: self.caretRect(client)
+            ) { [weak self, weak client] _ in
+                guard let self, let client else { return }
+                self.commitVoice(self.voicePartial, client: client)
+            }
         }
         voice.onFinal = { [weak self] text in
-            guard let self else { return }
-            self.voicePartial = ""
-            self.window.hide()
-            if let client = self.currentClient, !text.isEmpty {
-                client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
-                PetWindowController.shared.showToast("已上屏：\(text)", duration: 3)
+            guard let self, self.voice.isListening else { return }
+            guard !self.engine.hasComposition, let client = self.activeClient() else {
+                // 打字已接管或焦点已丢：不再抢上屏
+                self.stopVoice()
+                return
             }
-            self.menu()?.item(withTitle: "停止语音输入")?.title = "语音输入（端上识别）"
+            let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            self.commitVoice(value.isEmpty ? self.voicePartial : value, client: client)
         }
         voice.onStatus = { message in
             PetWindowController.shared.showToast(message, duration: 4)
         }
         voice.start()
+    }
+
+    private func activeClient() -> IMKTextInput? {
+        currentClient ?? (client as? IMKTextInput)
+    }
+
+    /// 停止监听并清掉未上屏的识别文本（菜单每次打开按状态重建，无需手改标题）。
+    private func stopVoice() {
+        if voice.isListening { voice.stop() }
+        voicePartial = ""
+    }
+
+    /// 统一的语音上屏：空格 / 1 / 回车 / 点击候选 / 识别结束都走这里。
+    private func commitVoice(_ text: String, client: IMKTextInput) {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        stopVoice()
+        if !value.isEmpty {
+            // insertText 会替换当前 marked 区域（边说边落字的内容）
+            client.insertText(value, replacementRange: NSRange(location: NSNotFound, length: 0))
+            voiceMarked = false
+            engine.recordCommit(value)
+            persistUserModel()
+            stats.recordCommit(chars: value.count, keys: 0)
+            recordModeSignal(strong: false)
+            PetWindowController.shared.react(.commit)
+        } else if voiceMarked {
+            clearMarkedText(client)
+            voiceMarked = false
+        }
+        window.hide()
+    }
+
+    /// 语音让位给打字：先落下已识别文本再停监听（说→打无缝衔接）。
+    private func absorbVoice(client: IMKTextInput) {
+        let pending = voicePartial
+        stopVoice()
+        if !pending.isEmpty {
+            client.insertText(pending, replacementRange: NSRange(location: NSNotFound, length: 0))
+            voiceMarked = false
+            engine.recordCommit(pending)
+            persistUserModel()
+            stats.recordCommit(chars: pending.count, keys: 0)
+            recordModeSignal(strong: false)
+            PetWindowController.shared.react(.commit)
+        } else if voiceMarked {
+            clearMarkedText(client)
+            voiceMarked = false
+        }
     }
 
     @objc private func openPetCatalog(_ sender: Any) {
@@ -691,8 +769,12 @@ final class InputFlowInputController: IMKInputController {
         switch keyCode {
         case 53: // Esc
             if voice.isListening {
-                voice.stop()
-                voicePartial = ""
+                let hadMarked = voiceMarked
+                stopVoice()
+                if hadMarked {
+                    clearMarkedText(client)
+                    voiceMarked = false
+                }
                 window.hide()
                 return true
             }
@@ -706,6 +788,10 @@ final class InputFlowInputController: IMKInputController {
             update(client)
             return true
         case 36, 76: // Return
+            if voice.isListening, !voicePartial.isEmpty, !engine.hasComposition {
+                commitVoice(voicePartial, client: client)
+                return true
+            }
             guard engine.hasComposition else { return false }
             let keys = engine.composition.raw.count
             if let raw = engine.commitRaw() {
@@ -719,6 +805,10 @@ final class InputFlowInputController: IMKInputController {
             update(client)
             return true
         case 49: // Space
+            if voice.isListening, !voicePartial.isEmpty, !engine.hasComposition {
+                commitVoice(voicePartial, client: client)
+                return true
+            }
             guard engine.hasComposition || engine.mode == "emoji" else { return false }
             select(index: page * CandidateWindowController.pageSize, client: client)
             return true
@@ -754,7 +844,19 @@ final class InputFlowInputController: IMKInputController {
             }
         }
 
+        // 语音候选只有一条：按 1 直接上屏（避免落进普通流程把 "1" 打出来）
+        if voice.isListening, !voicePartial.isEmpty, !engine.hasComposition,
+           event.charactersIgnoringModifiers == "1" {
+            commitVoice(voicePartial, client: client)
+            return true
+        }
+
         guard let chars = event.charactersIgnoringModifiers else { return false }
+
+        // 语音进行中遇到普通按键：先落下已识别文本，再继续处理本键（说→打无缝衔接）
+        if voice.isListening {
+            absorbVoice(client: client)
+        }
 
         // 连按两下 a：浏览器 → 网址模式；聊天工具 → 表情模式（斗图）。
         if chars == "a", !event.isARepeat, !flags.contains(.shift) {
@@ -809,6 +911,9 @@ final class InputFlowInputController: IMKInputController {
     }
 
     override func commitComposition(_ sender: Any!) {
+        if voice.isListening, let voiceClient = sender as? IMKTextInput {
+            absorbVoice(client: voiceClient)
+        }
         if let client = sender as? IMKTextInput {
             let keys = engine.composition.raw.count
             if let raw = engine.commitRaw() {
@@ -822,6 +927,8 @@ final class InputFlowInputController: IMKInputController {
     }
 
     override func deactivateServer(_ sender: Any!) {
+        stopVoice()
+        voiceMarked = false
         engine.clear()
         urlMode = false
         // 会话结束：截断发呆计时，避免跨应用间隙被误计
@@ -986,8 +1093,9 @@ final class InputFlowInputController: IMKInputController {
     private func update(_ client: IMKTextInput) {
         let comp = engine.composition
         guard !comp.raw.isEmpty || !comp.candidates.isEmpty else {
-            clearMarkedText(client)
-            window.hide()
+            // 语音正在「边说边落字」时，预编辑与候选窗归语音所有，不许清
+            if !voiceMarked { clearMarkedText(client) }
+            if !voice.isListening { window.hide() }
             PetWindowController.shared.react(.idle)
             return
         }

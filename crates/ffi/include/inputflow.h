@@ -60,6 +60,9 @@ char *inputflow_user_export(InputFlowSession *session);
 
 int32_t inputflow_user_import(InputFlowSession *session, const char *tsv);
 
+/* 外部文本上屏（语音等）的学习入口：记词并更新二元组上下文；成功 0，参数无效 -1。 */
+int32_t inputflow_record_commit(InputFlowSession *session, const char *text);
+
 /* 备份与恢复：导出带版本头与 CRC32 的明文包（前端负责加密落盘、明文导出二次确认）；
  * 导入时 merge 非 0 表示同名条目取较大次数，返回条目数，失败返回 -1。 */
 char *inputflow_backup_export(InputFlowSession *session);

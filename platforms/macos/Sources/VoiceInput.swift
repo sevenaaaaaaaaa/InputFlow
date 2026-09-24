@@ -15,6 +15,8 @@ final class VoiceInputController {
     private var tapInstalled = false
 
     private(set) var isListening = false
+    /// 手动 stop（Esc/上屏）不算错误，抑制随之而来的 cancel toast。
+    private var cancelled = false
 
     /// 实时文本（partial）与最终文本。
     var onPartial: ((String) -> Void)?
@@ -51,6 +53,7 @@ final class VoiceInputController {
     }
 
     func stop() {
+        cancelled = true
         guard isListening || task != nil || tapInstalled else { return }
         if tapInstalled {
             engine.inputNode.removeTap(onBus: 0)
@@ -65,6 +68,7 @@ final class VoiceInputController {
     }
 
     private func begin(locale: String) {
+        cancelled = false
         guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: locale)),
               recognizer.isAvailable else {
             onStatus?("当前系统语音识别不可用")
@@ -109,7 +113,9 @@ final class VoiceInputController {
             }
             if error != nil {
                 DispatchQueue.main.async {
-                    self.onStatus?("语音识别结束/出错")
+                    if !self.cancelled {
+                        self.onStatus?("语音识别结束/出错")
+                    }
                     self.stop()
                 }
             }

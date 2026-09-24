@@ -246,6 +246,9 @@ private final class CandidateCell: NSView {
     private let hoverAccent: NSColor
     private let baseFontSize: CGFloat
     private let side: CandidateTheme.Side
+    /// 语音长句：允许两行换行展示（其余候选仍单行截断）。
+    private var wraps = false
+    private var wrapConstraint: NSLayoutConstraint?
 
     init(index: Int, side: CandidateTheme.Side) {
         self.side = side
@@ -312,6 +315,26 @@ private final class CandidateCell: NSView {
         textLabel.font = candidate.kind == "emoji"
             ? .systemFont(ofSize: baseFontSize + 9)
             : .systemFont(ofSize: baseFontSize, weight: .regular)
+        if candidate.kind == "voice" {
+            wraps = true
+            // 抗压缩提到 required：低优先级被挤 1px 就会把末字换行到 frame 外整字消失
+            textLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+            textLabel.lineBreakMode = .byWordWrapping
+            textLabel.maximumNumberOfLines = 2
+            textLabel.preferredMaxLayoutWidth = 360
+            let constraint = wrapConstraint ?? textLabel.widthAnchor.constraint(
+                lessThanOrEqualToConstant: 360
+            )
+            constraint.isActive = true
+            wrapConstraint = constraint
+        } else {
+            wraps = false
+            textLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            textLabel.lineBreakMode = .byTruncatingMiddle
+            textLabel.maximumNumberOfLines = 1
+            textLabel.preferredMaxLayoutWidth = 0
+            wrapConstraint?.isActive = false
+        }
         if let comment = candidate.comment, !comment.isEmpty, candidate.kind != "emoji" {
             commentLabel.stringValue = comment
             commentLabel.isHidden = false
@@ -362,7 +385,7 @@ private final class CandidateCell: NSView {
                 textLabel.intrinsicContentSize.width,
                 commentLabel.isHidden ? 0 : commentLabel.intrinsicContentSize.width
             ),
-            Self.maxTextWidth
+            wraps ? 360 : Self.maxTextWidth
         )
         let height = textLabel.intrinsicContentSize.height
             + (commentLabel.isHidden ? 0 : commentLabel.intrinsicContentSize.height + 1)

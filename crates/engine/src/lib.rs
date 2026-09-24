@@ -219,6 +219,20 @@ impl Session {
         Some(s)
     }
 
+    /// 外部上屏（语音识别结果等）的学习入口：记词 + 更新二元组上下文。
+    ///
+    /// 与 `select`/`commit_raw` 的区别：外部文本没有按键序列，不进短语库
+    /// （短语必须绑定按键才能被拼音召回），但 unigram 与上下文对
+    /// 「说完接着打字」同样有效——语音上屏的词会给下一个打的词二元组加分。
+    pub fn commit_external(&mut self, text: &str) {
+        let text = text.trim();
+        if text.is_empty() {
+            return;
+        }
+        self.user.record(text);
+        self.learn_context(text);
+    }
+
     /// 自动学习短语：把最近几段上屏与本次拼接，窗口内的每个后缀组合各记一次。
     ///
     /// 这就是「AI 辅助短语」——没有手动短语表，用户重复打出来的搭配自己沉淀下来。
@@ -510,6 +524,37 @@ mod tests {
         type_str(&mut s, "zzz");
         assert_eq!(s.commit_raw().as_deref(), Some("zzz"));
         assert!(s.commit_raw().is_none());
+    }
+
+    #[test]
+    fn external_commit_feeds_voice_then_typing_context() {
+        let mut s = session(Mode::Pinyin);
+        // 语音上屏「北京」→ 记词
+        s.commit_external("北京");
+        assert_eq!(s.user_model().count("北京"), 1);
+
+        // 接着打「世界」→ 二元组 北京→世界 被记录（语音喂给打字）
+        type_str(&mut s, "shijie");
+        let idx = s
+            .composition()
+            .candidates
+            .iter()
+            .position(|c| c.text == "世界")
+            .expect("应有「世界」");
+        s.select(idx);
+
+        // 反向：先打字后语音，同样形成二元组
+        s.commit_external("啊");
+        assert!(s.user_model().pair_count("世界", "啊") > 0, "先打字后语音也要形成二元组");
+    }
+
+    #[test]
+    fn external_commit_ignores_blank() {
+        let mut s = session(Mode::Pinyin);
+        s.commit_external("");
+        s.commit_external(" \n\t");
+        assert!(s.user_model().is_empty(), "空白文本不该进用户词库");
+        assert_eq!(s.last_committed(), None, "空白文本不该改上下文");
     }
 
     #[test]

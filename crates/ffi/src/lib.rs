@@ -269,6 +269,25 @@ pub unsafe extern "C" fn inputflow_user_import(
     })
 }
 
+/// 外部文本上屏（语音等）的学习入口：记词并更新二元组上下文。
+/// 成功返回 0，参数无效返回 -1。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_record_commit(
+    session: *mut InputFlowSession,
+    text: *const c_char,
+) -> i32 {
+    if session.is_null() {
+        return -1;
+    }
+    let text = unsafe { cstr(text) };
+    guard_int(|| {
+        let Some(text) = text else { return -1 };
+        let session = unsafe { &mut *session };
+        session.inner.commit_external(&text);
+        0
+    })
+}
+
 /// 导出用户数据备份包（明文 TSV + 版本头 + CRC32）。前端负责加密落盘。
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn inputflow_backup_export(session: *mut InputFlowSession) -> *mut c_char {
