@@ -12,6 +12,7 @@ use inputflow_pinyin::{Layout, PinyinDecoder};
 use inputflow_symbol::SymbolDecoder;
 
 pub mod app_mode;
+pub mod evolution;
 pub mod stats;
 pub use app_mode::AppModeMemory;
 

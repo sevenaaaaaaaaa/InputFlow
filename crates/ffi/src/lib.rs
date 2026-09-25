@@ -14,6 +14,7 @@ use inputflow_core::Mode;
 use inputflow_dict::Dictionary;
 use inputflow_engine::Session;
 use inputflow_engine::app_mode::AppModeMemory;
+use inputflow_engine::evolution::{self, EvolutionMemory};
 use inputflow_plugin::Pack as PluginPack;
 
 pub struct InputFlowSession {
@@ -23,6 +24,66 @@ pub struct InputFlowSession {
 /// 每应用中英模式记忆（独立于输入会话：跨应用共享一份）。
 pub struct InputFlowAppMode {
     inner: AppModeMemory,
+}
+
+/// 知你自进化账本（ADR-0008 决策层）。
+pub struct InputFlowEvolution {
+    inner: EvolutionMemory,
+}
+
+/// 解析候选 JSON `[{"text":"现","score":10.5},...]` → (词, base 分) 列表。
+/// 只认这个固定形状，宽容空白；坏对象跳过。
+fn parse_candidates(json: &str) -> Vec<(String, f32)> {
+    let mut out = Vec::new();
+    let bytes = json.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'{' {
+            i += 1;
+            continue;
+        }
+        let end = match json[i..].find('}') {
+            Some(e) => i + e,
+            None => break,
+        };
+        let obj = &json[i..=end];
+        let text = obj
+            .find("\"text\"")
+            .and_then(|p| obj[p + 6..].find('"').map(|q| p + 6 + q + 1))
+            .and_then(|s| obj[s..].find('"').map(|e| obj[s..s + e].to_string()));
+        let score = obj
+            .find("\"score\"")
+            .and_then(|p| {
+                let rest = &obj[p + 7..];
+                let num: String = rest
+                    .chars()
+                    .skip_while(|c| !c.is_ascii_digit() && *c != '-')
+                    .take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-' || *c == 'e')
+                    .collect();
+                num.parse::<f32>().ok()
+            });
+        if let (Some(t), Some(sc)) = (text, score) {
+            out.push((t, sc));
+        }
+        i = end + 1;
+    }
+    out
+}
+
+fn json_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 impl InputFlowSession {
@@ -337,21 +398,6 @@ pub extern "C" fn inputflow_version() -> *const c_char {
     VERSION.as_ptr().cast()
 }
 
-fn json_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out
-}
 
 fn composition_json(session: &Session) -> String {
     let comp = session.composition();
@@ -438,6 +484,172 @@ pub extern "C" fn inputflow_stats_digest_json(
         });
         into_c(digest.to_json())
     })
+}
+
+// ──────────────────── 知你自进化（ADR-0008 决策层） ────────────────────
+
+#[unsafe(no_mangle)]
+pub extern "C" fn inputflow_evolution_new() -> *mut InputFlowEvolution {
+    catch_unwind(AssertUnwindSafe(|| {
+        Box::into_raw(Box::new(InputFlowEvolution {
+            inner: EvolutionMemory::new(),
+        }))
+    }))
+    .unwrap_or(std::ptr::null_mut())
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_evolution_free(memory: *mut InputFlowEvolution) {
+    if memory.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        drop(unsafe { Box::from_raw(memory) });
+    }));
+}
+
+/// 记录一次奖励：reward_x100 ∈ {100 选词, 150 重选, -200 删除, 60 次选}。
+/// lex_window 为最近上屏文本；app 可为空串；hour 0-23；now Unix 秒。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_evolution_reward(
+    memory: *mut InputFlowEvolution,
+    word: *const c_char,
+    lex_window: *const c_char,
+    app: *const c_char,
+    hour: u32,
+    reward_x100: i32,
+    now: u64,
+) -> i32 {
+    if memory.is_null() {
+        return 0;
+    }
+    let (word, lex, app) = unsafe { (cstr(word), cstr(lex_window), cstr(app)) };
+    guard_int(|| {
+        let Some(word) = word else { return 0 };
+        let lex = lex.unwrap_or_default();
+        let app = app.unwrap_or_default();
+        let features = evolution::context_features(&lex, if app.is_empty() { None } else { Some(&app) }, hour);
+        let features = [features, evolution::topic_features(&lex, 3)].concat();
+        let memory = unsafe { &mut *memory };
+        memory.inner.reward(&word, &features, reward_x100 as f32 / 100.0, now);
+        1
+    })
+}
+
+/// 候选重排：输入 `[{"text":"现","score":10.5},...]`，
+/// 输出按修正后分数降序的 `[{"text":..,"score":..,"delta":..},...]`。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_evolution_adjust_json(
+    memory: *mut InputFlowEvolution,
+    candidates_json: *const c_char,
+    lex_window: *const c_char,
+    app: *const c_char,
+    hour: u32,
+    now: u64,
+) -> *mut c_char {
+    if memory.is_null() {
+        return std::ptr::null_mut();
+    }
+    let (cands, lex, app) = unsafe { (cstr(candidates_json), cstr(lex_window), cstr(app)) };
+    guard_ptr(|| {
+        let Some(cands) = cands else { return std::ptr::null_mut() };
+        let lex = lex.unwrap_or_default();
+        let app = app.unwrap_or_default();
+        let mut features =
+            evolution::context_features(&lex, if app.is_empty() { None } else { Some(&app) }, hour);
+        features.extend(evolution::topic_features(&lex, 3));
+        let ranked = unsafe { &*memory }.inner.rank(&parse_candidates(&cands), &features, now);
+        let mut out = String::from("[");
+        for (i, (text, score, delta)) in ranked.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            out.push_str(&format!(
+                "{{\"text\":\"{}\",\"score\":{:.3},\"delta\":{:.3}}}",
+                json_escape(text),
+                score,
+                delta
+            ));
+        }
+        out.push(']');
+        into_c(out)
+    })
+}
+
+/// 决策轨道：这个词在该上下文里的贡献特征 [{"feature":..,"affinity":..},...]。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_evolution_explain_json(
+    memory: *mut InputFlowEvolution,
+    word: *const c_char,
+    lex_window: *const c_char,
+    app: *const c_char,
+    hour: u32,
+    now: u64,
+) -> *mut c_char {
+    if memory.is_null() {
+        return std::ptr::null_mut();
+    }
+    let (word, lex, app) = unsafe { (cstr(word), cstr(lex_window), cstr(app)) };
+    guard_ptr(|| {
+        let Some(word) = word else { return std::ptr::null_mut() };
+        let lex = lex.unwrap_or_default();
+        let app = app.unwrap_or_default();
+        let mut features =
+            evolution::context_features(&lex, if app.is_empty() { None } else { Some(&app) }, hour);
+        features.extend(evolution::topic_features(&lex, 3));
+        let trail = unsafe { &*memory }.inner.explain(&word, &features, now);
+        let mut out = String::from("[");
+        for (i, (f, a)) in trail.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            out.push_str(&format!(
+                "{{\"feature\":\"{}\",\"affinity\":{:.3}}}",
+                json_escape(f),
+                a
+            ));
+        }
+        out.push(']');
+        into_c(out)
+    })
+}
+
+/// 学习账本 TSV 导出/导入（词\t特征\t亲和度\t观察数\t最后触摸）。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_evolution_export(memory: *mut InputFlowEvolution) -> *mut c_char {
+    if memory.is_null() {
+        return std::ptr::null_mut();
+    }
+    guard_ptr(|| {
+        let memory = unsafe { &*memory };
+        into_c(memory.inner.export_tsv())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_evolution_import(
+    memory: *mut InputFlowEvolution,
+    tsv: *const c_char,
+) -> i32 {
+    if memory.is_null() {
+        return -1;
+    }
+    let tsv = unsafe { cstr(tsv) };
+    guard_int(|| {
+        let Some(tsv) = tsv else { return -1 };
+        let memory = unsafe { &mut *memory };
+        memory.inner.import_tsv(&tsv) as i32
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_evolution_forget_all(memory: *mut InputFlowEvolution) {
+    if memory.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        unsafe { &mut *memory }.inner.forget_all();
+    }));
 }
 
 // ──────────────────── 每应用中英模式记忆 ────────────────────
@@ -753,6 +965,71 @@ mod tests {
                 -1
             );
             inputflow_app_mode_free(std::ptr::null_mut());
+        }
+    }
+
+    #[test]
+    fn evolution_via_c_abi() {
+        let mem = inputflow_evolution_new();
+        assert!(!mem.is_null());
+        unsafe {
+            let word = CString::new("先").unwrap();
+            let lex = CString::new("优先").unwrap();
+            let app = CString::new("com.apple.Notes").unwrap();
+            let cands = CString::new(
+                r#"[{"text":"现","score":10.5},{"text":"先","score":9.0}]"#,
+            )
+            .unwrap();
+
+            // 一次奖励不足置信
+            inputflow_evolution_reward(mem, word.as_ptr(), lex.as_ptr(), app.as_ptr(), 10, 100, 1_000);
+            let out = call_str(|| {
+                inputflow_evolution_adjust_json(mem, cands.as_ptr(), lex.as_ptr(), app.as_ptr(), 10, 1_100)
+            })
+            .unwrap();
+            assert!(out.starts_with("\"text\":\"现\"") || out.contains("\"text\":\"现\""), "{out}");
+
+            // 两次奖励后上浮
+            inputflow_evolution_reward(mem, word.as_ptr(), lex.as_ptr(), app.as_ptr(), 10, 100, 1_200);
+            let out = call_str(|| {
+                inputflow_evolution_adjust_json(mem, cands.as_ptr(), lex.as_ptr(), app.as_ptr(), 10, 1_300)
+            })
+            .unwrap();
+            assert!(out.find("\"text\":\"先\"").unwrap() < out.find("\"text\":\"现\"").unwrap(), "{out}");
+            assert!(out.contains("\"delta\""), "{out}");
+
+            // 决策轨道
+            let trail = call_str(|| {
+                inputflow_evolution_explain_json(mem, word.as_ptr(), lex.as_ptr(), app.as_ptr(), 10, 1_400)
+            })
+            .unwrap();
+            assert!(trail.contains("\"feature\":\"lex:"), "{trail}");
+
+            // 导出/导入回环
+            let tsv = call_str(|| inputflow_evolution_export(mem)).unwrap();
+            let other = inputflow_evolution_new();
+            let c_tsv = CString::new(tsv).unwrap();
+            assert!(inputflow_evolution_import(other, c_tsv.as_ptr()) >= 1);
+            inputflow_evolution_forget_all(other);
+            inputflow_evolution_free(other);
+            inputflow_evolution_free(mem);
+        }
+    }
+
+    #[test]
+    fn evolution_null_args_are_safe() {
+        unsafe {
+            let w = c"先".as_ptr();
+            assert_eq!(
+                inputflow_evolution_reward(std::ptr::null_mut(), w, w, w, 0, 100, 0),
+                0
+            );
+            assert!(inputflow_evolution_adjust_json(std::ptr::null_mut(), w, w, w, 0, 0).is_null());
+            assert!(inputflow_evolution_explain_json(std::ptr::null_mut(), w, w, w, 0, 0).is_null());
+            assert!(inputflow_evolution_export(std::ptr::null_mut()).is_null());
+            assert_eq!(inputflow_evolution_import(std::ptr::null_mut(), w), -1);
+            inputflow_evolution_free(std::ptr::null_mut());
+            inputflow_evolution_forget_all(std::ptr::null_mut());
         }
     }
 

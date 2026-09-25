@@ -16,6 +16,7 @@ extern "C" {
 
 typedef struct InputFlowSession InputFlowSession;
 typedef struct InputFlowAppMode InputFlowAppMode;
+typedef struct InputFlowEvolution InputFlowEvolution;
 
 /* 创建会话。mode: "pinyin" | "flypy" | "mspy" | "zrm" | "en" | "ja"；
  * 传 NULL 时使用内置词典与拼音模式。 */
@@ -107,6 +108,31 @@ char *inputflow_stats_digest_json(uint64_t chars, uint64_t keys, uint64_t delete
 /* 插件包扫描（皮肤/桌宠/词典声明式数据包，零代码执行）：
  * 返回目录 JSON {"packs":[...],"errors":[...]}，由调用方释放。 */
 char *inputflow_plugin_scan_json(const char *dir);
+
+/* 知你自进化（ADR-0008 决策层）：上下文赌动机账本，全本地可解释。
+ * reward_x100：100 选词 / 150 重选 / -200 删除 / 60 次选。 */
+InputFlowEvolution *inputflow_evolution_new(void);
+void inputflow_evolution_free(InputFlowEvolution *memory);
+
+int32_t inputflow_evolution_reward(InputFlowEvolution *memory, const char *word,
+                                   const char *lex_window, const char *app,
+                                   uint32_t hour, int32_t reward_x100, uint64_t now);
+
+/* 候选重排：输入 [{"text":..,"score":..},...]，输出按修正后分降序
+ * [{"text":..,"score":..,"delta":..},...]，由调用方释放。 */
+char *inputflow_evolution_adjust_json(InputFlowEvolution *memory, const char *candidates_json,
+                                      const char *lex_window, const char *app,
+                                      uint32_t hour, uint64_t now);
+
+/* 决策轨道：[{"feature":..,"affinity":..},...]，由调用方释放。 */
+char *inputflow_evolution_explain_json(InputFlowEvolution *memory, const char *word,
+                                       const char *lex_window, const char *app,
+                                       uint32_t hour, uint64_t now);
+
+/* 学习账本 TSV 导出/导入与清空。 */
+char *inputflow_evolution_export(InputFlowEvolution *memory);
+int32_t inputflow_evolution_import(InputFlowEvolution *memory, const char *tsv);
+void inputflow_evolution_forget_all(InputFlowEvolution *memory);
 
 /* 版本字符串（静态，勿释放）。 */
 const char *inputflow_version(void);
