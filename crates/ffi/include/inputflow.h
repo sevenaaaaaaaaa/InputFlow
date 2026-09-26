@@ -134,6 +134,55 @@ char *inputflow_evolution_export(InputFlowEvolution *memory);
 int32_t inputflow_evolution_import(InputFlowEvolution *memory, const char *tsv);
 void inputflow_evolution_forget_all(InputFlowEvolution *memory);
 
+/* 知你教学层接线（ADR-0008 E1）：会话内的选词/删除序列 → 共享账本奖励，
+ * 候选排序自动接 adjust（仅同层重排，封顶 ±3）。账本为进程单例，
+ * 经任意会话读写；持久化由前端负责。 */
+
+/* 同步决策上下文与开关（会话激活时调用）：app 可为 NULL/空串；
+ * hour 0-23；enabled 非 0 开学习；now 为 Unix 秒（兼作重排时钟）。返回 1 表示已设置。 */
+int32_t inputflow_set_evolution_context(InputFlowSession *session, const char *app,
+                                        uint32_t hour, int32_t enabled, uint64_t now);
+
+/* 确认一次选词：必须在 inputflow_select 成功后调用。alt_rank 非 0 表示
+ * 数字键选了第 2+ 候选（+0.6），否则 +1.0；删除后的窗口内重选自动记 +1.5。 */
+int32_t inputflow_evolution_note_selection(InputFlowSession *session, int32_t alt_rank,
+                                           uint64_t now);
+
+/* 无组合态的删除键：按「选了又删」记 −2 并武装重选期待；窗口外/重复删忽略。 */
+int32_t inputflow_evolution_note_delete(InputFlowSession *session, uint64_t now);
+
+/* 共享账本 TSV 导出/导入/清空（格式与 E0 独立句柄一致）。 */
+char *inputflow_evolution_session_export(InputFlowSession *session);
+int32_t inputflow_evolution_session_import(InputFlowSession *session, const char *tsv);
+void inputflow_evolution_session_forget(InputFlowSession *session);
+
+/* 知你喂食层（ADR-0008 E2）：文档 → 术语提炼 → 营养库。
+ * 营养词获得词典级加分与按键召回（内核按词典单字读音派生拼音串），
+ * 忘记即全部效果消失。 */
+
+/* 术语提炼（纯函数，不经会话）：输入文档文本，输出
+ * [{"term":..,"count":..},...]（复现次数降序，上限 50），由调用方释放。 */
+char *inputflow_feed_extract_json(const char *text);
+
+/* 喂入一条营养词；strength 为文档内复现次数（>=1），now 为 Unix 秒。
+ * 返回 1 表示已入库（重复喂同一词：强度累加、出处与时间刷新）。 */
+int32_t inputflow_nutrition_add(InputFlowSession *session, const char *term,
+                                const char *source, uint32_t strength, uint64_t now);
+
+/* 营养库列举（按加入时间倒序）：[{"term":..,"keys":..,"source":..,
+ * "strength":..,"addedAt":..},...]，由调用方释放。 */
+char *inputflow_nutrition_list_json(InputFlowSession *session);
+
+/* 忘记一条营养词：返回 1 表示存在过并已删除。 */
+int32_t inputflow_nutrition_forget(InputFlowSession *session, const char *term);
+
+/* 清空营养库。 */
+void inputflow_nutrition_forget_all(InputFlowSession *session);
+
+/* 营养库 TSV 导出/导入（词\t按键串\t出处\t强度\t加入时间）；导入返回行数。 */
+char *inputflow_nutrition_export(InputFlowSession *session);
+int32_t inputflow_nutrition_import(InputFlowSession *session, const char *tsv);
+
 /* 版本字符串（静态，勿释放）。 */
 const char *inputflow_version(void);
 

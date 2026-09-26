@@ -16,6 +16,21 @@ struct Composition: Codable {
     static let empty = Composition(mode: "pinyin", raw: "", preedit: "", candidates: [])
 }
 
+/// 术语提炼结果（喂食层，纯统计）。
+struct FeedTerm: Codable {
+    let term: String
+    let count: Int
+}
+
+/// 营养库条目。
+struct NutritionItem: Codable {
+    let term: String
+    let keys: String
+    let source: String
+    let strength: Int
+    let addedAt: UInt64
+}
+
 /// 内核 C ABI 的 Swift 封装。会话只在本进程内存中，不做任何网络访问。
 final class InputFlowEngine {
     private var handle: OpaquePointer?
@@ -117,6 +132,96 @@ final class InputFlowEngine {
         _ = text.withCString { inputflow_record_commit(h, $0) }
     }
 
+    // MARK: - 知你教学层（ADR-0008 E1）：选词/删除序列 → 共享账本，排序接 adjust
+
+    /// 会话激活时同步决策上下文与开关（app/hour/now 由前端供给）。
+    func setEvolutionContext(app: String?, hour: UInt32, enabled: Bool) {
+        guard let h = handle else { return }
+        let now = UInt64(Date().timeIntervalSince1970)
+        let cApp = app ?? ""
+        _ = cApp.withCString { inputflow_set_evolution_context(h, $0, hour, enabled ? 1 : 0, now) }
+    }
+
+    /// 选词上屏后确认一次：数字键选了第 2+ 候选时 altRank = true。
+    func noteEvolutionSelection(altRank: Bool) {
+        guard let h = handle else { return }
+        _ = inputflow_evolution_note_selection(h, altRank ? 1 : 0, UInt64(Date().timeIntervalSince1970))
+    }
+
+    /// 无组合态的删除键：交给内核判定是否「选了又删」。
+    func noteEvolutionDelete() {
+        guard let h = handle else { return }
+        _ = inputflow_evolution_note_delete(h, UInt64(Date().timeIntervalSince1970))
+    }
+
+    func exportEvolution() -> String {
+        guard let h = handle, let s = takeString(inputflow_evolution_session_export(h)) else { return "" }
+        return s
+    }
+
+    @discardableResult
+    func importEvolution(_ tsv: String) -> Int {
+        guard let h = handle else { return -1 }
+        return Int(tsv.withCString { inputflow_evolution_session_import(h, $0) })
+    }
+
+    func forgetEvolution() {
+        if let h = handle { inputflow_evolution_session_forget(h) }
+    }
+
+    // MARK: - 知你喂食层（ADR-0008 E2）：术语提炼 + 营养库
+
+    /// 术语提炼（纯函数，不经会话）：反复出现的 n-gram，次数降序。
+    static func feedExtract(_ text: String) -> [FeedTerm] {
+        guard !text.isEmpty,
+              let json = text.withCString({ takeStatic(inputflow_feed_extract_json($0)) }),
+              let data = json.data(using: .utf8),
+              let terms = try? JSONDecoder().decode([FeedTerm].self, from: data)
+        else { return [] }
+        return terms
+    }
+
+    /// 喂入营养词；按键串由内核按词典读音派生。
+    @discardableResult
+    func nutritionAdd(term: String, source: String, strength: UInt32) -> Bool {
+        guard let h = handle else { return false }
+        return term.withCString { t in
+            source.withCString { s in
+                inputflow_nutrition_add(h, t, s, strength, UInt64(Date().timeIntervalSince1970)) == 1
+            }
+        }
+    }
+
+    func nutritionList() -> [NutritionItem] {
+        guard let h = handle,
+              let json = takeString(inputflow_nutrition_list_json(h)),
+              let data = json.data(using: .utf8),
+              let items = try? JSONDecoder().decode([NutritionItem].self, from: data)
+        else { return [] }
+        return items
+    }
+
+    @discardableResult
+    func nutritionForget(_ term: String) -> Bool {
+        guard let h = handle else { return false }
+        return term.withCString { inputflow_nutrition_forget(h, $0) == 1 }
+    }
+
+    func nutritionForgetAll() {
+        if let h = handle { inputflow_nutrition_forget_all(h) }
+    }
+
+    func nutritionExport() -> String {
+        guard let h = handle, let s = takeString(inputflow_nutrition_export(h)) else { return "" }
+        return s
+    }
+
+    @discardableResult
+    func nutritionImport(_ tsv: String) -> Int {
+        guard let h = handle else { return -1 }
+        return Int(tsv.withCString { inputflow_nutrition_import(h, $0) })
+    }
+
     /// 导出备份包（明文 TSV + 版本头 + CRC32）；加密由 `BackupManager` 负责。
     func exportBackup() -> String {
         guard let h = handle, let s = takeString(inputflow_backup_export(h)) else { return "" }
@@ -154,6 +259,21 @@ final class InputFlowEngine {
             return AIRecommendationSet(totalRamMb: totalRamMb, recommendations: [])
         }
         return set
+    }
+}
+
+/// 知你学习开关（默认开）。关闭即停止记账与重排；账本清空走「忘记」。
+enum EvolutionLearning {
+    static let enabledKey = "InputFlowEvolutionEnabled"
+
+    static var isEnabled: Bool {
+        UserDefaults.standard.object(forKey: enabledKey) == nil
+            ? true
+            : UserDefaults.standard.bool(forKey: enabledKey)
+    }
+
+    static func setEnabled(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: enabledKey)
     }
 }
 

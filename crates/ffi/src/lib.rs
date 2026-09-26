@@ -8,7 +8,7 @@
 use std::ffi::{CStr, CString, c_char};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use inputflow_core::Mode;
 use inputflow_dict::Dictionary;
@@ -88,10 +88,21 @@ fn json_escape(s: &str) -> String {
 
 impl InputFlowSession {
     fn new(dict: Arc<Dictionary>, mode: Mode) -> Self {
-        Self {
-            inner: Session::with_mode(dict, mode),
-        }
+        let mut inner = Session::with_mode(dict, mode);
+        // 知你账本是进程级单例：IMK 下每个应用各有一个会话，
+        // 学习必须跨应用沉淀才叫「越用越懂你」。
+        inner.set_evolution_memory(shared_evolution());
+        Self { inner }
     }
+}
+
+/// 进程内共享的知你账本。会话构造时注入；`inputflow_evolution_session_*`
+/// 系列经由任意会话读写同一份。E0 的独立句柄 API 不受影响（各自私有）。
+fn shared_evolution() -> Arc<Mutex<EvolutionMemory>> {
+    static LEDGER: OnceLock<Arc<Mutex<EvolutionMemory>>> = OnceLock::new();
+    LEDGER
+        .get_or_init(|| Arc::new(Mutex::new(EvolutionMemory::new())))
+        .clone()
 }
 
 unsafe fn cstr(p: *const c_char) -> Option<String> {
@@ -652,6 +663,234 @@ pub unsafe extern "C" fn inputflow_evolution_forget_all(memory: *mut InputFlowEv
     }));
 }
 
+// ──────────── 知你教学层接线（ADR-0008 E1，会话侧共享账本） ────────────
+
+/// 同步决策上下文与开关：`app` 可为空串；`hour` 0-23；`enabled` 非 0 开学习；
+/// `now`（Unix 秒）同时刷新重排衰减时钟。返回 1 表示已设置。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_set_evolution_context(
+    session: *mut InputFlowSession,
+    app: *const c_char,
+    hour: u32,
+    enabled: i32,
+    now: u64,
+) -> i32 {
+    if session.is_null() {
+        return 0;
+    }
+    let app = unsafe { cstr(app) };
+    guard_int(|| {
+        let session = unsafe { &mut *session };
+        session
+            .inner
+            .set_evolution_context(app.as_deref(), hour, enabled != 0, now);
+        1
+    })
+}
+
+/// 前端确认一次选词：`alt_rank` 非 0 表示数字键选了第 2+ 候选（+0.6），
+/// 否则正常选词（+1.0）；删除后的窗口内重选自动升级为强正（+1.5）。
+/// 必须在 `inputflow_select` 成功后调用一次；返回 1 表示已记账。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_evolution_note_selection(
+    session: *mut InputFlowSession,
+    alt_rank: i32,
+    now: u64,
+) -> i32 {
+    if session.is_null() {
+        return 0;
+    }
+    guard_int(|| {
+        let session = unsafe { &mut *session };
+        session.inner.note_selection(alt_rank != 0, now);
+        1
+    })
+}
+
+/// 前端看到无组合态的删除键：按「选了又删」记强负（−2）并武装重选期待。
+/// 窗口外、重复删除或无上次选词时静默忽略。返回 1 表示已记账。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_evolution_note_delete(session: *mut InputFlowSession, now: u64) -> i32 {
+    if session.is_null() {
+        return 0;
+    }
+    guard_int(|| {
+        let session = unsafe { &mut *session };
+        session.inner.note_delete(now);
+        1
+    })
+}
+
+/// 共享账本 TSV 导出/导入/清空（与 E0 独立句柄同格式，经会话访问进程单例）。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_evolution_session_export(session: *mut InputFlowSession) -> *mut c_char {
+    if session.is_null() {
+        return std::ptr::null_mut();
+    }
+    guard_ptr(|| {
+        let session = unsafe { &*session };
+        into_c(session.inner.export_evolution())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_evolution_session_import(
+    session: *mut InputFlowSession,
+    tsv: *const c_char,
+) -> i32 {
+    if session.is_null() {
+        return -1;
+    }
+    let tsv = unsafe { cstr(tsv) };
+    guard_int(|| {
+        let Some(tsv) = tsv else { return -1 };
+        let session = unsafe { &mut *session };
+        session.inner.import_evolution(&tsv) as i32
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_evolution_session_forget(session: *mut InputFlowSession) {
+    if session.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        unsafe { &mut *session }.inner.forget_evolution();
+    }));
+}
+
+// ──────────── 知你喂食层（ADR-0008 E2）：术语提炼 + 营养库 ────────────
+
+/// 术语提炼（纯函数）：输入文档文本，输出
+/// `[{"term":"县政府","count":5},...]`（次数降序，上限 50）。调用方释放。
+#[unsafe(no_mangle)]
+pub extern "C" fn inputflow_feed_extract_json(text: *const c_char) -> *mut c_char {
+    let text = unsafe { cstr(text) };
+    guard_ptr(|| {
+        let Some(text) = text else {
+            return std::ptr::null_mut();
+        };
+        let terms = inputflow_engine::feed::extract_terms(&text);
+        let mut out = String::from("[");
+        for (i, (term, count)) in terms.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            out.push_str(&format!(
+                "{{\"term\":\"{}\",\"count\":{}}}",
+                json_escape(term),
+                count
+            ));
+        }
+        out.push(']');
+        into_c(out)
+    })
+}
+
+/// 喂入一条营养词：按键串由内核按词典读音派生；返回 1 表示已入库。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_nutrition_add(
+    session: *mut InputFlowSession,
+    term: *const c_char,
+    source: *const c_char,
+    strength: u32,
+    now: u64,
+) -> i32 {
+    if session.is_null() {
+        return 0;
+    }
+    let (term, source) = unsafe { (cstr(term), cstr(source)) };
+    guard_int(|| {
+        let Some(term) = term else { return 0 };
+        let session = unsafe { &mut *session };
+        i32::from(session.inner.nutrition_add(&term, source.as_deref().unwrap_or(""), strength, now))
+    })
+}
+
+/// 营养库列举（按加入时间倒序）：
+/// `[{"term":..,"keys":..,"source":..,"strength":..,"addedAt":..},...]`。调用方释放。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_nutrition_list_json(session: *mut InputFlowSession) -> *mut c_char {
+    if session.is_null() {
+        return std::ptr::null_mut();
+    }
+    guard_ptr(|| {
+        let session = unsafe { &*session };
+        let mut out = String::from("[");
+        for (i, (term, e)) in session.inner.nutrition().list().iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            out.push_str(&format!(
+                "{{\"term\":\"{}\",\"keys\":\"{}\",\"source\":\"{}\",\"strength\":{},\"addedAt\":{}}}",
+                json_escape(term),
+                json_escape(&e.keys),
+                json_escape(&e.source),
+                e.strength,
+                e.added_at
+            ));
+        }
+        out.push(']');
+        into_c(out)
+    })
+}
+
+/// 忘记一条营养词：返回 1 表示存在过并已删除。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_nutrition_forget(
+    session: *mut InputFlowSession,
+    term: *const c_char,
+) -> i32 {
+    if session.is_null() {
+        return 0;
+    }
+    let term = unsafe { cstr(term) };
+    guard_int(|| {
+        let Some(term) = term else { return 0 };
+        let session = unsafe { &mut *session };
+        i32::from(session.inner.nutrition_forget(&term))
+    })
+}
+
+/// 清空营养库。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_nutrition_forget_all(session: *mut InputFlowSession) {
+    if session.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        unsafe { &mut *session }.inner.nutrition_forget_all();
+    }));
+}
+
+/// 营养库 TSV 导出/导入（词\t按键串\t出处\t强度\t加入时间）。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_nutrition_export(session: *mut InputFlowSession) -> *mut c_char {
+    if session.is_null() {
+        return std::ptr::null_mut();
+    }
+    guard_ptr(|| {
+        let session = unsafe { &*session };
+        into_c(session.inner.nutrition_export())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_nutrition_import(
+    session: *mut InputFlowSession,
+    tsv: *const c_char,
+) -> i32 {
+    if session.is_null() {
+        return -1;
+    }
+    let tsv = unsafe { cstr(tsv) };
+    guard_int(|| {
+        let Some(tsv) = tsv else { return -1 };
+        let session = unsafe { &mut *session };
+        session.inner.nutrition_import(&tsv) as i32
+    })
+}
+
 // ──────────────────── 每应用中英模式记忆 ────────────────────
 #[unsafe(no_mangle)]
 pub extern "C" fn inputflow_app_mode_new() -> *mut InputFlowAppMode {
@@ -1030,6 +1269,154 @@ mod tests {
             assert_eq!(inputflow_evolution_import(std::ptr::null_mut(), w), -1);
             inputflow_evolution_free(std::ptr::null_mut());
             inputflow_evolution_forget_all(std::ptr::null_mut());
+        }
+    }
+
+    /// 取当前组合态首个候选文本（E1 教学序列测试用）。
+    unsafe fn first_candidate_text(session: *mut InputFlowSession) -> Option<String> {
+        let json = unsafe { call_str(|| unsafe { inputflow_composition_json(session) }) }?;
+        let key = "\"text\":\"";
+        let start = json.find(key)? + key.len();
+        let end = json[start..].find('"')? + start;
+        Some(json[start..end].to_string())
+    }
+
+    unsafe fn feed_str(session: *mut InputFlowSession, text: &str) {
+        for ch in text.chars() {
+            let c = CString::new(ch.to_string()).unwrap();
+            assert_eq!(unsafe { inputflow_feed(session, c.as_ptr()) }, 1, "{ch}");
+        }
+    }
+
+    /// E1 接线：选词奖励跨会话共享（进程单例账本）、删除负奖励、开关、TSV 回环。
+    #[test]
+    fn evolution_session_wiring_via_c_abi() {
+        unsafe {
+            let s1 = inputflow_new(b"pinyin\0".as_ptr().cast());
+            let s2 = inputflow_new(b"pinyin\0".as_ptr().cast());
+            assert!(!s1.is_null() && !s2.is_null());
+            let app = CString::new("evo.session.test").unwrap();
+
+            // 会话 B 也能看到会话 A 学到的东西：账本是进程单例
+            assert_eq!(inputflow_set_evolution_context(s1, app.as_ptr(), 10, 1, 1_000), 1);
+            feed_str(s1, "nihao");
+            let top = first_candidate_text(s1).expect("应有候选");
+
+            for t in [1_005u64, 1_010] {
+                assert!(!inputflow_select(s1, 0).is_null());
+                assert_eq!(inputflow_evolution_note_selection(s1, 0, t), 1);
+                feed_str(s1, "nihao");
+            }
+            let shared = call_str(|| inputflow_evolution_session_export(s2)).unwrap();
+            assert!(
+                shared.lines().any(|l| l.starts_with(&format!("{top}\t"))),
+                "会话 B 应读到会话 A 的学习: {shared}"
+            );
+
+            // 选了又删：负亲和度落账
+            assert!(!inputflow_select(s1, 0).is_null());
+            assert_eq!(inputflow_evolution_note_selection(s1, 0, 1_015), 1);
+            assert_eq!(inputflow_evolution_note_delete(s1, 1_018), 1);
+            let tsv = call_str(|| inputflow_evolution_session_export(s1)).unwrap();
+            assert!(
+                tsv.lines().any(|l| {
+                    l.starts_with(&format!("{top}\t"))
+                        && l.split('\t').nth(2).unwrap().parse::<f32>().unwrap() < 0.0
+                }),
+                "删除应留负亲和度: {tsv}"
+            );
+
+            // 关闭学习：选择与删除都不再记账
+            let frozen = call_str(|| inputflow_evolution_session_export(s1)).unwrap();
+            assert_eq!(inputflow_set_evolution_context(s1, app.as_ptr(), 10, 0, 2_000), 1);
+            feed_str(s1, "nihao");
+            assert!(!inputflow_select(s1, 0).is_null());
+            assert_eq!(inputflow_evolution_note_selection(s1, 0, 2_005), 1);
+            assert_eq!(inputflow_evolution_note_delete(s1, 2_008), 1);
+            assert_eq!(
+                call_str(|| inputflow_evolution_session_export(s1)).unwrap(),
+                frozen,
+                "关闭后不得新增账目"
+            );
+            assert_eq!(inputflow_set_evolution_context(s1, app.as_ptr(), 10, 1, 2_100), 1);
+
+            // 清空 + TSV 导入回环
+            let saved = frozen.clone();
+            inputflow_evolution_session_forget(s2);
+            assert!(call_str(|| inputflow_evolution_session_export(s1)).unwrap().is_empty());
+            let c_tsv = CString::new(saved).unwrap();
+            assert!(inputflow_evolution_session_import(s1, c_tsv.as_ptr()) >= 1);
+
+            // 空会话指针安全
+            assert_eq!(inputflow_set_evolution_context(std::ptr::null_mut(), app.as_ptr(), 0, 1, 0), 0);
+            assert_eq!(inputflow_evolution_note_selection(std::ptr::null_mut(), 0, 0), 0);
+            assert_eq!(inputflow_evolution_note_delete(std::ptr::null_mut(), 0), 0);
+            assert!(inputflow_evolution_session_export(std::ptr::null_mut()).is_null());
+            assert_eq!(inputflow_evolution_session_import(std::ptr::null_mut(), c_tsv.as_ptr()), -1);
+            inputflow_evolution_session_forget(std::ptr::null_mut());
+
+            inputflow_free(s1);
+            inputflow_free(s2);
+        }
+    }
+
+    /// E2 喂食层：术语提炼 JSON → 喂入营养词 → 按键召回 → 列举/忘记/回环。
+    #[test]
+    fn nutrition_feed_via_c_abi() {
+        unsafe {
+            let session = inputflow_new(b"pinyin\0".as_ptr().cast());
+            assert!(!session.is_null());
+
+            // 纯函数提炼：反复出现的词浮出，只出现一次的不给
+            let text = CString::new("县政府发布通知，县政府要求落实。").unwrap();
+            let json = call_str(|| inputflow_feed_extract_json(text.as_ptr())).unwrap();
+            assert!(json.contains("\"term\":\"县政府\""), "{json}");
+            assert!(!json.contains("通知"), "只出现一次不成词: {json}");
+
+            // 喂入营养词（词典单字读音派生按键串）
+            let term = CString::new("北京高").unwrap();
+            let source = CString::new("会议纪要.txt").unwrap();
+            assert_eq!(inputflow_nutrition_add(session, term.as_ptr(), source.as_ptr(), 2, 1_000), 1);
+
+            // 列举
+            let list = call_str(|| inputflow_nutrition_list_json(session)).unwrap();
+            assert!(list.contains("\"term\":\"北京高\""), "{list}");
+            assert!(list.contains("\"keys\":\"beijinggao\""), "{list}");
+            assert!(list.contains("\"source\":\"会议纪要.txt\""), "{list}");
+
+            // 按键召回：打 beijinggao 应出现北京高
+            feed_str(session, "beijinggao");
+            let comp = call_str(|| inputflow_composition_json(session)).unwrap();
+            assert!(comp.contains("北京高"), "{comp}");
+            inputflow_clear(session);
+
+            // TSV 回环
+            let tsv = call_str(|| inputflow_nutrition_export(session)).unwrap();
+            assert!(tsv.contains("北京高\tbeijinggao"), "{tsv}");
+            let c_tsv = CString::new(tsv).unwrap();
+            let fresh = inputflow_new(b"pinyin\0".as_ptr().cast());
+            assert_eq!(inputflow_nutrition_import(fresh, c_tsv.as_ptr()), 1);
+            let list2 = call_str(|| inputflow_nutrition_list_json(fresh)).unwrap();
+            assert!(list2.contains("\"term\":\"北京高\""), "{list2}");
+
+            // 忘记
+            assert_eq!(inputflow_nutrition_forget(fresh, term.as_ptr()), 1);
+            assert_eq!(inputflow_nutrition_forget(fresh, term.as_ptr()), 0);
+            inputflow_nutrition_forget_all(fresh);
+            assert!(call_str(|| inputflow_nutrition_list_json(fresh)).unwrap() == "[]");
+
+            // 空指针安全
+            let bad = CString::new("x").unwrap();
+            assert!(inputflow_feed_extract_json(std::ptr::null()).is_null());
+            assert_eq!(inputflow_nutrition_add(std::ptr::null_mut(), bad.as_ptr(), bad.as_ptr(), 1, 0), 0);
+            assert!(inputflow_nutrition_list_json(std::ptr::null_mut()).is_null());
+            assert_eq!(inputflow_nutrition_forget(std::ptr::null_mut(), bad.as_ptr()), 0);
+            inputflow_nutrition_forget_all(std::ptr::null_mut());
+            assert!(inputflow_nutrition_export(std::ptr::null_mut()).is_null());
+            assert_eq!(inputflow_nutrition_import(std::ptr::null_mut(), bad.as_ptr()), -1);
+
+            inputflow_free(session);
+            inputflow_free(fresh);
         }
     }
 

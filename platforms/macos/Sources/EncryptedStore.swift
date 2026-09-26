@@ -20,6 +20,10 @@ final class EncryptedStore {
 
     private(set) var clipboard: [ClipboardItem] = []
     private(set) var userModelTsv: String = ""
+    /// 知你账本 TSV（词\t特征\t亲和度\t观察数\t最后触摸），随 userdata.enc 加密落盘。
+    private(set) var evolutionTsv: String = ""
+    /// 营养库 TSV（词\t按键串\t出处\t强度\t加入时间），喂食层的落盘。
+    private(set) var nutritionTsv: String = ""
     /// 钥匙串是否可用（false = 本次运行不落盘）。
     private(set) var keyAvailable = false
 
@@ -35,6 +39,10 @@ final class EncryptedStore {
     private struct Payload: Codable {
         var schemaVersion: Int
         var userModelTsv: String
+        /// v2 起新增；解码 v1 旧档时为 nil。
+        var evolutionTsv: String?
+        /// v3 起新增（喂食层营养库）；解码 v1/v2 旧档时为 nil。
+        var nutritionTsv: String?
         var clipboard: [ClipboardItem]
     }
 
@@ -68,6 +76,8 @@ final class EncryptedStore {
             let plaintext = try Self.open(data, key: key)
             let payload = try JSONDecoder().decode(Payload.self, from: plaintext)
             userModelTsv = payload.userModelTsv
+            evolutionTsv = payload.evolutionTsv ?? ""
+            nutritionTsv = payload.nutritionTsv ?? ""
             clipboard = payload.clipboard
             return true
         } catch {
@@ -76,6 +86,8 @@ final class EncryptedStore {
             try? FileManager.default.removeItem(at: backup)
             try? FileManager.default.moveItem(at: fileURL, to: backup)
             userModelTsv = ""
+            evolutionTsv = ""
+            nutritionTsv = ""
             clipboard = []
             return false
         }
@@ -83,6 +95,42 @@ final class EncryptedStore {
 
     func setUserModel(_ tsv: String) {
         userModelTsv = tsv
+        markDirty()
+    }
+
+    /// 覆盖知你账本（权限中心「一键忘记」后归零走这里）。
+    func setEvolution(_ tsv: String) {
+        evolutionTsv = tsv
+        markDirty()
+    }
+
+    /// 合并另一份知你账本 TSV（多控制器同时使用时避免互相覆盖）：
+    /// 同一 (词, 特征) 取「最后触摸」较新的整行——亲和度与观察数是一体的。
+    func mergeEvolution(tsv: String) {
+        guard !tsv.isEmpty else { return }
+        var rows: [String: [String]] = [:]
+        _ = Self.mergeDatedRows(evolutionTsv, into: &rows) {
+            Float($0[2]) != nil && Int($0[3]) != nil
+        }
+        guard Self.mergeDatedRows(tsv, into: &rows, validate: { Float($0[2]) != nil && Int($0[3]) != nil })
+        else { return }
+        evolutionTsv = Self.renderDatedRows(rows)
+        markDirty()
+    }
+
+    /// 覆盖营养库（权限中心「清空」后归零走这里）。
+    func setNutrition(_ tsv: String) {
+        nutritionTsv = tsv
+        markDirty()
+    }
+
+    /// 合并另一份营养库 TSV：同一词取「加入时间」较新的整行。
+    func mergeNutrition(tsv: String) {
+        guard !tsv.isEmpty else { return }
+        var rows: [String: [String]] = [:]
+        _ = Self.mergeDatedRows(nutritionTsv, into: &rows) { Int($0[3]) != nil }
+        guard Self.mergeDatedRows(tsv, into: &rows, validate: { Int($0[3]) != nil }) else { return }
+        nutritionTsv = Self.renderDatedRows(rows)
         markDirty()
     }
 
@@ -150,7 +198,13 @@ final class EncryptedStore {
         saveWorkItem?.cancel()
         saveWorkItem = nil
         guard let key, keyAvailable else { return }
-        let payload = Payload(schemaVersion: 1, userModelTsv: userModelTsv, clipboard: clipboard)
+        let payload = Payload(
+            schemaVersion: 3,
+            userModelTsv: userModelTsv,
+            evolutionTsv: evolutionTsv,
+            nutritionTsv: nutritionTsv,
+            clipboard: clipboard
+        )
         do {
             let plaintext = try JSONEncoder().encode(payload)
             let sealed = try Self.seal(plaintext, key: key)
@@ -193,6 +247,37 @@ final class EncryptedStore {
         var out = ""
         for (key, c) in records.sorted(by: { $0.key < $1.key }) {
             out += "\(key)\t\(c)\n"
+        }
+        return out
+    }
+
+    /// 五列带时间戳的行（知你账本 / 营养库共用）：末列是 Unix 秒，
+    /// 键 = 前两列；已有同键行时间不早于新行时不覆盖。有实际变化时返回 true。
+    private static func mergeDatedRows(
+        _ tsv: String,
+        into rows: inout [String: [String]],
+        validate: ([String]) -> Bool
+    ) -> Bool {
+        var changed = false
+        for line in tsv.split(separator: "\n") {
+            let fields = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+            guard fields.count == 5, !fields[0].isEmpty, !fields[1].isEmpty,
+                  validate(fields), let last = UInt64(fields[4])
+            else { continue }
+            let key = "\(fields[0])\t\(fields[1])"
+            if let existing = rows[key], let prevLast = UInt64(existing[4]), prevLast >= last {
+                continue
+            }
+            rows[key] = fields
+            changed = true
+        }
+        return changed
+    }
+
+    private static func renderDatedRows(_ rows: [String: [String]]) -> String {
+        var out = ""
+        for (_, fields) in rows.sorted(by: { $0.key < $1.key }) {
+            out += fields.joined(separator: "\t") + "\n"
         }
         return out
     }
@@ -252,6 +337,7 @@ extension EncryptedStore {
 
         let a = EncryptedStore(fileURL: url, key: key)
         a.setUserModel("你好\t3\n@pair\t你好\t世界\t2\n")
+        a.setEvolution("你好\tapp:com.apple.Notes\t0.5250\t2\t1000\n")
         a.recordClipboard("第一段文本")
         a.recordClipboard("第一段文本") // 连续重复应忽略
         a.recordClipboard("第二段文本")
@@ -267,6 +353,7 @@ extension EncryptedStore {
         let b = EncryptedStore(fileURL: url, key: key)
         ok = ok && b.load()
         ok = ok && b.userModelTsv.contains("你好\t3")
+        ok = ok && b.evolutionTsv.contains("你好\tapp:com.apple.Notes\t0.5250\t2\t1000")
         ok = ok && b.clipboard.count == 2
         ok = ok && b.clipboard.first?.text == "第二段文本"
 
@@ -285,6 +372,22 @@ extension EncryptedStore {
         ok = ok && merged.userModelTsv.contains("@pair\t你好\t世界\t4")
         ok = ok && merged.userModelTsv.contains("@pair\t世界\t你好\t1")
         ok = ok && merged.userModelTsv.contains("@phrase\tnihaoshijie\t你好世界\t3")
+
+        // 知你账本合并：同键取「最后触摸」较新的整行，坏行跳过
+        merged.mergeEvolution(tsv: "你好\tapp:old\t0.1000\t1\t500\n你好\tapp:new\t0.3500\t2\t2000\n坏行\n")
+        ok = ok && merged.evolutionTsv.contains("你好\tapp:old\t0.1000\t1\t500")
+        merged.mergeEvolution(tsv: "你好\tapp:old\t0.9000\t3\t800\n")
+        ok = ok && merged.evolutionTsv.contains("你好\tapp:old\t0.1000\t1\t500")
+        ok = ok && merged.evolutionTsv.contains("你好\tapp:new\t0.3500\t2\t2000")
+
+        // 营养库合并：同词取「加入时间」较新的整行
+        merged.setNutrition("")
+        merged.mergeNutrition(tsv: "张江高科\tzhangjianggaoke\t旧文档\t2\t500\n")
+        merged.mergeNutrition(tsv: "张江高科\tzhangjianggaoke\t新文档\t5\t2000\n坏行\n缺\t列\t1\n")
+        ok = ok && merged.nutritionTsv.contains("张江高科\tzhangjianggaoke\t新文档\t5\t2000")
+        ok = ok && !merged.nutritionTsv.contains("旧文档")
+        merged.mergeNutrition(tsv: "张江高科\tzhangjianggaoke\t更老\t1\t100\n")
+        ok = ok && merged.nutritionTsv.contains("新文档\t5\t2000")
 
         // 损坏文件应被隔离为 .corrupt
         try? Data("garbage".utf8).write(to: url)

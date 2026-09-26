@@ -67,6 +67,7 @@ SWIFT_SOURCES=("$HERE/Sources/main.swift" "$HERE/Sources/Engine.swift" \
     "$HERE/Sources/SettingsWindow.swift" "$HERE/Sources/InputController.swift" \
     "$HERE/Sources/AppModeMemory.swift" "$HERE/Sources/Theme.swift" \
     "$HERE/Sources/PermissionCenter.swift" "$HERE/Sources/PetStats.swift" \
+    "$HERE/Sources/FeedWindow.swift" \
     "$HERE/Sources/VRMPetView.swift" \
     "$HERE/Sources/PetCatalog.swift" \
     "$HERE/Sources/PetCatalogWindow.swift" \
@@ -83,7 +84,7 @@ for arch in "${SWIFT_ARCHS[@]}"; do
         -import-objc-header "$ROOT/crates/ffi/include/inputflow.h" \
         "$RUST_LIB" \
         -framework AppKit -framework InputMethodKit -framework Carbon -framework WebKit \
-        -framework Speech -framework AVFoundation \
+        -framework Speech -framework AVFoundation -framework Vision \
         -o "$BIN_DIR/$APP.$arch" \
         "${SWIFT_SOURCES[@]}"
 done

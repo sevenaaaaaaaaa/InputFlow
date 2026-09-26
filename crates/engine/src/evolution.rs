@@ -206,6 +206,9 @@ impl EvolutionMemory {
     }
 
     pub fn export_tsv(&self) -> String {
+        if self.cells.is_empty() {
+            return String::new();
+        }
         let mut rows: Vec<String> = self
             .cells
             .iter()

@@ -61,6 +61,12 @@ final class InputFlowInputController: IMKInputController {
         if !store.userModelTsv.isEmpty {
             _ = engine.importUserModel(store.userModelTsv)
         }
+        if !store.evolutionTsv.isEmpty {
+            _ = engine.importEvolution(store.evolutionTsv)
+        }
+        if !store.nutritionTsv.isEmpty {
+            _ = engine.nutritionImport(store.nutritionTsv)
+        }
         engine.setTraditional(UserDefaults.standard.bool(forKey: Self.traditionalKey))
         observePetActions()
     }
@@ -88,6 +94,20 @@ final class InputFlowInputController: IMKInputController {
         ) { [weak self] _ in
             guard Self.activeController === self else { return }
             PetWindowController.shared.showStatsCard(yesterday: true)
+        }
+        // 喂食窗改了营养库：整体重导入（营养库按会话持有，账本才是进程单例）
+        NotificationCenter.default.addObserver(
+            forName: .nutritionChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.engine.nutritionForgetAll()
+            _ = self.engine.nutritionImport(self.store.nutritionTsv)
+        }
+        // 权限中心切了知你学习开关：活跃会话即时重同步
+        NotificationCenter.default.addObserver(
+            forName: .evolutionToggled, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.syncEvolutionContext()
         }
     }
 
@@ -138,6 +158,16 @@ final class InputFlowInputController: IMKInputController {
         let forgetMem = NSMenuItem(title: "忘记此应用的中英偏好", action: #selector(forgetAppModeMemory(_:)), keyEquivalent: "")
         forgetMem.target = self
         menu.addItem(forgetMem)
+        let evo = NSMenuItem(title: "知你学习（越用越懂你）", action: #selector(toggleEvolutionLearning(_:)), keyEquivalent: "")
+        evo.target = self
+        evo.state = EvolutionLearning.isEnabled ? .on : .off
+        menu.addItem(evo)
+        let forgetEvo = NSMenuItem(title: "清空知你学习账本", action: #selector(forgetEvolutionLedger(_:)), keyEquivalent: "")
+        forgetEvo.target = self
+        menu.addItem(forgetEvo)
+        let feed = NSMenuItem(title: "喂它一段…", action: #selector(openFeedWindow(_:)), keyEquivalent: "")
+        feed.target = self
+        menu.addItem(feed)
         let punct = NSMenuItem(title: "强制半角标点", action: #selector(toggleHalfPunctuation(_:)), keyEquivalent: "")
         punct.target = self
         punct.state = UserDefaults.standard.bool(forKey: "InputFlowForceHalfPunctuation") ? .on : .off
@@ -1032,11 +1062,15 @@ final class InputFlowInputController: IMKInputController {
             }
             return true
         case 51: // Delete
+            if !engine.hasComposition {
+                // 落到应用的删除：多半在删刚上屏的词——交给内核按窗口判定强负信号
+                engine.noteEvolutionDelete()
+                persistEvolution()
+            }
             guard engine.hasComposition else { return false }
             _ = engine.backspace()
             update(client)
-            return true
-        case 49: // Space
+            return true        case 49: // Space
             if (voice.isListening || voiceSettledSource != nil), !engine.hasComposition,
                commitVoiceSelection(index: 0, client: client) {
                 return true
@@ -1184,6 +1218,7 @@ final class InputFlowInputController: IMKInputController {
         if let client = sender as? IMKTextInput {
             clearMarkedText(client)
         }
+        persistEvolution(force: true)
         window.hide()
         store.flush()
         super.deactivateServer(sender)
@@ -1194,6 +1229,7 @@ final class InputFlowInputController: IMKInputController {
         currentClient = sender as? IMKTextInput
         Self.activeController = self
         page = 0
+        syncEvolutionContext()
         restoreModeForApp()
         refreshPetModeLabel()
         maybeEveningDigest()
@@ -1273,6 +1309,7 @@ final class InputFlowInputController: IMKInputController {
             NSSound.beep()
             return
         }
+        noteEvolutionSelection(index: index)
         stats.recordCommit(chars: text.count, keys: keys)
         commit(text, client: client)
     }
@@ -1289,6 +1326,55 @@ final class InputFlowInputController: IMKInputController {
     /// 把会话内学到的用户词（含上下词二元组）合并进加密存储。
     private func persistUserModel() {
         store.mergeUserModel(tsv: engine.exportUserModel())
+    }
+
+    // MARK: - 知你教学层（ADR-0008 E1）
+
+    /// 知你账本落盘节流：账本是全量 TSV，没必要跟着每次选词导出；
+    /// 平峰 60 秒一次，会话结束/切换应用前强制一次。
+    private var lastEvolutionPersistAt: TimeInterval = 0
+
+    private func persistEvolution(force: Bool = false) {
+        let now = Date().timeIntervalSince1970
+        guard force || now - lastEvolutionPersistAt >= 60 else { return }
+        lastEvolutionPersistAt = now
+        store.mergeEvolution(tsv: engine.exportEvolution())
+    }
+
+    /// 会话激活：把前台应用、时段与学习开关同步给内核（重排的决策上下文）。
+    private func syncEvolutionContext() {
+        let hour = UInt32(Calendar.current.component(.hour, from: Date()))
+        engine.setEvolutionContext(app: currentAppId, hour: hour, enabled: EvolutionLearning.isEnabled)
+    }
+
+    /// 选词上屏的教学信号：数字键选了第 2+ 候选算「排序还不够准」（+0.6），
+    /// 首选正常记账（+1.0）；若刚发生选后删除，这里自动升级为重选强正（+1.5）。
+    private func noteEvolutionSelection(index: Int) {
+        guard EvolutionLearning.isEnabled else { return }
+        engine.noteEvolutionSelection(altRank: index > 0)
+        persistEvolution()
+    }
+
+    @objc private func toggleEvolutionLearning(_ sender: NSMenuItem) {
+        let on = !EvolutionLearning.isEnabled
+        EvolutionLearning.setEnabled(on)
+        sender.state = on ? .on : .off
+        syncEvolutionContext()
+        PetWindowController.shared.showToast(
+            on ? "知你学习已开启：选词与纠错都会成为排序参考" : "知你学习已暂停（账本保留，可随时继续）",
+            duration: 4
+        )
+    }
+
+    /// 一键忘记：清空共享账本与落盘数据（忘了就是真忘了）。
+    @objc private func forgetEvolutionLedger(_ sender: Any) {
+        engine.forgetEvolution()
+        store.setEvolution("")
+        PetWindowController.shared.showToast("知你学习账本已清空", duration: 3)
+    }
+
+    @objc private func openFeedWindow(_ sender: Any) {
+        FeedWindowController.shared.show()
     }
 
     // MARK: - 网址模式 / 表情模式

@@ -33,6 +33,8 @@ pub struct Dictionary {
     prefix: OnceLock<Vec<(Box<str>, Box<str>)>>,
     /// (首字母串, key)，按首字母串排序；简拼查询用。
     initials: OnceLock<Vec<(Box<str>, Box<str>)>>,
+    /// 字 → 拼音音节（取词频最高的读音）；喂食层给营养词派生按键串用。
+    char_pinyin: OnceLock<HashMap<char, Box<str>>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,11 +124,41 @@ impl Dictionary {
         // 索引与内容保持一致：内容变化时重建。
         self.prefix = OnceLock::new();
         self.initials = OnceLock::new();
+        self.char_pinyin = OnceLock::new();
     }
 
     /// 按 key 查候选（词频降序，同频按字典序）。
     pub fn lookup(&self, key: &str) -> &[Entry] {
         self.map.get(key).map(Vec::as_slice).unwrap_or(EMPTY)
+    }
+
+    /// 字 → 拼音音节（无分隔符的小写字母串，如 `zhang`），取词典里词频最高的读音。
+    /// 喂食层用它给营养词派生按键串；缺字返回 None。首次调用时构建，之后只读。
+    pub fn char_pinyin(&self) -> &HashMap<char, Box<str>> {
+        self.char_pinyin.get_or_init(|| {
+            let mut best: HashMap<char, (u32, &str)> = HashMap::new();
+            for (key, entries) in &self.map {
+                // 单音节键才可能是单字条目（多字词的键含分隔符）
+                if key.contains('\'') {
+                    continue;
+                }
+                for e in entries {
+                    let mut cs = e.word.chars();
+                    let (Some(ch), None) = (cs.next(), cs.next()) else {
+                        continue;
+                    };
+                    match best.get(&ch) {
+                        Some(&(freq, _)) if freq >= e.freq => continue,
+                        _ => {
+                            best.insert(ch, (e.freq, key.as_str()));
+                        }
+                    }
+                }
+            }
+            best.into_iter()
+                .map(|(ch, (_, key))| (ch, Box::<str>::from(key)))
+                .collect()
+        })
     }
 
     fn prefix_index(&self) -> &[(Box<str>, Box<str>)] {

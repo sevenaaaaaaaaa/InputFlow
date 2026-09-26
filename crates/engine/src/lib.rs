@@ -1,9 +1,9 @@
 //! 会话编排：持有输入缓冲、组合态与用户词模型，是平台前端唯一需要打交道的对象。
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use inputflow_core::backup::{self, BackupError};
-use inputflow_core::{Composition, Decoder, Mode, UserModel};
+use inputflow_core::{Candidate, CandidateKind, Composition, Decoder, Mode, UserModel};
 use inputflow_dict::Dictionary;
 use inputflow_emoji::EmojiDecoder;
 use inputflow_en::EnDecoder;
@@ -11,8 +11,11 @@ use inputflow_ja::JaDecoder;
 use inputflow_pinyin::{Layout, PinyinDecoder};
 use inputflow_symbol::SymbolDecoder;
 
+use evolution::EvolutionMemory;
+
 pub mod app_mode;
 pub mod evolution;
+pub mod feed;
 pub mod stats;
 pub use app_mode::AppModeMemory;
 
@@ -40,6 +43,12 @@ const MIN_PHRASE_PREFIX: u32 = 3;
 const PHRASE_SCORE_EXACT: f64 = 18.0;
 const PHRASE_SCORE_PREFIX: f64 = 12.0;
 
+// ——— 知你教学层（ADR-0008）序列判定 ———
+/// 上屏后多少秒内按下删除，算「选了又删」（强负信号）。
+const DELETE_WINDOW_SECS: u64 = 10;
+/// 删除后多少秒内的下一次选词，算「纠正后的真实意图」（+1.5）。
+const RESELECT_WINDOW_SECS: u64 = 30;
+
 pub struct Session {
     mode: Mode,
     buffer: String,
@@ -58,6 +67,28 @@ pub struct Session {
     traditional: bool,
     /// 与 `comp.candidates` 同下标的简体原文，仅在繁体显示时非空。
     origins: Vec<String>,
+    /// 知你账本（ADR-0008）：FFI 注入进程级共享实例，独立使用时是私有账本。
+    evolution: Arc<Mutex<EvolutionMemory>>,
+    /// 营养库（ADR-0008 喂食层）：营养词的加分与按键召回都从这里出，
+    /// 忘记即移除全部效果；跨会话一致性由前端重导入保证。
+    nutrition: feed::NutritionLibrary,
+    /// 知你学习开关（前端在激活时按用户设置同步）。
+    evolution_enabled: bool,
+    /// 决策上下文：前台应用 bundle id（前端在激活时同步）。
+    evolution_app: Option<String>,
+    /// 决策上下文：本地时段桶用的小时（0-23）。
+    evolution_hour: u32,
+    /// 知你的「当前时刻」缓存：重排衰减用，精度到分钟级足够（半衰 14 天）。
+    evolution_now: u64,
+    /// 最近一次选词的 (词, 特征)：等前端确认（含越级/删除/重选）后记账。
+    pending_selection: Option<(String, Vec<String>)>,
+    /// 上一次已记账的选词与特征：删除负奖励要落回当初的上下文。
+    last_selection: Option<(String, Vec<String>)>,
+    last_selection_at: u64,
+    /// 同一次选词只罚一次删除（连按删除不会叠加负奖励）。
+    last_selection_deleted: bool,
+    /// 删除已发生，等待重选；附带武装时刻用于过期判定。
+    reselect_armed_at: Option<u64>,
 }
 
 impl Session {
@@ -80,6 +111,17 @@ impl Session {
             recent: Vec::new(),
             traditional: false,
             origins: Vec::new(),
+            evolution: Arc::new(Mutex::new(EvolutionMemory::new())),
+            nutrition: feed::NutritionLibrary::new(),
+            evolution_enabled: true,
+            evolution_app: None,
+            evolution_hour: 0,
+            evolution_now: 0,
+            pending_selection: None,
+            last_selection: None,
+            last_selection_at: 0,
+            last_selection_deleted: false,
+            reselect_armed_at: None,
         };
         session.refresh();
         session
@@ -180,6 +222,8 @@ impl Session {
     pub fn clear(&mut self) {
         self.buffer.clear();
         self.comp = Composition::default();
+        self.pending_selection = None;
+        self.reselect_armed_at = None;
     }
 
     pub fn set_mode(&mut self, mode: Mode) {
@@ -199,6 +243,8 @@ impl Session {
             .get(index)
             .cloned()
             .unwrap_or_else(|| cand.text.clone());
+        // 教学层：特征必须按「选择瞬间」的上下文捕获——后面 learn_context 会改写它。
+        self.pending_selection = self.evolution_pending(&learned);
         self.consume(cand.consumed);
         if self.mode != Mode::Emoji {
             self.user.record(&learned);
@@ -216,6 +262,9 @@ impl Session {
         }
         let s = std::mem::take(&mut self.buffer);
         self.learn_context(&s);
+        // 原样上屏不是选词：挂起的选词奖励与重选期待一并作废。
+        self.pending_selection = None;
+        self.reselect_armed_at = None;
         self.refresh();
         Some(s)
     }
@@ -232,6 +281,158 @@ impl Session {
         }
         self.user.record(text);
         self.learn_context(text);
+    }
+
+    // ──────────── 知你喂食层（ADR-0008 E2 接线） ────────────
+
+    /// 营养库只读访问（FFI 列举用）。
+    pub fn nutrition(&self) -> &feed::NutritionLibrary {
+        &self.nutrition
+    }
+
+    /// 喂入一条营养词：按键串由词典的单字读音派生（缺字的词只享受加分）。
+    /// 返回是否写入。
+    pub fn nutrition_add(&mut self, term: &str, source: &str, strength: u32, now: u64) -> bool {
+        let keys = derive_nutrition_keys(term, &self.dict);
+        self.nutrition.add(term, &keys, source, strength, now)
+    }
+
+    /// 忘记一条营养词（加分与按键召回一并消失）。返回是否存在。
+    pub fn nutrition_forget(&mut self, term: &str) -> bool {
+        self.nutrition.forget(term)
+    }
+
+    /// 清空营养库。
+    pub fn nutrition_forget_all(&mut self) {
+        self.nutrition.forget_all();
+    }
+
+    /// 营养库 TSV 导出（词\t按键串\t出处\t强度\t加入时间）。
+    pub fn nutrition_export(&self) -> String {
+        self.nutrition.export_tsv()
+    }
+
+    /// 营养库 TSV 导入（覆盖同名条目），返回成功行数。
+    pub fn nutrition_import(&mut self, tsv: &str) -> usize {
+        self.nutrition.import_tsv(tsv)
+    }
+
+    // ──────────── 知你教学层（ADR-0008 E1 接线） ────────────
+
+    /// 注入共享账本（FFI 层用：进程内所有会话共享一份「越用越懂你」）。
+    pub fn set_evolution_memory(&mut self, memory: Arc<Mutex<EvolutionMemory>>) {
+        self.evolution = memory;
+    }
+
+    /// 同步决策上下文与开关（前端在会话激活时调用）；`now` 同时刷新重排时钟。
+    pub fn set_evolution_context(
+        &mut self,
+        app: Option<&str>,
+        hour: u32,
+        enabled: bool,
+        now: u64,
+    ) {
+        self.evolution_app = app.map(str::to_string).filter(|a| !a.is_empty());
+        self.evolution_hour = hour;
+        self.evolution_enabled = enabled;
+        self.evolution_now = now;
+    }
+
+    pub fn evolution_enabled(&self) -> bool {
+        self.evolution_enabled
+    }
+
+    /// 当前上下文特征：词法窗（上次上屏）+ 应用 + 时段 + 主题指纹。
+    fn evolution_features(&self) -> Vec<String> {
+        let lex = self.last_committed.clone().unwrap_or_default();
+        let mut features = evolution::context_features(
+            &lex,
+            self.evolution_app.as_deref(),
+            self.evolution_hour,
+        );
+        features.extend(evolution::topic_features(&lex, 3));
+        features
+    }
+
+    /// 选择瞬间的待记账项：词 + 当时的上下文特征。表情模式不参与。
+    fn evolution_pending(&self, word: &str) -> Option<(String, Vec<String>)> {
+        if !self.evolution_enabled || self.mode == Mode::Emoji || word.is_empty() {
+            return None;
+        }
+        Some((word.to_string(), self.evolution_features()))
+    }
+
+    /// 前端确认了一次选词：`alt_rank` = 数字键选了第 2+ 候选；
+    /// 删除后的窗口内重选记强正，其余按正常选词/越级选词记账。
+    pub fn note_selection(&mut self, alt_rank: bool, now: u64) {
+        let Some((word, features)) = self.pending_selection.take() else {
+            return;
+        };
+        if !self.evolution_enabled {
+            return;
+        }
+        let reselect = self
+            .reselect_armed_at
+            .is_some_and(|at| now.saturating_sub(at) <= RESELECT_WINDOW_SECS);
+        self.reselect_armed_at = None;
+        let reward = if reselect {
+            evolution::REWARD_RESELECT
+        } else if alt_rank {
+            evolution::REWARD_ALT_RANK
+        } else {
+            evolution::REWARD_SELECT
+        };
+        if let Ok(mut mem) = self.evolution.lock() {
+            mem.reward(&word, &features, reward, now);
+        }
+        self.last_selection = Some((word, features));
+        self.last_selection_at = now;
+        self.last_selection_deleted = false;
+    }
+
+    /// 前端看到「无组合态的删除键」：多半在删刚上屏的词——强负信号，
+    /// 并武装重选期待。窗口外或已罚过的忽略。
+    pub fn note_delete(&mut self, now: u64) {
+        if !self.evolution_enabled || self.last_selection_deleted {
+            return;
+        }
+        let Some((word, features)) = self.last_selection.clone() else {
+            return;
+        };
+        if now.saturating_sub(self.last_selection_at) > DELETE_WINDOW_SECS {
+            return;
+        }
+        if let Ok(mut mem) = self.evolution.lock() {
+            mem.reward(&word, &features, evolution::REWARD_DELETED, now);
+        }
+        self.last_selection_deleted = true;
+        self.reselect_armed_at = Some(now);
+    }
+
+    /// 导出知你账本 TSV（词\t特征\t亲和度\t观察数\t最后触摸）。
+    pub fn export_evolution(&self) -> String {
+        match self.evolution.lock() {
+            Ok(mem) => mem.export_tsv(),
+            Err(_) => String::new(),
+        }
+    }
+
+    /// 导入知你账本 TSV，返回成功行数。
+    pub fn import_evolution(&mut self, tsv: &str) -> usize {
+        match self.evolution.lock() {
+            Ok(mut mem) => mem.import_tsv(tsv),
+            Err(_) => 0,
+        }
+    }
+
+    /// 清空知你账本（权限中心的「一键忘记」）。
+    pub fn forget_evolution(&mut self) {
+        if let Ok(mut mem) = self.evolution.lock() {
+            mem.forget_all();
+        }
+        self.last_selection = None;
+        self.pending_selection = None;
+        self.reselect_armed_at = None;
     }
 
     /// 自动学习短语：把最近几段上屏与本次拼接，窗口内的每个后缀组合各记一次。
@@ -330,22 +531,25 @@ impl Session {
         if self.mode != Mode::Emoji {
             for c in &mut cands {
                 c.score += self.user.bonus(&c.text);
+                c.score += self.nutrition.bonus(&c.text);
                 if let Some(prev) = &self.last_committed {
                     c.score += self.user.pair_bonus(prev, &c.text);
                 }
             }
             if matches!(self.mode, Mode::Pinyin | Mode::Shuangpin(_)) {
                 self.push_phrase_candidates(&mut cands);
+                self.push_nutrition_candidates(&mut cands);
                 self.push_english_candidates(&mut cands);
             }
         }
         self.finish(cands, preedit);
     }
 
-    /// 候选收尾：分层排序 → 截断 → 简繁转换 → 落到组合态。
+    /// 候选收尾：分层排序 → 知你重排 → 截断 → 简繁转换 → 落到组合态。
     fn finish(&mut self, mut cands: Vec<inputflow_core::Candidate>, preedit: String) {
         // 分层排序：literal 垫底、覆盖输入多的优先，用户词只在同层内重排。
         cands.sort_by(inputflow_core::Candidate::rank_cmp);
+        self.apply_evolution_rerank(&mut cands);
         cands.truncate(MAX_CANDIDATES);
         if self.traditional {
             self.origins.clear();
@@ -364,6 +568,45 @@ impl Session {
             preedit,
             candidates: cands,
         };
+    }
+
+    /// 知你重排：把学习修正施加在「等价层」内——同 literal 归属且同 consumed 的
+    /// 连续段。封顶 ±3 加上只在层内换位，保证覆盖分层与「原样上屏垫底」的
+    /// 不变式永不被学习打破（ADR-0008：学习只能微调，不能掀桌）。
+    fn apply_evolution_rerank(&mut self, cands: &mut [Candidate]) {
+        if !self.evolution_enabled || self.mode == Mode::Emoji || cands.len() < 2 {
+            return;
+        }
+        let features = self.evolution_features();
+        let now = self.evolution_now;
+        let Ok(mem) = self.evolution.lock() else {
+            return;
+        };
+        let mut start = 0;
+        while start < cands.len() {
+            let mut end = start + 1;
+            while end < cands.len() && same_tier(&cands[start], &cands[end]) {
+                end += 1;
+            }
+            if end - start > 1 {
+                let mut pool: Vec<Candidate> = cands[start..end].to_vec();
+                let mut scored: Vec<(String, f32)> = pool
+                    .iter()
+                    .map(|c| (c.text.clone(), c.score as f32))
+                    .collect();
+                mem.adjust(&mut scored, &features, now);
+                let mut reordered = Vec::with_capacity(pool.len());
+                for (text, _) in scored {
+                    if let Some(pos) = pool.iter().position(|c| c.text == text) {
+                        reordered.push(pool.remove(pos));
+                    }
+                }
+                // 兜底：adjust 不会增删条目，这里理论上是空的。
+                reordered.extend(pool);
+                cands[start..end].clone_from_slice(&reordered);
+            }
+            start = end;
+        }
     }
 
     /// 短语补全：把学到的短语按当前按键前缀召回。
@@ -411,6 +654,42 @@ impl Session {
         }
     }
 
+    /// 营养词按键召回：喂过的词按派生拼音召回（教一次，处处可用）。
+    ///
+    /// 按键完全命中时给整句量级的分；只是前缀时给补全分。与短语候选同一套
+    /// 去重规则：解码器已给出同样的词时只提分，不塞重复候选。
+    fn push_nutrition_candidates(&self, cands: &mut Vec<inputflow_core::Candidate>) {
+        use inputflow_core::{Candidate, CandidateKind};
+        let raw: String = self
+            .buffer
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .map(|c| c.to_ascii_lowercase())
+            .collect();
+        let consumed = self.buffer.chars().count();
+        if raw.chars().count() < MIN_PHRASE_QUERY {
+            return;
+        }
+        for (keys, term, strength) in self.nutrition.prefix_matches(&raw, 5) {
+            let exact = keys.len() == raw.len();
+            let score = if exact {
+                feed::NUTRITION_SCORE_EXACT
+            } else {
+                feed::NUTRITION_SCORE_PREFIX
+            } + (strength.max(1) as f64).ln();
+            if let Some(existing) = cands
+                .iter_mut()
+                .find(|c| c.text == term && c.consumed == consumed)
+            {
+                existing.score = existing.score.max(score);
+                continue;
+            }
+            cands.push(
+                Candidate::new(term, consumed, CandidateKind::Phrase, score).with_comment("营养词"),
+            );
+        }
+    }
+
     /// 中英混输：中文模式里掺入英文候选。
     ///
     /// 触发条件：输入无法完整解成中文（有残余）、或本身是长度 ≥4 的英文词、
@@ -443,6 +722,27 @@ impl Session {
 /// 能进短语库的字符：中日韩文字。英文、数字、符号、表情都排除在外。
 fn is_phrase_char(c: char) -> bool {
     matches!(c, '\u{3400}'..='\u{9fff}' | '\u{f900}'..='\u{faff}')
+}
+
+/// 知你重排的等价层：literal 归属相同且覆盖的按键数相同。
+/// 与 `Candidate::rank_cmp` 的层级键一致，层内换位永远不会跨层。
+fn same_tier(a: &Candidate, b: &Candidate) -> bool {
+    (a.kind == CandidateKind::Literal) == (b.kind == CandidateKind::Literal)
+        && a.consumed == b.consumed
+}
+
+/// 给营养词派生按键串：逐字查词典里的最高频读音并拼接。
+/// 含生僻字（词典无读音）时返回空串——该词不做按键召回，只享受加分。
+fn derive_nutrition_keys(term: &str, dict: &Dictionary) -> String {
+    let readings = dict.char_pinyin();
+    let mut keys = String::new();
+    for ch in term.trim().chars() {
+        match readings.get(&ch) {
+            Some(syl) => keys.push_str(syl),
+            None => return String::new(),
+        }
+    }
+    keys
 }
 
 #[cfg(test)]
@@ -966,5 +1266,310 @@ mod tests {
         s.set_mode(Mode::English);
         assert!(s.buffer().is_empty());
         assert_eq!(s.mode(), Mode::English);
+    }
+
+    // ──────────── 知你教学层接线（E1） ────────────
+
+    /// 同层内重排：奖励把「先」顶到「现」前面；不同 consumed 的层纹丝不动。
+    #[test]
+    fn evolution_rerank_moves_learned_word_within_tier() {
+        let mut s = session(Mode::Pinyin);
+        s.set_evolution_context(Some("com.apple.Notes"), 10, true, 1_000);
+        let mut cands = vec![
+            Candidate::new("现", 4, CandidateKind::Word, 10.0),
+            Candidate::new("先", 4, CandidateKind::Word, 9.0),
+            Candidate::new("县", 2, CandidateKind::Char, 8.0),
+            Candidate::new("xian", 4, CandidateKind::Literal, -1000.0),
+        ];
+        // 同一上下文里两次选「先」：奖励写进每个特征，跨特征求和越过 1.0 分差
+        let feats = s.evolution_features();
+        for t in [1_000u64, 1_100] {
+            s.evolution
+                .lock()
+                .unwrap()
+                .reward("先", &feats, evolution::REWARD_SELECT, t);
+        }
+        s.apply_evolution_rerank(&mut cands);
+        assert_eq!(cands[0].text, "先", "{cands:?}");
+        assert_eq!(cands[1].text, "现");
+        // 部分覆盖层与 literal 层顺序不动
+        assert_eq!(cands[2].text, "县");
+        assert_eq!(cands[3].text, "xian");
+    }
+
+    /// 选词 → 删除的完整序列：上屏 +1 记账、删除 −2 翻负、重选 +1.5。
+    #[test]
+    fn select_delete_reselect_sequence_is_rewarded() {
+        let mut s = session(Mode::Pinyin);
+        s.set_evolution_context(Some("com.apple.Notes"), 10, true, 1_000);
+        type_str(&mut s, "shi");
+        let top = s.composition().candidates[0].text.clone();
+        let idx = s
+            .composition()
+            .candidates
+            .iter()
+            .position(|c| c.text == top)
+            .unwrap();
+        s.select(idx);
+        s.note_selection(false, 1_005);
+
+        // 选后立刻删除（窗口内）：强负
+        s.note_delete(1_008);
+        let tsv = s.export_evolution();
+        let neg: Vec<_> = tsv
+            .lines()
+            .filter(|l| {
+                l.starts_with(&(top.clone() + "\t"))
+                    && l.split('\t').nth(2).unwrap().parse::<f32>().unwrap() < 0.0
+            })
+            .collect();
+        assert!(!neg.is_empty(), "删除应给 {top} 留下负亲和度: {tsv}");
+
+        // 删除后换个词重选：强正 1.5（v = 0.35 * 1.5 = 0.525）
+        type_str(&mut s, "shi");
+        let alt_idx = s
+            .composition()
+            .candidates
+            .iter()
+            .position(|c| c.text != top)
+            .unwrap();
+        let alt = s.composition().candidates[alt_idx].text.clone();
+        s.select(alt_idx);
+        s.note_selection(false, 1_020);
+        let tsv = s.export_evolution();
+        let reselected = tsv
+            .lines()
+            .filter(|l| l.starts_with(&alt))
+            .any(|l| l.split('\t').nth(2).unwrap().parse::<f32>().unwrap() > 0.5);
+        assert!(reselected, "重选应记 1.5 强正（0.5250）: {tsv}");
+    }
+
+    /// 删除窗口外：删除键只是普通编辑，不产生负奖励、也不武装重选。
+    #[test]
+    fn delete_outside_window_is_ignored() {
+        let mut s = session(Mode::Pinyin);
+        s.set_evolution_context(Some("com.apple.Notes"), 10, true, 1_000);
+        type_str(&mut s, "shi");
+        s.select(0);
+        s.note_selection(false, 1_000);
+        s.note_delete(1_000 + DELETE_WINDOW_SECS + 1);
+        let tsv = s.export_evolution();
+        assert!(
+            !tsv.lines().any(|l| l
+                .split('\t')
+                .nth(2)
+                .and_then(|v| v.parse::<f32>().ok())
+                .is_some_and(|v| v < 0.0)),
+            "窗口外的删除不该有负奖励: {tsv}"
+        );
+        // 重选期待未武装：下一次选词按普通 +1 记账（0.3500 而非 0.5250）
+        type_str(&mut s, "shi");
+        s.select(0);
+        s.note_selection(false, 2_000);
+        let tsv = s.export_evolution();
+        assert!(
+            !tsv.lines().any(|l| l.contains("\t0.5250\t")),
+            "重选期待应在窗口外过期: {tsv}"
+        );
+    }
+
+    /// 关闭知你：不重排、不记账。
+    #[test]
+    fn disabled_evolution_is_identity() {
+        let mut s = session(Mode::Pinyin);
+        s.set_evolution_context(Some("com.apple.Notes"), 10, false, 1_000);
+        let mut cands = vec![
+            Candidate::new("现", 4, CandidateKind::Word, 10.0),
+            Candidate::new("先", 4, CandidateKind::Word, 9.0),
+        ];
+        let feats = s.evolution_features();
+        s.evolution
+            .lock()
+            .unwrap()
+            .reward("先", &feats, evolution::REWARD_SELECT, 1_000);
+        s.evolution
+            .lock()
+            .unwrap()
+            .reward("先", &feats, evolution::REWARD_SELECT, 1_100);
+        s.apply_evolution_rerank(&mut cands);
+        assert_eq!(cands[0].text, "现", "关闭时不得重排");
+
+        type_str(&mut s, "shi");
+        let before = s.export_evolution();
+        s.select(0);
+        s.note_selection(false, 1_200);
+        s.note_delete(1_300);
+        assert_eq!(s.export_evolution(), before, "关闭时不得记账（直接注入的底账保持原样）");
+    }
+
+    /// 覆盖分层不变式：对部分覆盖候选狂加奖励也不能让它越级。
+    #[test]
+    fn coverage_tiers_survive_heavy_rewards() {
+        let mut s = session(Mode::Pinyin);
+        s.set_evolution_context(Some("com.apple.Terminal"), 22, true, 1_000);
+        type_str(&mut s, "nihao");
+        let partial = s
+            .composition()
+            .candidates
+            .iter()
+            .position(|c| c.consumed < 5 && c.kind != CandidateKind::Literal)
+            .expect("应有部分覆盖候选");
+        for i in 0..6u64 {
+            let idx = s
+                .composition()
+                .candidates
+                .iter()
+                .position(|c| c.consumed < 5 && c.kind != CandidateKind::Literal)
+                .unwrap_or(partial);
+            s.select(idx);
+            s.note_selection(true, 1_000 + i * 10);
+            // 重新打出同样的输入（select 会消费缓冲）
+            s.clear();
+            type_str(&mut s, "nihao");
+        }
+        let c = &s.composition().candidates;
+        let zh: Vec<_> = c
+            .iter()
+            .filter(|x| x.kind != CandidateKind::Literal)
+            .collect();
+        let first_partial = zh.iter().position(|x| x.consumed < 5).unwrap_or(zh.len());
+        assert!(first_partial > 0);
+        assert!(
+            zh[..first_partial].iter().all(|x| x.consumed == 5),
+            "全覆盖候选必须仍在最前: {:?}",
+            zh.iter().map(|x| (x.text.clone(), x.consumed)).collect::<Vec<_>>()
+        );
+        assert_eq!(c.last().map(|x| x.kind), Some(CandidateKind::Literal));
+    }
+
+    // ──────────── 知你喂食层接线（E2） ────────────
+
+    /// 营养词加分：喂过的词在候选里分数变高；忘记后回落。
+    #[test]
+    fn nutrition_bonus_lifts_candidate() {
+        let mut s = session(Mode::Pinyin);
+        type_str(&mut s, "beijing");
+        let baseline = s
+            .composition()
+            .candidates
+            .iter()
+            .find(|c| c.text == "北京")
+            .expect("应有「北京」")
+            .score;
+
+        assert!(s.nutrition_add("北京", "会议纪要.txt", 3, 1_000));
+        s.clear();
+        type_str(&mut s, "beijing");
+        let fed = s
+            .composition()
+            .candidates
+            .iter()
+            .find(|c| c.text == "北京")
+            .expect("应有「北京」")
+            .score;
+        assert!(fed > baseline, "营养词应获得词典级加分: {baseline} → {fed}");
+
+        s.nutrition_forget("北京");
+        s.clear();
+        type_str(&mut s, "beijing");
+        let forgotten = s
+            .composition()
+            .candidates
+            .iter()
+            .find(|c| c.text == "北京")
+            .unwrap()
+            .score;
+        assert_eq!(forgotten, baseline, "忘记后加分应完全消失");
+    }
+
+    /// 按键串派生：词典有的字拼出音节串；含缺字的词派生为空（只加分不召回）。
+    #[test]
+    fn nutrition_keys_derive_from_dict() {
+        let mut s = session(Mode::Pinyin);
+        assert!(s.nutrition_add("北京高", "测试文档", 2, 1_000));
+        let entry = s.nutrition().get("北京高").expect("应已入库");
+        assert_eq!(entry.keys, "beijinggao", "{entry:?}");
+
+        // 「界」不在内置小词典里：含它的词派生失败，但词本身仍入库享受加分
+        assert!(s.nutrition_add("世界级", "测试文档", 2, 1_100));
+        let entry = s.nutrition().get("世界级").expect("应已入库");
+        assert_eq!(entry.keys, "", "缺字词不做按键召回: {entry:?}");
+        assert!(s.nutrition().bonus("世界级") > 0.0);
+    }
+
+    /// 喂过的词按派生拼音整键召回（解码器已能给出同一词时只提分、不重复出候选）。
+    #[test]
+    fn nutrition_phrase_recall_on_exact_keys() {
+        let mut s = session(Mode::Pinyin);
+        type_str(&mut s, "beijinggao");
+        let baseline = s
+            .composition()
+            .candidates
+            .iter()
+            .find(|c| c.text == "北京高" && c.consumed == 10)
+            .expect("单字组合应给出「北京高」")
+            .score;
+        s.clear();
+
+        assert!(s.nutrition_add("北京高", "会议纪要", 2, 1_000));
+        type_str(&mut s, "beijinggao");
+        let hit = s
+            .composition()
+            .candidates
+            .iter()
+            .find(|c| c.text == "北京高" && c.consumed == 10)
+            .expect("整键输入应召回营养词");
+        let expected_lift = feed::NUTRIENT_BONUS + 2.0f64.ln();
+        assert!(
+            hit.score >= baseline + expected_lift - 1e-9,
+            "营养词应吃到词典级加分: {baseline} → {}",
+            hit.score
+        );
+    }
+
+    /// 营养库 TSV 走 Session 导入导出闭环；清空即全忘。
+    #[test]
+    fn nutrition_tsv_roundtrip_via_session() {
+        let mut s = session(Mode::Pinyin);
+        assert!(s.nutrition_add("北京高", "会议纪要", 2, 1_000));
+        let tsv = s.nutrition_export();
+        assert!(tsv.contains("北京高\t"), "{tsv}");
+
+        let mut fresh = session(Mode::Pinyin);
+        assert_eq!(fresh.nutrition_import(&tsv), 1);
+        assert!(fresh.nutrition().bonus("北京高") > 0.0);
+        assert_eq!(fresh.nutrition().get("北京高").unwrap().keys, "beijinggao");
+
+        fresh.nutrition_forget_all();
+        assert!(fresh.nutrition().is_empty());
+    }
+
+    /// 账本 TSV 走 Session 导出/导入闭环。
+    #[test]
+    fn evolution_tsv_roundtrip_via_session() {
+        let mut s = session(Mode::Pinyin);
+        s.set_evolution_context(Some("com.apple.Notes"), 10, true, 1_000);
+        let mut cands = vec![
+            Candidate::new("现", 4, CandidateKind::Word, 10.0),
+            Candidate::new("先", 4, CandidateKind::Word, 9.0),
+        ];
+        let feats = s.evolution_features();
+        for t in [1_000u64, 1_100] {
+            s.evolution
+                .lock()
+                .unwrap()
+                .reward("先", &feats, evolution::REWARD_SELECT, t);
+        }
+        let tsv = s.export_evolution();
+        assert!(tsv.contains("先\t"));
+
+        let mut fresh = session(Mode::Pinyin);
+        fresh.set_evolution_context(Some("com.apple.Notes"), 10, true, 1_200);
+        assert!(fresh.import_evolution(&tsv) >= 2, "每个特征一行");
+        fresh.apply_evolution_rerank(&mut cands);
+        assert_eq!(cands[0].text, "先");
+
+        fresh.forget_evolution();
+        assert!(fresh.export_evolution().is_empty());
     }
 }

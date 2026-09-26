@@ -73,6 +73,21 @@ final class PermissionCenterWindowController: NSWindowController {
             extra: #selector(openDictionary(_:))
         )
         addSection(
+            title: "知你学习账本",
+            detail: "「上下文 → 候选词」的亲和度账本：只记哪个词在哪个上下文里被选过、被删过，无按键内容。删除窗口 10 秒内才会记负分。",
+            dataPath: dataDir.appendingPathComponent("store.dat").path,
+            toggleTitle: "知你学习",
+            wipeTitle: "清空知你学习账本"
+        )
+        addSection(
+            title: "知你营养库（喂食）",
+            detail: "「喂它一段」从截图/文档提炼的专有名词：OCR 用 Apple Vision 端上识别，零网络；营养词只影响本机候选排序，逐条可忘。",
+            dataPath: dataDir.appendingPathComponent("store.dat").path,
+            wipeTitle: "清空营养库",
+            extraTitle: "打开喂食窗…",
+            extra: #selector(openFeed(_:))
+        )
+        addSection(
             title: "按应用记忆中/英",
             detail: "本地统计模型只存「应用 bundle id → 模式票数」，无按键内容。",
             dataPath: "UserDefaults（InputFlowAppModeMemoryTSV）",
@@ -184,6 +199,7 @@ final class PermissionCenterWindowController: NSWindowController {
         switch title {
         case "剪切板记录": return ClipboardMonitor.shared.isEnabled
         case "学习开关": return AppModeMemory.shared.isEnabled
+        case "知你学习": return EvolutionLearning.isEnabled
         case "统计开关": return PetStats.shared.isEnabled
         case "桌宠": return PetWindowController.isEnabled
         default: return false
@@ -195,6 +211,9 @@ final class PermissionCenterWindowController: NSWindowController {
         switch sender.title {
         case "剪切板记录": ClipboardMonitor.shared.setEnabled(on)
         case "学习开关": AppModeMemory.shared.isEnabled = on
+        case "知你学习":
+            EvolutionLearning.setEnabled(on)
+            NotificationCenter.default.post(name: .evolutionToggled, object: nil)
         case "统计开关": PetStats.shared.isEnabled = on
         case "桌宠": PetWindowController.setEnabled(on)
         default: break
@@ -206,11 +225,32 @@ final class PermissionCenterWindowController: NSWindowController {
         switch sender.identifier?.rawValue {
         case "剪切板历史": EncryptedStore.shared.clearClipboard()
         case "按应用记忆中/英": AppModeMemory.shared.isEnabled = false
+        case "知你学习账本": forgetEvolution()
+        case "知你营养库（喂食）": forgetNutrition()
         case "输入统计": PetStats.shared.isEnabled = false
         case "本地 AI 模型": deleteAllModels()
         default: break
         }
         refresh()
+    }
+
+    /// 账本是进程单例：任意会话清空即全局清空。
+    private func forgetEvolution() {
+        InputFlowEngine(mode: "pinyin").forgetEvolution()
+        EncryptedStore.shared.setEvolution("")
+        PetWindowController.shared.showToast("知你学习账本已清空", duration: 3)
+    }
+
+    private func forgetNutrition() {
+        let engine = InputFlowEngine(mode: "pinyin")
+        engine.nutritionForgetAll()
+        EncryptedStore.shared.setNutrition("")
+        NotificationCenter.default.post(name: .nutritionChanged, object: nil)
+        PetWindowController.shared.showToast("营养库已清空", duration: 3)
+    }
+
+    @objc private func openFeed(_ sender: NSButton) {
+        FeedWindowController.shared.show()
     }
 
     private func deleteAllModels() {
