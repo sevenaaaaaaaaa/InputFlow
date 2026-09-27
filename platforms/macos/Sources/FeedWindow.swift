@@ -21,12 +21,24 @@ final class FeedWindowController: NSWindowController {
     private let textView = NSTextView()
     private let sourceLabel = NSTextField(labelWithString: "还没喂入内容——选文件、贴截图或直接粘贴文本")
     private let extractButton = NSButton(title: "提炼术语", target: nil, action: nil)
+    private let aiToggle = NSButton(checkboxWithTitle: "AI 增强提炼（本机 Gemma，零网络）", target: nil, action: nil)
     private let feedButton = NSButton(title: "喂入选中术语", target: nil, action: nil)
     private let statusLabel = NSTextField(labelWithString: "")
     private let termsStack = NSStackView()
     private let libraryStack = NSStackView()
+    private var pendingSourceBase = ""
+    private var aiTopic = ""
     private var pendingSource = ""
-    private var terms: [(term: String, count: Int, checked: Bool)] = []
+    private var aiRunning = false
+    private var terms: [CandidateTerm] = []
+
+    /// 待喂入的术语：统计提炼与 Gemma 提炼共用一条勾选流。
+    struct CandidateTerm {
+        var term: String
+        var count: Int
+        var checked: Bool
+        var isAI: Bool
+    }
 
     private convenience init() {
         let window = NSWindow(
@@ -45,6 +57,7 @@ final class FeedWindowController: NSWindowController {
 
     func show() {
         refreshLibrary()
+        refreshAIAvailability()
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
     }
@@ -102,6 +115,17 @@ final class FeedWindowController: NSWindowController {
         extractButton.target = self
         extractButton.action = #selector(extractTerms(_:))
         root.addArrangedSubview(extractButton)
+
+        refreshAIAvailability()
+        aiToggle.target = self
+        aiToggle.action = #selector(toggleAI(_:))
+        let aiHint = NSTextField(labelWithString: "需 llama.cpp（brew install llama.cpp）+「AI 增强」里的 Gemma 模型")
+        aiHint.font = .systemFont(ofSize: 10)
+        aiHint.textColor = .tertiaryLabelColor
+        let aiRow = NSStackView(views: [aiToggle, aiHint])
+        aiRow.orientation = .horizontal
+        aiRow.spacing = 8
+        root.addArrangedSubview(aiRow)
 
         termsStack.orientation = .vertical
         termsStack.alignment = .leading
@@ -284,8 +308,10 @@ final class FeedWindowController: NSWindowController {
             return
         }
         if pendingSource.isEmpty { pendingSource = "粘贴文本" }
+        pendingSourceBase = pendingSource
+        aiTopic = ""
         let found = InputFlowEngine.feedExtract(text)
-        terms = found.map { (term: $0.term, count: $0.count, checked: true) }
+        terms = found.map { CandidateTerm(term: $0.term, count: $0.count, checked: true, isAI: false) }
         rebuildTermsStack()
         feedButton.isEnabled = !terms.isEmpty
         setStatus(
@@ -294,6 +320,10 @@ final class FeedWindowController: NSWindowController {
                 : "提炼出 \(terms.count) 个术语，勾掉不想学的，然后喂入",
             error: terms.isEmpty
         )
+        // AI 增强（E4）：统计打底之后，让本机 Gemma 补一遍专有名词并概括主题
+        if aiToggle.state == .on, aiAvailable() {
+            runAIExtraction(text)
+        }
     }
 
     @objc private func feedSelected(_ sender: NSButton) {
@@ -318,6 +348,8 @@ final class FeedWindowController: NSWindowController {
     /// 有内容待提炼：放进文本区并记出处。
     private func setPending(_ text: String, source: String) {
         pendingSource = source
+        pendingSourceBase = source
+        aiTopic = ""
         textView.string = text
         sourceLabel.stringValue = "来源：\(source)（\(text.count) 字）"
         setStatus("", error: false)
@@ -336,7 +368,8 @@ final class FeedWindowController: NSWindowController {
             v.removeFromSuperview()
         }
         for (index, item) in terms.enumerated() {
-            let box = NSButton(checkboxWithTitle: "\(item.term)（×\(item.count)）", target: self, action: #selector(toggleTerm(_:)))
+            let badge = item.isAI ? "（AI）" : "（×\(item.count)）"
+            let box = NSButton(checkboxWithTitle: item.term + badge, target: self, action: #selector(toggleTerm(_:)))
             box.font = .systemFont(ofSize: 12)
             box.state = item.checked ? .on : .off
             box.tag = index
@@ -348,6 +381,124 @@ final class FeedWindowController: NSWindowController {
         guard terms.indices.contains(sender.tag) else { return }
         terms[sender.tag].checked = sender.state == .on
         feedButton.isEnabled = terms.contains(where: \.checked)
+    }
+
+    // MARK: - AI 增强提炼（E4：本机 Gemma，零云）
+
+    private static let aiEnabledKey = "InputFlowFeedAIEnhanced"
+
+    private func aiAvailable() -> Bool {
+        TranslateClient.findRuntime() != nil && TranslateClient.translateModelPath() != nil
+    }
+
+    /// 开关可用性随运行时/模型状态刷新；首次可用时默认打开。
+    private func refreshAIAvailability() {
+        let available = aiAvailable()
+        aiToggle.isEnabled = available
+        if UserDefaults.standard.object(forKey: Self.aiEnabledKey) == nil {
+            aiToggle.state = available ? .on : .off
+        } else {
+            aiToggle.state = UserDefaults.standard.bool(forKey: Self.aiEnabledKey) ? .on : .off
+        }
+    }
+
+    @objc private func toggleAI(_ sender: NSButton) {
+        UserDefaults.standard.set(sender.state == .on, forKey: Self.aiEnabledKey)
+        // 开着的时候立即补跑一遍（文本已有统计提炼结果）
+        if sender.state == .on, aiAvailable(),
+           !textView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            runAIExtraction(textView.string.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+    }
+
+    /// Gemma 两步：先补专有名词（统计 n-gram 漏掉的低频词/专名），
+    /// 再概括主题（进营养词出处，权限中心一眼看清这批词是干什么的）。
+    private func runAIExtraction(_ text: String) {
+        guard !aiRunning else { return }
+        aiRunning = true
+        setStatus("AI 提炼中（本机 Gemma，零网络）…", error: false)
+        // 小模型上下文有限：只喂开头一段
+        let clipped = String(text.prefix(1200))
+        TranslateClient.shared.chat(
+            system: "You extract proper nouns from Chinese text. Output ONLY the terms, one per line. No numbering, no explanations.",
+            user: "从下面的文字里找专有名词（人名、地名、机构、项目、产品、术语），2到6个字，一行一个，最多20个：\n\n\(clipped)",
+            maxTokens: 300
+        ) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let output):
+                self.appendAITerms(Self.parseTerms(output))
+                TranslateClient.shared.chat(
+                    system: "Answer with the topic only. No explanations, no punctuation.",
+                    user: "用不超过12个字概括这段文字的主题：\n\n\(clipped)",
+                    maxTokens: 40
+                ) { [weak self] topicResult in
+                    DispatchQueue.main.async {
+                        guard let self else { return }
+                        self.aiRunning = false
+                        if case .success(let topic) = topicResult {
+                            self.applyTopic(topic)
+                        }
+                        let ai = self.terms.filter(\.isAI).count
+                        self.setStatus(
+                            "提炼完成：统计 \(self.terms.count - ai) 个 + AI 补充 \(ai) 个，勾掉不想学的然后喂入",
+                            error: false
+                        )
+                    }
+                }
+            case .failure(let error):
+                self.aiRunning = false
+                self.setStatus("AI 提炼失败：\(error.localizedDescription)（统计提炼照常可用）", error: true)
+            }
+        }
+    }
+
+    /// 解析 Gemma 输出：一行一词，剥常见列表符号；只留 2–6 字含汉字的词，去重封顶 20。
+    static func parseTerms(_ output: String) -> [String] {
+        var seen = Set<String>()
+        var found: [String] = []
+        for raw in output.split(whereSeparator: \.isNewline) {
+            var term = String(raw)
+            while let first = term.first, "-•*·> \t0123456789.、）)".contains(first) {
+                term.removeFirst()
+            }
+            term = term.trimmingCharacters(in: .whitespaces)
+            guard term.count >= 2, term.count <= 6,
+                  term.contains(where: Self.isCJKIdeograph),
+                  seen.insert(term).inserted
+            else { continue }
+            found.append(term)
+            if found.count >= 20 { break }
+        }
+        return found
+    }
+
+    /// 与内核同一套汉字范围。
+    static func isCJKIdeograph(_ c: Character) -> Bool {
+        guard let scalar = c.unicodeScalars.first, c.unicodeScalars.count == 1 else { return false }
+        return (0x3400...0x9FFF).contains(scalar.value) || (0xF900...0xFAFF).contains(scalar.value)
+    }
+
+    /// AI 补充的词并进勾选流：与统计结果去重，默认勾上，用户逐条把关。
+    private func appendAITerms(_ found: [String]) {
+        guard !found.isEmpty else { return }
+        let existing = Set(terms.map(\.term))
+        for term in found where !existing.contains(term) {
+            terms.append(CandidateTerm(term: term, count: 1, checked: true, isAI: true))
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.rebuildTermsStack()
+            self?.feedButton.isEnabled = self?.terms.contains(where: \.checked) ?? false
+        }
+    }
+
+    /// 主题进出处元数据：权限中心里一眼看清这批营养词是干什么的。
+    private func applyTopic(_ topic: String) {
+        let cleaned = topic.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return }
+        aiTopic = String(cleaned.prefix(16))
+        pendingSource = pendingSourceBase + " · 主题：\(aiTopic)"
+        sourceLabel.stringValue = "来源：\(pendingSource)（\(textView.string.count) 字）"
     }
 
     // MARK: - 营养库管理
@@ -420,6 +571,8 @@ extension FeedWindowController: NSTextViewDelegate {
     /// 用户手改文本：出处按粘贴处理。
     func textDidChange(_ notification: Notification) {
         pendingSource = textView.string.isEmpty ? "" : "粘贴文本"
+        pendingSourceBase = pendingSource
+        aiTopic = ""
         sourceLabel.stringValue = pendingSource.isEmpty
             ? "还没喂入内容——选文件、贴截图或直接粘贴文本"
             : "来源：粘贴文本（\(textView.string.count) 字）"

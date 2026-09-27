@@ -239,6 +239,18 @@ final class TranslateClient {
     // MARK: - 翻译请求（串行队列，保序）
 
     func translate(_ text: String, target: String, completion: @escaping (Result<String, Error>) -> Void) {
+        let language = target == "ja" ? "Japanese" : "English"
+        chat(
+            system: "Translate the Chinese input completely into natural \(language). Never omit, summarize, or shorten any part. Output ONLY the \(language) translation, nothing else.",
+            user: text,
+            maxTokens: 400,
+            completion: completion
+        )
+    }
+
+    /// 通用对话补全（同传与喂食层 AI 提炼共用同一 llama-server 与串行队列）。
+    /// 只连 127.0.0.1：输入与输出都不离开设备（ADR-0004 / ADR-0008 边界）。
+    func chat(system: String, user: String, maxTokens: Int, completion: @escaping (Result<String, Error>) -> Void) {
         DispatchQueue.main.async {
             guard Self.findRuntime() != nil else {
                 completion(.failure(TranslateError.runtimeMissing)); return
@@ -246,16 +258,14 @@ final class TranslateClient {
             guard Self.translateModelPath() != nil else {
                 completion(.failure(TranslateError.modelMissing)); return
             }
-            let language = target == "ja" ? "Japanese" : "English"
             let payload: [String: Any] = [
                 "model": "inputflow",
                 "messages": [
-                    ["role": "system", "content":
-                        "Translate the Chinese input completely into natural \(language). Never omit, summarize, or shorten any part. Output ONLY the \(language) translation, nothing else."],
-                    ["role": "user", "content": text],
+                    ["role": "system", "content": system],
+                    ["role": "user", "content": user],
                 ],
                 "temperature": 0.2,
-                "max_tokens": 400,
+                "max_tokens": maxTokens,
                 "stream": false,
             ]
             guard JSONSerialization.isValidJSONObject(payload),
