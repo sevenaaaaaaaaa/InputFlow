@@ -99,11 +99,16 @@ void inputflow_app_mode_forget_all(InputFlowAppMode *memory);
 char *inputflow_app_mode_export(InputFlowAppMode *memory);
 int32_t inputflow_app_mode_import(InputFlowAppMode *memory, const char *tsv);
 
-/* 输入统计总结（全为计数，零内容）：返回指标 JSON，由调用方释放。 */
+/* 输入统计总结（全为计数，零内容）：返回指标 JSON，由调用方释放。
+ * 最后四个参数是 E3 评估层：selections = 选词数，top1_hits = 实际首选命中，
+ * base_top1_hits = 反事实首选命中（剔除学习修正的基线排序），reselects = 重选次数；
+ * 输出含 top1_rate / base_top1_rate / reselect_rate（百分数，无选词时为 0）。 */
 char *inputflow_stats_digest_json(uint64_t chars, uint64_t keys, uint64_t deletes,
                                   uint64_t enters, uint64_t saved_keys,
                                   uint64_t voice_chars, uint64_t active_secs,
-                                  uint64_t stare_max_secs);
+                                  uint64_t stare_max_secs, uint64_t selections,
+                                  uint64_t top1_hits, uint64_t base_top1_hits,
+                                  uint64_t reselects);
 
 /* 插件包扫描（皮肤/桌宠/词典声明式数据包，零代码执行）：
  * 返回目录 JSON {"packs":[...],"errors":[...]}，由调用方释放。 */
@@ -150,6 +155,12 @@ int32_t inputflow_evolution_note_selection(InputFlowSession *session, int32_t al
 
 /* 无组合态的删除键：按「选了又删」记 −2 并武装重选期待；窗口外/重复删忽略。 */
 int32_t inputflow_evolution_note_delete(InputFlowSession *session, uint64_t now);
+
+/* 取走最近一次选词的评估（E3 反事实对比）：必须在 note_selection 之后调用。
+ * 返回 {"actualTop1":..,"baseTop1":..,"reselect":..,"altRank":..}，由调用方释放；
+ * actualTop1 = 选的是学习重排后的首选，baseTop1 = 基线（无学习）排序里也是首选，
+ * 两者之差就是学习的收益；无待取评估时返回 NULL。 */
+char *inputflow_evolution_eval_json(InputFlowSession *session);
 
 /* 共享账本 TSV 导出/导入/清空（格式与 E0 独立句柄一致）。 */
 char *inputflow_evolution_session_export(InputFlowSession *session);

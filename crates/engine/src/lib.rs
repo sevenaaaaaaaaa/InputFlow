@@ -49,6 +49,19 @@ const DELETE_WINDOW_SECS: u64 = 10;
 /// 删除后多少秒内的下一次选词，算「纠正后的真实意图」（+1.5）。
 const RESELECT_WINDOW_SECS: u64 = 30;
 
+/// 一次选词的评估记录（ADR-0008 E3）：傍晚小结拿它对比「学习开 vs 关」。
+///
+/// - `actual_top1`：选的是学习重排后的第 1 个候选吗；
+/// - `base_top1`：剔除学习修正的基线排序里，这个词也是第 1 吗（反事实）；
+///   两者之差就是今天学习的收益。学习关闭时基线 = 实际，收益读作 0。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SelectionEval {
+    pub actual_top1: bool,
+    pub base_top1: bool,
+    pub reselect: bool,
+    pub alt_rank: bool,
+}
+
 pub struct Session {
     mode: Mode,
     buffer: String,
@@ -82,6 +95,12 @@ pub struct Session {
     evolution_now: u64,
     /// 最近一次选词的 (词, 特征)：等前端确认（含越级/删除/重选）后记账。
     pending_selection: Option<(String, Vec<String>)>,
+    /// 学习重排前的基线顺序（简体原文，反事实评估用）；无重排语境时为 None。
+    base_order: Option<Vec<String>>,
+    /// 本次选词待确认的评估：(实际首选命中, 反事实首选命中)。
+    pending_eval: Option<(bool, bool)>,
+    /// 最近一次确认过的选词评估，前端取走即清。
+    last_eval: Option<SelectionEval>,
     /// 上一次已记账的选词与特征：删除负奖励要落回当初的上下文。
     last_selection: Option<(String, Vec<String>)>,
     last_selection_at: u64,
@@ -118,6 +137,9 @@ impl Session {
             evolution_hour: 0,
             evolution_now: 0,
             pending_selection: None,
+            base_order: None,
+            pending_eval: None,
+            last_eval: None,
             last_selection: None,
             last_selection_at: 0,
             last_selection_deleted: false,
@@ -223,6 +245,7 @@ impl Session {
         self.buffer.clear();
         self.comp = Composition::default();
         self.pending_selection = None;
+        self.pending_eval = None;
         self.reselect_armed_at = None;
     }
 
@@ -245,6 +268,15 @@ impl Session {
             .unwrap_or_else(|| cand.text.clone());
         // 教学层：特征必须按「选择瞬间」的上下文捕获——后面 learn_context 会改写它。
         self.pending_selection = self.evolution_pending(&learned);
+        // E3 反事实评估：这个词在学习重排前的基线排序里是不是首选？
+        let actual_top1 = index == 0;
+        let base_top1 = self
+            .base_order
+            .as_ref()
+            .and_then(|order| order.first())
+            .map(|top| top == &learned)
+            .unwrap_or(actual_top1);
+        self.pending_eval = Some((actual_top1, base_top1));
         self.consume(cand.consumed);
         if self.mode != Mode::Emoji {
             self.user.record(&learned);
@@ -262,8 +294,9 @@ impl Session {
         }
         let s = std::mem::take(&mut self.buffer);
         self.learn_context(&s);
-        // 原样上屏不是选词：挂起的选词奖励与重选期待一并作废。
+        // 原样上屏不是选词：挂起的选词奖励、评估与重选期待一并作废。
         self.pending_selection = None;
+        self.pending_eval = None;
         self.reselect_armed_at = None;
         self.refresh();
         Some(s)
@@ -365,15 +398,24 @@ impl Session {
     /// 前端确认了一次选词：`alt_rank` = 数字键选了第 2+ 候选；
     /// 删除后的窗口内重选记强正，其余按正常选词/越级选词记账。
     pub fn note_selection(&mut self, alt_rank: bool, now: u64) {
+        let reselect = self
+            .reselect_armed_at
+            .is_some_and(|at| now.saturating_sub(at) <= RESELECT_WINDOW_SECS);
+        // E3 评估：无论学习开关都产出——关闭时基线 = 实际，收益读作 0。
+        if let Some((actual_top1, base_top1)) = self.pending_eval.take() {
+            self.last_eval = Some(SelectionEval {
+                actual_top1,
+                base_top1,
+                reselect,
+                alt_rank,
+            });
+        }
         let Some((word, features)) = self.pending_selection.take() else {
             return;
         };
         if !self.evolution_enabled {
             return;
         }
-        let reselect = self
-            .reselect_armed_at
-            .is_some_and(|at| now.saturating_sub(at) <= RESELECT_WINDOW_SECS);
         self.reselect_armed_at = None;
         let reward = if reselect {
             evolution::REWARD_RESELECT
@@ -388,6 +430,11 @@ impl Session {
         self.last_selection = Some((word, features));
         self.last_selection_at = now;
         self.last_selection_deleted = false;
+    }
+
+    /// 取走最近一次选词的评估（E3：前端记入统计即清除）；无待取时为 None。
+    pub fn take_selection_eval(&mut self) -> Option<SelectionEval> {
+        self.last_eval.take()
     }
 
     /// 前端看到「无组合态的删除键」：多半在删刚上屏的词——强负信号，
@@ -549,6 +596,13 @@ impl Session {
     fn finish(&mut self, mut cands: Vec<inputflow_core::Candidate>, preedit: String) {
         // 分层排序：literal 垫底、覆盖输入多的优先，用户词只在同层内重排。
         cands.sort_by(inputflow_core::Candidate::rank_cmp);
+        // E3 反事实基线：重排前的顺序（简体原文空间，与 select 的 learned 同空间）。
+        self.base_order = if self.evolution_enabled && self.mode != Mode::Emoji && !cands.is_empty()
+        {
+            Some(cands.iter().map(|c| c.text.clone()).collect())
+        } else {
+            None
+        };
         self.apply_evolution_rerank(&mut cands);
         cands.truncate(MAX_CANDIDATES);
         if self.traditional {
@@ -1542,6 +1596,119 @@ mod tests {
 
         fresh.nutrition_forget_all();
         assert!(fresh.nutrition().is_empty());
+    }
+
+    // ──────────── 知你评估层接线（E3） ────────────
+
+    /// 无重排语境：选中首选 → 实际/反事实都命中；选非首选 → 都不命中。
+    #[test]
+    fn selection_eval_without_rerank_is_consistent() {
+        let mut s = session(Mode::Pinyin);
+        s.set_evolution_context(Some("eval.test"), 10, true, 1_000);
+        type_str(&mut s, "nihao");
+        let top = s.composition().candidates[0].text.clone();
+        let idx = s
+            .composition()
+            .candidates
+            .iter()
+            .position(|c| c.text == top)
+            .unwrap();
+        s.select(idx);
+        s.note_selection(false, 1_010);
+        let eval = s.take_selection_eval().expect("应产出评估");
+        assert!(eval.actual_top1);
+        assert!(eval.base_top1, "无学习影响时基线 = 实际");
+        assert!(!eval.reselect && !eval.alt_rank);
+        assert!(s.take_selection_eval().is_none(), "取走即清");
+
+        // 数字键选非首选：alt_rank=true，首选双双不命中
+        type_str(&mut s, "nihao");
+        let alt_idx = s
+            .composition()
+            .candidates
+            .iter()
+            .position(|c| c.text != top && c.kind != CandidateKind::Literal)
+            .expect("应有非首选候选");
+        s.select(alt_idx);
+        s.note_selection(true, 1_020);
+        let eval = s.take_selection_eval().unwrap();
+        assert!(!eval.actual_top1);
+        assert!(!eval.base_top1);
+        assert!(eval.alt_rank);
+    }
+
+    /// 核心场景：学习把 A 顶到首选（基线首选是别的词）→ 反事实不命中，
+    /// 收益 = 基线纠错率 − 实际纠错率 > 0。
+    #[test]
+    fn selection_eval_detects_learning_gain() {
+        let mut s = session(Mode::Pinyin);
+        s.set_evolution_context(Some("eval.test"), 10, true, 1_000);
+        // 建立词法窗：上屏「你好」，让后续选词的重排特征里有 lex 项
+        type_str(&mut s, "nihao");
+        s.select(0);
+        s.note_selection(false, 1_010);
+        assert!(s.take_selection_eval().unwrap().base_top1);
+
+        // 基线首选（账本还只有 1 次观察，不参与重排）
+        type_str(&mut s, "shi");
+        let base_top = s.composition().candidates[0].text.clone();
+        let consumed = s.composition().candidates[0].consumed;
+        // 找同层（同 consumed）里离首选最近的其他候选，把账本灌满让它翻上去
+        let challenger = s
+            .composition()
+            .candidates
+            .iter()
+            .find(|c| c.consumed == consumed && c.text != base_top)
+            .map(|c| c.text.clone())
+            .expect("同层应有其他候选");
+        let feats = s.evolution_features();
+        {
+            let mut mem = s.evolution.lock().unwrap();
+            for i in 0..6u64 {
+                mem.reward(&challenger, &feats, evolution::REWARD_SELECT, 1_020 + i);
+            }
+        }
+        s.clear();
+        type_str(&mut s, "shi");
+        assert_eq!(
+            s.composition().candidates[0].text,
+            challenger,
+            "灌满账本后 challenger 应被重排到首选（基线首选是 {base_top}）"
+        );
+        s.select(0);
+        s.note_selection(false, 1_100);
+        let eval = s.take_selection_eval().unwrap();
+        assert!(eval.actual_top1, "用户选的就是重排后的首选");
+        assert!(!eval.base_top1, "基线排序里它不是首选——这就是学习收益");
+        assert!(!eval.reselect);
+    }
+
+    /// 学习关闭：基线 = 实际，评估照常产出（收益读作 0）。
+    #[test]
+    fn selection_eval_when_disabled_equals_baseline() {
+        let mut s = session(Mode::Pinyin);
+        s.set_evolution_context(Some("eval.test"), 10, false, 1_000);
+        type_str(&mut s, "nihao");
+        s.select(0);
+        s.note_selection(false, 1_010);
+        let eval = s.take_selection_eval().unwrap();
+        assert_eq!(eval.actual_top1, eval.base_top1);
+    }
+
+    /// 原样上屏与清空会作废挂起的评估。
+    #[test]
+    fn selection_eval_invalidated_by_raw_commit_and_clear() {
+        let mut s = session(Mode::Pinyin);
+        s.set_evolution_context(Some("eval.test"), 10, true, 1_000);
+        type_str(&mut s, "nihao");
+        s.select(0); // 挂起评估
+        s.commit_raw().is_none();
+        assert!(s.take_selection_eval().is_none(), "commit_raw 不产出评估");
+
+        type_str(&mut s, "nihao");
+        s.select(0);
+        s.clear();
+        assert!(s.take_selection_eval().is_none(), "clear 应作废挂起评估");
     }
 
     /// 账本 TSV 走 Session 导出/导入闭环。

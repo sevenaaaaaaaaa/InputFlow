@@ -30,6 +30,15 @@ pub struct DayStats {
     pub active_secs: u64,
     /// 当天最长一次发呆秒数。
     pub stare_max_secs: u64,
+    // ——— 知你评估层（ADR-0008 E3）：选词质量 ————
+    /// 选词总次数（经教学层确认的上屏）。
+    pub selections: u64,
+    /// 实际首选命中：选的就是学习重排后的第 1 个候选。
+    pub top1_hits: u64,
+    /// 反事实首选命中：选的词在「剔除学习修正」的基线排序里也是第 1。
+    pub base_top1_hits: u64,
+    /// 重选次数：选了又删、删后再选（基线排序失手的强信号）。
+    pub reselects: u64,
 }
 
 /// 总结指标。
@@ -47,6 +56,12 @@ pub struct Digest {
     pub enters: u64,
     /// 最长发呆秒数。
     pub stare_max_secs: u64,
+    /// 实际首选命中率（百分数；无选词时为 0）。
+    pub top1_rate: f64,
+    /// 反事实首选命中率：剔除学习修正后的基线排序（百分数）。
+    pub base_top1_rate: f64,
+    /// 重选率：重选 / 选词（百分数）。
+    pub reselect_rate: f64,
 }
 
 impl Digest {
@@ -64,6 +79,13 @@ impl Digest {
             100.0
         };
         let kcal = active_min * KCAL_PER_ACTIVE_MIN;
+        let rate = |hits: u64| {
+            if s.selections > 0 {
+                hits as f64 / s.selections as f64 * 100.0
+            } else {
+                0.0
+            }
+        };
         Self {
             speed_cpm,
             accuracy,
@@ -73,13 +95,16 @@ impl Digest {
             deletes: s.deletes,
             enters: s.enters,
             stare_max_secs: s.stare_max_secs.min(STARE_CAP_SECS),
+            top1_rate: rate(s.top1_hits),
+            base_top1_rate: rate(s.base_top1_hits),
+            reselect_rate: rate(s.reselects),
         }
     }
 
     /// 紧凑 JSON，供前端 toast / 卡片直接解码。
     pub fn to_json(&self) -> String {
         format!(
-            "{{\"speed_cpm\":{:.1},\"accuracy\":{:.1},\"kcal\":{:.2},\"saved_keys\":{},\"voice_chars\":{},\"deletes\":{},\"enters\":{},\"stare_max_secs\":{}}}",
+            "{{\"speed_cpm\":{:.1},\"accuracy\":{:.1},\"kcal\":{:.2},\"saved_keys\":{},\"voice_chars\":{},\"deletes\":{},\"enters\":{},\"stare_max_secs\":{},\"top1_rate\":{:.1},\"base_top1_rate\":{:.1},\"reselect_rate\":{:.1}}}",
             self.speed_cpm,
             self.accuracy,
             self.kcal,
@@ -88,6 +113,9 @@ impl Digest {
             self.deletes,
             self.enters,
             self.stare_max_secs,
+            self.top1_rate,
+            self.base_top1_rate,
+            self.reselect_rate,
         )
     }
 }
@@ -154,11 +182,42 @@ mod tests {
             voice_chars: 6,
             active_secs: 120,
             stare_max_secs: 42,
+            selections: 10,
+            top1_hits: 9,
+            base_top1_hits: 6,
+            reselects: 2,
         };
         let json = Digest::compute(&s).to_json();
         assert!(json.contains("\"speed_cpm\":50.0"), "{json}");
         assert!(json.contains("\"accuracy\":96.2"), "{json}");
         assert!(json.contains("\"saved_keys\":88"), "{json}");
         assert!(json.contains("\"stare_max_secs\":42"), "{json}");
+        assert!(json.contains("\"top1_rate\":90.0"), "{json}");
+        assert!(json.contains("\"base_top1_rate\":60.0"), "{json}");
+        assert!(json.contains("\"reselect_rate\":20.0"), "{json}");
+    }
+
+    /// E3 评估层：命中率与重选率的分母是选词数，无选词时为 0 不除零。
+    #[test]
+    fn selection_rates_use_selections_as_denominator() {
+        let empty = Digest::compute(&DayStats {
+            top1_hits: 3,
+            base_top1_hits: 2,
+            ..Default::default()
+        });
+        assert_eq!(empty.top1_rate, 0.0);
+        assert_eq!(empty.base_top1_rate, 0.0);
+        assert_eq!(empty.reselect_rate, 0.0);
+
+        let s = Digest::compute(&DayStats {
+            selections: 4,
+            top1_hits: 3,
+            base_top1_hits: 2,
+            reselects: 1,
+            ..Default::default()
+        });
+        assert!((s.top1_rate - 75.0).abs() < 1e-9);
+        assert!((s.base_top1_rate - 50.0).abs() < 1e-9);
+        assert!((s.reselect_rate - 25.0).abs() < 1e-9);
     }
 }

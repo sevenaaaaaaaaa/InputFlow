@@ -470,7 +470,10 @@ pub unsafe extern "C" fn inputflow_plugin_scan_json(dir: *const c_char) -> *mut 
 }
 
 /// 输入统计总结（全为计数，零内容）：返回指标 JSON：
-/// `{"speed_cpm","accuracy","kcal","saved_keys","voice_chars","deletes","enters","stare_max_secs"}`。
+/// `{"speed_cpm","accuracy","kcal","saved_keys","voice_chars","deletes","enters",
+///   "stare_max_secs","top1_rate","base_top1_rate","reselect_rate"}`。
+/// 后四项为 E3 评估层：首选命中率 / 反事实首选命中率 / 重选率（百分数，
+/// 无选词时为 0；反事实 = 剔除学习修正的基线排序，两者之差即学习收益）。
 #[unsafe(no_mangle)]
 pub extern "C" fn inputflow_stats_digest_json(
     chars: u64,
@@ -481,6 +484,10 @@ pub extern "C" fn inputflow_stats_digest_json(
     voice_chars: u64,
     active_secs: u64,
     stare_max_secs: u64,
+    selections: u64,
+    top1_hits: u64,
+    base_top1_hits: u64,
+    reselects: u64,
 ) -> *mut c_char {
     guard_ptr(|| {
         let digest = inputflow_engine::stats::Digest::compute(&inputflow_engine::stats::DayStats {
@@ -492,6 +499,10 @@ pub extern "C" fn inputflow_stats_digest_json(
             voice_chars,
             active_secs,
             stare_max_secs,
+            selections,
+            top1_hits,
+            base_top1_hits,
+            reselects,
         });
         into_c(digest.to_json())
     })
@@ -718,6 +729,26 @@ pub unsafe extern "C" fn inputflow_evolution_note_delete(session: *mut InputFlow
         let session = unsafe { &mut *session };
         session.inner.note_delete(now);
         1
+    })
+}
+
+/// 取走最近一次选词的评估（E3 反事实对比）：
+/// `{"actualTop1":bool,"baseTop1":bool,"reselect":bool,"altRank":bool}`；
+/// 无待取评估时返回 NULL。必须在 note_selection 之后调用。
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inputflow_evolution_eval_json(session: *mut InputFlowSession) -> *mut c_char {
+    if session.is_null() {
+        return std::ptr::null_mut();
+    }
+    guard_ptr(|| {
+        let session = unsafe { &mut *session };
+        let Some(e) = session.inner.take_selection_eval() else {
+            return std::ptr::null_mut();
+        };
+        into_c(format!(
+            "{{\"actualTop1\":{},\"baseTop1\":{},\"reselect\":{},\"altRank\":{}}}",
+            e.actual_top1, e.base_top1, e.reselect, e.alt_rank
+        ))
     })
 }
 
@@ -1305,8 +1336,13 @@ mod tests {
             for t in [1_005u64, 1_010] {
                 assert!(!inputflow_select(s1, 0).is_null());
                 assert_eq!(inputflow_evolution_note_selection(s1, 0, t), 1);
+                // E3：每次确认都产出评估，取走即清
+                let eval = call_str(|| unsafe { inputflow_evolution_eval_json(s1) });
+                assert!(eval.is_some(), "note_selection 后应有评估");
+                assert!(eval.unwrap().contains("\"actualTop1\""));
                 feed_str(s1, "nihao");
             }
+            assert!(unsafe { inputflow_evolution_eval_json(s1) }.is_null(), "取走即清");
             let shared = call_str(|| inputflow_evolution_session_export(s2)).unwrap();
             assert!(
                 shared.lines().any(|l| l.starts_with(&format!("{top}\t"))),
@@ -1354,6 +1390,7 @@ mod tests {
             assert!(inputflow_evolution_session_export(std::ptr::null_mut()).is_null());
             assert_eq!(inputflow_evolution_session_import(std::ptr::null_mut(), c_tsv.as_ptr()), -1);
             inputflow_evolution_session_forget(std::ptr::null_mut());
+            assert!(inputflow_evolution_eval_json(std::ptr::null_mut()).is_null());
 
             inputflow_free(s1);
             inputflow_free(s2);

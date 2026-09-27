@@ -14,9 +14,33 @@ final class PetStats {
         var voice = 0
         var activeSecs = 0.0
         var stareMaxSecs = 0.0
+        // ——— 知你评估层（E3）：选词质量 ———
+        var selections = 0
+        var top1 = 0
+        var baseTop1 = 0
+        var reselects = 0
 
         var isEmpty: Bool {
-            chars == 0 && keys == 0 && deletes == 0 && enters == 0 && voice == 0
+            chars == 0 && keys == 0 && deletes == 0 && enters == 0 && voice == 0 && selections == 0
+        }
+
+        init() {}
+
+        /// 旧档兼容：E3 之前存的天没有选词质量字段，缺省为 0。
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            chars = try c.decodeIfPresent(Int.self, forKey: .chars) ?? 0
+            keys = try c.decodeIfPresent(Int.self, forKey: .keys) ?? 0
+            deletes = try c.decodeIfPresent(Int.self, forKey: .deletes) ?? 0
+            enters = try c.decodeIfPresent(Int.self, forKey: .enters) ?? 0
+            saved = try c.decodeIfPresent(Int.self, forKey: .saved) ?? 0
+            voice = try c.decodeIfPresent(Int.self, forKey: .voice) ?? 0
+            activeSecs = try c.decodeIfPresent(Double.self, forKey: .activeSecs) ?? 0
+            stareMaxSecs = try c.decodeIfPresent(Double.self, forKey: .stareMaxSecs) ?? 0
+            selections = try c.decodeIfPresent(Int.self, forKey: .selections) ?? 0
+            top1 = try c.decodeIfPresent(Int.self, forKey: .top1) ?? 0
+            baseTop1 = try c.decodeIfPresent(Int.self, forKey: .baseTop1) ?? 0
+            reselects = try c.decodeIfPresent(Int.self, forKey: .reselects) ?? 0
         }
     }
 
@@ -92,6 +116,16 @@ final class PetStats {
         mutate { $0.stareMaxSecs = max($0.stareMaxSecs, seconds) }
     }
 
+    /// 一次选词的评估（E3）：实际/反事实首选命中与重选，喂给傍晚小结的学习收益对比。
+    func recordSelection(_ eval: SelectionEvalData) {
+        mutate {
+            $0.selections += 1
+            if eval.actualTop1 { $0.top1 += 1 }
+            if eval.baseTop1 { $0.baseTop1 += 1 }
+            if eval.reselect { $0.reselects += 1 }
+        }
+    }
+
     // MARK: - 读取
 
     func day(_ key: String) -> Day {
@@ -117,15 +151,20 @@ final class PetStats {
         let deletes: Int
         let enters: Int
         let stare_max_secs: Int
+        let top1_rate: Double
+        let base_top1_rate: Double
+        let reselect_rate: Double
     }
 
-    /// 调内核把一天计数折算成指标（速度/准确率/卡路里等）。
+    /// 调内核把一天计数折算成指标（速度/准确率/卡路里/选词质量）。
     static func digest(_ day: Day) -> Digest? {
         let json = inputflow_stats_digest_json(
             UInt64(max(0, day.chars)), UInt64(max(0, day.keys)),
             UInt64(max(0, day.deletes)), UInt64(max(0, day.enters)),
             UInt64(max(0, day.saved)), UInt64(max(0, day.voice)),
-            UInt64(max(0, Int(day.activeSecs))), UInt64(max(0, Int(day.stareMaxSecs)))
+            UInt64(max(0, Int(day.activeSecs))), UInt64(max(0, Int(day.stareMaxSecs))),
+            UInt64(max(0, day.selections)), UInt64(max(0, day.top1)),
+            UInt64(max(0, day.baseTop1)), UInt64(max(0, day.reselects))
         )
         guard let json else { return nil }
         defer { inputflow_free_string(json) }
@@ -158,6 +197,15 @@ final class PetStats {
             fourth += " · 语音 \(d.voice_chars) 字"
         }
         lines.append(fourth)
+        // 知你评估层（E3）：选词质量与学习收益（反事实对比）
+        if day.selections > 0 {
+            var fifth = "首选命中 \(Int(d.top1_rate.rounded()))% · 重选 \(day.reselects) 次"
+            let gain = d.top1_rate - d.base_top1_rate
+            if gain >= 0.5 {
+                fifth += "\n🎯 知你学习：首选命中比无学习高 \(Int(gain.rounded())) 个百分点"
+            }
+            lines.append(fifth)
+        }
         return lines.joined(separator: "\n")
     }
 }

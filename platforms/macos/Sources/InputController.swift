@@ -1349,9 +1349,12 @@ final class InputFlowInputController: IMKInputController {
 
     /// 选词上屏的教学信号：数字键选了第 2+ 候选算「排序还不够准」（+0.6），
     /// 首选正常记账（+1.0）；若刚发生选后删除，这里自动升级为重选强正（+1.5）。
+    /// 同时把 E3 评估（实际/反事实首选命中、重选）记入当天统计。
     private func noteEvolutionSelection(index: Int) {
-        guard EvolutionLearning.isEnabled else { return }
         engine.noteEvolutionSelection(altRank: index > 0)
+        if let eval = engine.takeEvolutionEval() {
+            stats.recordSelection(eval)
+        }
         persistEvolution()
     }
 

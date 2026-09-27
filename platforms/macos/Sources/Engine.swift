@@ -31,6 +31,14 @@ struct NutritionItem: Codable {
     let addedAt: UInt64
 }
 
+/// 一次选词的评估（E3 反事实对比）：实际首选命中 vs 基线（无学习）首选命中。
+struct SelectionEvalData: Codable {
+    let actualTop1: Bool
+    let baseTop1: Bool
+    let reselect: Bool
+    let altRank: Bool
+}
+
 /// 内核 C ABI 的 Swift 封装。会话只在本进程内存中，不做任何网络访问。
 final class InputFlowEngine {
     private var handle: OpaquePointer?
@@ -152,6 +160,16 @@ final class InputFlowEngine {
     func noteEvolutionDelete() {
         guard let h = handle else { return }
         _ = inputflow_evolution_note_delete(h, UInt64(Date().timeIntervalSince1970))
+    }
+
+    /// 取走最近一次选词的评估（note_selection 之后调用；取走即清）。
+    func takeEvolutionEval() -> SelectionEvalData? {
+        guard let h = handle,
+              let json = takeString(inputflow_evolution_eval_json(h)),
+              let data = json.data(using: .utf8),
+              let eval = try? JSONDecoder().decode(SelectionEvalData.self, from: data)
+        else { return nil }
+        return eval
     }
 
     func exportEvolution() -> String {
