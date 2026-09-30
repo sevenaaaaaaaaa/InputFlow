@@ -10,3 +10,5 @@ publish = false
 [dependencies]
 inputflow-dict = { workspace = true }
 inputflow-plugin = { workspace = true }
+inputflow-core = { workspace = true }
+inputflow-engine = { workspace = true }

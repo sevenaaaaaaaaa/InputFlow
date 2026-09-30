@@ -94,6 +94,8 @@ version = "0.1.0"
 name = "xtask"
 version = "0.1.0"
 dependencies = [
+ "inputflow-core",
  "inputflow-dict",
+ "inputflow-engine",
  "inputflow-plugin",
 ]

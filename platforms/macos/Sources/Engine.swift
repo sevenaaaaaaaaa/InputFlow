@@ -11,9 +11,11 @@ struct Composition: Codable {
     let mode: String
     let raw: String
     let preedit: String
+    /// 英文串（网址/邮箱/英文词）：无任何含汉字候选。空格原样上屏、数字不选候选。
+    let englishLike: Bool?
     let candidates: [Candidate]
 
-    static let empty = Composition(mode: "pinyin", raw: "", preedit: "", candidates: [])
+    static let empty = Composition(mode: "pinyin", raw: "", preedit: "", englishLike: nil, candidates: [])
 }
 
 /// 术语提炼结果（喂食层，纯统计）。

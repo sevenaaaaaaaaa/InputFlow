@@ -39,6 +39,11 @@ const MAX_FUZZY_INPUT: usize = 12;
 const PREFIX_SCAN_LIMIT: usize = 8192;
 /// 前缀查询时同一 key 下取多少条词条（是/时/事/使…）。
 const PREFIX_PER_KEY: usize = 3;
+/// 分隔符指定切分后，音节数不符候选的惩罚（`xi'an` 下 `xian` 系候选让位）。
+const SYL_MISMATCH_PENALTY: f64 = 6.0;
+/// 零模糊且全覆盖候选的加分：精确读音永远压过同覆盖的模糊读音
+/// （`nve` 的「虐」不许被模糊 `lve` 的高频「略」劫持）。
+const EXACT_FULL_BONUS: f64 = 2.5;
 /// 简拼候选的惩罚：低于同长度的完整拼音，避免抢占正常输入。
 const ABBR_PENALTY: f64 = 2.5;
 /// 混拼候选的惩罚（命中更具体，惩罚略小）。
@@ -137,17 +142,40 @@ impl PinyinDecoder {
             .filter(|c| c.is_ascii_alphabetic() || *c == ';')
             .collect();
 
-        let paths = self.segment(chars);
+        // 分隔符是用户的硬指令：`xi'an` 的 `'` 表示「这里必须切」。
+        // 跨越分隔符的切分路径直接淘汰（现 [xian] 让位 西安 [xi][an]）。
+        let mut boundaries: Vec<usize> = Vec::new();
+        for (i, &oi) in orig.iter().enumerate() {
+            if i + 1 < orig.len() && input[oi + 1..].starts_with('\'') {
+                boundaries.push(i + 1);
+            }
+        }
+        let mut paths = self.segment(chars);
+        if !boundaries.is_empty() {
+            paths.retain(|p| {
+                boundaries
+                    .iter()
+                    .all(|b| p.iter().any(|s| s.syl.is_some() && s.end == *b))
+            });
+        }
         let ends_complete = paths.iter().any(|p| p.iter().all(|s| s.syl.is_some()));
         let mut out: Vec<Candidate> = Vec::new();
-        let mut best: Option<(Hyp, usize, usize)> = None;
+        let mut best: Option<(Hyp, usize, usize, f64)> = None;
         // 只处理覆盖最好的前 N 条路径：路径数上限放宽后仍保持性能
         // （长输入会产生大量等价切分，全部跑 Viterbi 会拖慢到毫秒级）
         let mut ranked: Vec<(usize, usize, f64)> = paths
             .iter()
             .enumerate()
             .map(|(i, p)| {
-                let used = p.iter().take_while(|s| s.syl.is_some()).count();
+                // 覆盖量按「字母数」计，不按段数：[zuo][tian]（2 段全覆盖）必须
+                // 与 [zuo][ti][an]（3 段）同权重，否则整词路径被逐字切分挤出
+                // 候选窗口，Viterbi 永远看不到「昨天」。
+                let used: usize = p
+                    .iter()
+                    .take_while(|s| s.syl.is_some())
+                    .map(|s| s.end)
+                    .max()
+                    .unwrap_or(0);
                 let cost: f64 = p.iter().map(|s| s.fuzzy).sum();
                 (i, used, cost)
             })
@@ -179,7 +207,7 @@ impl PinyinDecoder {
         for idx in decode_set {
             self.decode_path(orig, &paths[idx], &mut out);
         }
-        for idx in chosen {
+        for idx in chosen.iter().copied() {
             let path = &paths[idx];
             let usable: Vec<&Seg> = path.iter().take_while(|s| s.syl.is_some()).collect();
             if usable.is_empty() {
@@ -187,31 +215,35 @@ impl PinyinDecoder {
             }
             if let Some(h) = self.viterbi(&usable) {
                 let consumed = orig[usable.last().expect("非空").end - 1] + 1;
+                let path_fuzzy: f64 = usable.iter().map(|s| s.fuzzy).sum();
                 let cover = (
-                    h.score + COVERAGE_BONUS * consumed as f64,
+                    h.score - path_fuzzy * FUZZY_PENALTY + COVERAGE_BONUS * consumed as f64,
                     consumed,
                     usable.len(),
+                    path_fuzzy,
                 );
-                let better = best.as_ref().is_none_or(|(cur, cur_consumed, _)| {
-                    cover.0 > cur.score + COVERAGE_BONUS * *cur_consumed as f64
+                let better = best.as_ref().is_none_or(|(cur, cur_consumed, _, cur_fuzzy)| {
+                    cover.0 > cur.score - cur_fuzzy * FUZZY_PENALTY + COVERAGE_BONUS * *cur_consumed as f64
                 });
                 if better {
-                    best = Some((h, consumed, usable.len()));
+                    best = Some((h, consumed, usable.len(), path_fuzzy));
                 }
             }
         }
         let full_cover = best
             .as_ref()
-            .is_some_and(|(_, consumed, _)| *consumed >= orig.len());
-        if let Some((hyp, consumed, syls)) = best {
+            .is_some_and(|(_, consumed, _, _)| *consumed >= orig.len());
+        if let Some((hyp, consumed, syls, path_fuzzy)) = best {
             let kind = if syls == 1 {
                 CandidateKind::Char
             } else {
                 CandidateKind::Sentence
             };
-            // 旁路音节重罚：避免「词 + 未成词残字」凑出的伪整句（如 专区+du）压过真词
-            let score =
-                hyp.sum_ln + LEN_BONUS * hyp.matched as f64 + 1.0 - hyp.garbage as f64 * 30.0;
+            // 旁路音节重罚：避免「词 + 未成词残字」凑出的伪整句（如 专区+du）压过真词；
+            // 路径的模糊代价也计入整句——模糊读音的整句不得压过精确读音的词。
+            let score = hyp.sum_ln + LEN_BONUS * hyp.matched as f64 + 1.0
+                - hyp.garbage as f64 * 30.0
+                - path_fuzzy * FUZZY_PENALTY;
             let mut c = Candidate::new(hyp.text, consumed, kind, score);
             if !hyp.pinyin.is_empty() {
                 c = c.with_comment(hyp.pinyin.join(" "));
@@ -226,7 +258,15 @@ impl PinyinDecoder {
         ));
         let single_complete =
             ends_complete && paths.iter().any(|p| p.len() == 1 && p[0].syl.is_some());
-        self.push_prefix_candidates(chars, orig, !ends_complete, single_complete, &mut out);
+        let expected_syls = (!boundaries.is_empty()).then_some(boundaries.clone());
+        self.push_prefix_candidates(
+            chars,
+            orig,
+            !ends_complete,
+            single_complete,
+            expected_syls,
+            &mut out,
+        );
         self.push_abbreviation_candidates(chars, orig, full_cover, &mut out);
         dedupe_and_sort(&mut out);
         out.truncate(30);
@@ -292,6 +332,7 @@ impl PinyinDecoder {
         orig: &[usize],
         partial_tail: bool,
         single_complete: bool,
+        expected_syls: Option<Vec<usize>>,
         out: &mut Vec<Candidate>,
     ) {
         let query = self.prefix_query(chars);
@@ -305,6 +346,13 @@ impl PinyinDecoder {
         {
             let covered = covered_syllables(hit.key, &query);
             let mut score = (hit.entry.freq as f64).ln() + LEN_BONUS * covered as f64;
+            // 分隔符在场：词的音节边界必须包含用户指定的全部切分点
+            // （`xi'an` 要求边界 {2}：西安 ✓；现在 [xian|zai] 边界 {4} ✗）。
+            if let Some(ref expected) = expected_syls {
+                if !expected.iter().all(|b| key_boundaries(hit.key).contains(b)) {
+                    score -= SYL_MISMATCH_PENALTY;
+                }
+            }
             let extends = hit.entry.letters as usize > query.len();
             if partial_tail && extends {
                 score += COMPLETION_BONUS * consumed as f64;
@@ -414,8 +462,11 @@ impl PinyinDecoder {
                 } else {
                     CandidateKind::Word
                 };
-                let score = (e.freq as f64).ln() + LEN_BONUS * f64::from(e.syls)
+                let mut score = (e.freq as f64).ln() + LEN_BONUS * f64::from(e.syls)
                     - fuzzy_cost * FUZZY_PENALTY;
+                if consumed == orig.len() && fuzzy_cost == 0.0 {
+                    score += EXACT_FULL_BONUS;
+                }
                 out.push(
                     Candidate::new(e.word.clone(), consumed, kind, score)
                         .with_comment(display.clone()),
@@ -496,6 +547,17 @@ fn word_kind(entry: &Entry) -> CandidateKind {
 }
 
 /// key（`ni'hao`）的前缀查询串覆盖了几个完整音节。
+/// 词键的内部音节边界（按字母位置）：`xi'an` → {2}。
+fn key_boundaries(key: &str) -> std::collections::HashSet<usize> {
+    let mut bounds = std::collections::HashSet::new();
+    let mut pos = 0;
+    for syl in key.split('\'') {
+        pos += syl.len();
+        bounds.insert(pos);
+    }
+    bounds
+}
+
 fn covered_syllables(key: &str, query: &str) -> usize {
     let mut pos = 0;
     let mut n = 0;
@@ -616,9 +678,16 @@ fn fuzzy_variants(chunk: &str) -> Vec<(String, u8)> {
     }
     // 只允许删除元音（zhuan→zhun 这类多打了一个元音）；
     // 删除辅音多半是「n/h/s 还没输完」（nih、nhao、wos），交给前缀补全
+    // 元音删除的禁区：üe 韵家族（含 v 或 ue 结尾，如 nve/lue/que）删掉一个
+    // 元音就变成完全不同的高频音节（nve→nv「女」、lue→le「了」），
+    // 会劫持精确读音；zhuan→zhun 这类鼻尾缩短的纠错不受影响。
+    let ue_family = chunk.contains('v') || chunk.ends_with("ue");
     for (i, c) in chars.iter().enumerate() {
         if !matches!(c, 'a' | 'e' | 'i' | 'o' | 'u' | 'v') {
             continue;
+        }
+        if ue_family {
+            break;
         }
         let mut v = chars.clone();
         v.remove(i);

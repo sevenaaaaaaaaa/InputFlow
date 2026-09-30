@@ -412,14 +412,24 @@ pub extern "C" fn inputflow_version() -> *const c_char {
 
 fn composition_json(session: &Session) -> String {
     let comp = session.composition();
-    let mut out = String::with_capacity(64 + comp.candidates.len() * 48);
+    // 英文串判定与内核同源：没有任何全覆盖汉字候选 → 前端空格原样上屏、
+    // 数字键不再选候选（网址/邮箱/版本号直打）。
+    let raw_len = comp.raw.chars().count();
+    let english_like = !comp.raw.is_empty()
+        && !comp
+            .candidates
+            .iter()
+            .any(|c| c.consumed == raw_len && c.text.chars().any(inputflow_engine::is_cjk_char));
+    let mut out = String::with_capacity(96 + comp.candidates.len() * 48);
     out.push_str("{\"mode\":\"");
     out.push_str(session.mode().id());
     out.push_str("\",\"raw\":\"");
     out.push_str(&json_escape(&comp.raw));
     out.push_str("\",\"preedit\":\"");
     out.push_str(&json_escape(&comp.preedit));
-    out.push_str("\",\"candidates\":[");
+    out.push_str("\",\"englishLike\":");
+    out.push_str(if english_like { "true" } else { "false" });
+    out.push_str(",\"candidates\":[");
     for (i, c) in comp.candidates.iter().enumerate() {
         if i > 0 {
             out.push(',');

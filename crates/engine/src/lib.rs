@@ -217,10 +217,21 @@ impl Session {
         Ok(n)
     }
 
-    /// 前端按键入口。只接受字母与 `'`、`;`（微软双拼 ing 键）。
+    /// 前端按键入口。只接受字母与 `'`、`;`（微软双拼 ing 键）；
+    /// 英文串（纯字母组合解码不出中文）里允许续接网址/邮箱/版本号符号。
     pub fn feed(&mut self, ch: char) -> bool {
         let ok = ch.is_ascii_alphabetic() || ch == '\'' || ch == ';';
         if !ok {
+            // 英文串续接：lovart.ai、http://、someone@example.com、v1.2——
+            // 符号与数字直接进组合，空格/回车由前端原样上屏。
+            if matches!(self.mode, Mode::Pinyin | Mode::Shuangpin(_) | Mode::English)
+                && self.english_like()
+                && (ch.is_ascii_punctuation() || ch.is_ascii_digit())
+            {
+                self.buffer.push(ch);
+                self.refresh();
+                return true;
+            }
             return false;
         }
         match self.mode {
@@ -230,6 +241,18 @@ impl Session {
         }
         self.refresh();
         true
+    }
+
+    /// 组合是否已是「英文串」：缓冲非空、模式可打中文、且没有任何**全覆盖**
+    /// 的汉字候选——整串解码不出中文（`lovart`，部分覆盖的零星单字不算），
+    /// 或全覆盖命中英文词（`hello`）。中文组合（全覆盖汉字候选）绝不触发。
+    fn english_like(&self) -> bool {
+        let raw_len = self.buffer.chars().count();
+        !self.buffer.is_empty()
+            && matches!(self.mode, Mode::Pinyin | Mode::Shuangpin(_) | Mode::English)
+            && !self.comp.candidates.iter().any(|c| {
+                c.consumed == raw_len && c.text.chars().any(is_phrase_char)
+            })
     }
 
     pub fn backspace(&mut self) -> bool {
@@ -776,6 +799,11 @@ impl Session {
 /// 能进短语库的字符：中日韩文字。英文、数字、符号、表情都排除在外。
 fn is_phrase_char(c: char) -> bool {
     matches!(c, '\u{3400}'..='\u{9fff}' | '\u{f900}'..='\u{faff}')
+}
+
+/// 是否 CJK 表意文字（FFI 的 englishLike 判定与内核同源）。
+pub fn is_cjk_char(c: char) -> bool {
+    is_phrase_char(c)
 }
 
 /// 知你重排的等价层：literal 归属相同且覆盖的按键数相同。
@@ -1598,7 +1626,47 @@ mod tests {
         assert!(fresh.nutrition().is_empty());
     }
 
-    // ──────────── 知你评估层接线（E3） ────────────
+    // ──────────── 英文串续接（网址/邮箱/版本号直打） ────────────
+
+    /// 纯字母串解码不出中文 → . : / @ 数字全部续进组合，原样上屏。
+    #[test]
+    fn english_string_continues_with_url_chars() {
+        let mut s = session(Mode::Pinyin);
+        for ch in "lovart.ai/corp?v=1.2".chars() {
+            assert!(s.feed(ch), "{ch}");
+        }
+        assert_eq!(s.buffer(), "lovart.ai/corp?v=1.2");
+        // 组合里全是字面候选，没有任何全覆盖汉字
+        assert_eq!(s.commit_raw().as_deref(), Some("lovart.ai/corp?v=1.2"));
+    }
+
+    /// 邮箱：字母 + @ + 域名一路续接；中文组合则拒绝符号（走前端首选+标点）。
+    #[test]
+    fn email_continues_but_chinese_composition_rejects() {
+        let mut s = session(Mode::Pinyin);
+        for ch in "someone@example.com".chars() {
+            assert!(s.feed(ch), "{ch}");
+        }
+        assert_eq!(s.commit_raw().as_deref(), Some("someone@example.com"));
+
+        let mut t = session(Mode::Pinyin);
+        type_str(&mut t, "nihao");
+        assert!(
+            !t.feed('.'),
+            "中文组合（有全覆盖汉字候选）必须拒绝符号，交给前端首选+标点"
+        );
+    }
+
+    /// 部分覆盖的零星单字不算中文读法：`lov`→咯(consumed 2) 不阻断续接。
+    #[test]
+    fn partial_cjk_candidates_do_not_block_continuation() {
+        let mut s = session(Mode::Pinyin);
+        for ch in "lov".chars() {
+            s.feed(ch);
+        }
+        assert!(s.feed('.'), "lov 只剩字面候选，应视为英文串");
+        assert_eq!(s.buffer(), "lov.");
+    }
 
     /// 无重排语境：选中首选 → 实际/反事实都命中；选非首选 → 都不命中。
     #[test]

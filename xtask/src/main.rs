@@ -32,6 +32,7 @@ fn run(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         Some("dict") => dict_cmd(&args[1..]),
         Some("plugin") => plugin_cmd(&args[1..]),
+        Some("accuracy") => accuracy_cmd(),
         Some("-h") | Some("--help") => {
             usage();
             Ok(())
@@ -42,6 +43,219 @@ fn run(args: &[String]) -> Result<(), String> {
             Ok(())
         }
     }
+}
+
+/// `xtask accuracy`：输入准确率体检——生产词库跑 90+ 真实场景，
+/// 按「首选是否就是想要的那一个」计分，暴露排序/词频/分词的真实短板。
+fn accuracy_cmd() -> Result<(), String> {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    use inputflow_core::Mode;
+    use inputflow_engine::Session;
+
+    let tsv = std::fs::read_to_string("crates/dict/data/base-large.tsv")
+        .map_err(|e| format!("读不到 crates/dict/data/base-large.tsv: {e}（请在仓库根目录运行）"))?;
+    let (dict, _) = parse_tsv(&tsv);
+    let dict = Arc::new(dict);
+    println!("词库: {} 词条，开始体检…", dict.entry_count());
+
+    // (分组, 按键, 期望首选)
+    let cases: &[(&str, &str, &str)] = &[
+        // ── 日常高频词 ──
+        ("日常高频", "nihao", "你好"),
+        ("日常高频", "xiexie", "谢谢"),
+        ("日常高频", "zaijian", "再见"),
+        ("日常高频", "duibuqi", "对不起"),
+        ("日常高频", "meiguanxi", "没关系"),
+        ("日常高频", "huanying", "欢迎"),
+        ("日常高频", "kuaile", "快乐"),
+        ("日常高频", "mingtian", "明天"),
+        ("日常高频", "zuotian", "昨天"),
+        ("日常高频", "xianzai", "现在"),
+        ("日常高频", "shijian", "时间"),
+        ("日常高频", "keyi", "可以"),
+        ("日常高频", "yinggai", "应该"),
+        ("日常高频", "bixu", "必须"),
+        ("日常高频", "xuyao", "需要"),
+        ("日常高频", "xiwang", "希望"),
+        ("日常高频", "yijing", "已经"),
+        ("日常高频", "yinwei", "因为"),
+        ("日常高频", "suoyi", "所以"),
+        ("日常高频", "danshi", "但是"),
+        ("日常高频", "haishi", "还是"),
+        ("日常高频", "shenme", "什么"),
+        ("日常高频", "zenme", "怎么"),
+        ("日常高频", "zheyang", "这样"),
+        ("日常高频", "zhidao", "知道"),
+        ("日常高频", "mingbai", "明白"),
+        ("日常高频", "jixu", "继续"),
+        ("日常高频", "chongxin", "重新"),
+        // ── 专名地名 ──
+        ("专名地名", "beijing", "北京"),
+        ("专名地名", "shanghai", "上海"),
+        ("专名地名", "zhongguo", "中国"),
+        ("专名地名", "changcheng", "长城"),
+        ("专名地名", "huanghe", "黄河"),
+        ("专名地名", "xi'an", "西安"),
+        ("专名地名", "xingqitian", "星期天"),
+        ("专名地名", "gongzuori", "工作日"),
+        // ── 工作/科技 ──
+        ("工作科技", "gongzuo", "工作"),
+        ("工作科技", "xiangmu", "项目"),
+        ("工作科技", "wenti", "问题"),
+        ("工作科技", "jiejue", "解决"),
+        ("工作科技", "jisuanji", "计算机"),
+        ("工作科技", "chengxuyuan", "程序员"),
+        ("工作科技", "daima", "代码"),
+        ("工作科技", "ceshi", "测试"),
+        ("工作科技", "yunxing", "运行"),
+        ("工作科技", "bushu", "部署"),
+        ("工作科技", "wenjian", "文件"),
+        ("工作科技", "shezhi", "设置"),
+        ("工作科技", "gengxin", "更新"),
+        ("工作科技", "shengji", "升级"),
+        ("工作科技", "anzhuang", "安装"),
+        ("工作科技", "xiazai", "下载"),
+        ("工作科技", "shangchuan", "上传"),
+        ("工作科技", "fuzhi", "复制"),
+        ("工作科技", "baocun", "保存"),
+        ("工作科技", "shanchu", "删除"),
+        ("工作科技", "baocuo", "报错"),
+        ("工作科技", "keji", "科技"),
+        ("工作科技", "jingji", "经济"),
+        ("工作科技", "fazhan", "发展"),
+        ("工作科技", "jiaoyu", "教育"),
+        ("工作科技", "yinhang", "银行"),
+        ("工作科技", "yonghu", "用户"),
+        ("工作科技", "mima", "密码"),
+        ("工作科技", "zhanghu", "账户"),
+        ("工作科技", "youjian", "邮件"),
+        // ── 设备/生活 ──
+        ("设备生活", "shouji", "手机"),
+        ("设备生活", "diannao", "电脑"),
+        ("设备生活", "wangluo", "网络"),
+        ("设备生活", "jianpan", "键盘"),
+        ("设备生活", "pingmu", "屏幕"),
+        ("设备生活", "shubiao", "鼠标"),
+        ("设备生活", "ditu", "地图"),
+        ("设备生活", "yiyuan", "医院"),
+        ("设备生活", "xuexiao", "学校"),
+        ("设备生活", "huoche", "火车"),
+        ("设备生活", "feiji", "飞机"),
+        ("设备生活", "ditie", "地铁"),
+        ("设备生活", "gongyuan", "公园"),
+        ("设备生活", "laoshi", "老师"),
+        ("设备生活", "xuesheng", "学生"),
+        ("设备生活", "pengyou", "朋友"),
+        ("设备生活", "shenghuo", "生活"),
+        ("设备生活", "xuexi", "学习"),
+        // ── 易混淆音（声母韵母陷阱） ──
+        ("易混淆音", "lvxing", "旅行"),
+        ("易混淆音", "lvshi", "律师"),
+        ("易混淆音", "falv", "法律"),
+        ("易混淆音", "guilv", "规律"),
+        ("易混淆音", "nuli", "努力"),
+        ("易混淆音", "lue", "略"),
+        ("易混淆音", "nve", "虐"),
+        ("易混淆音", "jilu", "记录"),
+        ("易混淆音", "huiyi", "会议"),
+        ("易混淆音", "jihua", "计划"),
+        // ── 整句转换（Viterbi） ──
+        ("整句转换", "nihaoma", "你好吗"),
+        ("整句转换", "jintiantianqi", "今天天气"),
+        ("整句转换", "womenmingtiankaihui", "我们明天开会"),
+        ("整句转换", "zhegexiangmu", "这个项目"),
+        ("整句转换", "taihaole", "太好了"),
+        ("整句转换", "chifanlema", "吃饭了吗"),
+        ("整句转换", "zaoshanghao", "早上好"),
+        ("整句转换", "wanshanghao", "晚上好"),
+        ("整句转换", "shurufa", "输入法"),
+        ("整句转换", "zhongwen", "中文"),
+    ];
+
+    let mut by_group: BTreeMap<&str, (usize, usize)> = BTreeMap::new();
+    let mut failures: Vec<(&str, &str, &str, String)> = Vec::new();
+    let mut total = 0usize;
+    let mut pass = 0usize;
+
+    for (group, keys, want) in cases {
+        let mut s = Session::with_mode(dict.clone(), Mode::Pinyin);
+        for ch in keys.chars() {
+            s.feed(ch);
+        }
+        let got = s
+            .composition()
+            .candidates
+            .first()
+            .map(|c| c.text.clone())
+            .unwrap_or_default();
+        total += 1;
+        let entry = by_group.entry(group).or_insert((0, 0));
+        entry.1 += 1;
+        if got == *want {
+            pass += 1;
+            entry.0 += 1;
+        } else {
+            failures.push((group, keys, want, got));
+        }
+    }
+
+    // 英文/网址：符号续接 + 原样上屏；中文组合仍拒绝符号（前端走 首选+全角标点）
+    {
+        let mut ok = true;
+        let mut s = Session::with_mode(dict.clone(), Mode::Pinyin);
+        for ch in "lovart.ai".chars() {
+            ok = ok && s.feed(ch);
+        }
+        ok = ok && s.commit_raw().as_deref() == Some("lovart.ai");
+
+        let mut t = Session::with_mode(dict.clone(), Mode::Pinyin);
+        for ch in "http://x.com/a_1?k=v".chars() {
+            ok = ok && t.feed(ch);
+        }
+        ok = ok && t.commit_raw().as_deref() == Some("http://x.com/a_1?k=v");
+
+        let mut c = Session::with_mode(dict.clone(), Mode::Pinyin);
+        for ch in "nihao".chars() {
+            c.feed(ch);
+        }
+        ok = ok && !c.feed('.');
+
+        total += 1;
+        let entry = by_group.entry("英文/网址").or_insert((0, 0));
+        entry.1 += 1;
+        if ok {
+            pass += 1;
+            entry.0 += 1;
+        } else {
+            failures.push((
+                "英文/网址",
+                "lovart.ai 等",
+                "符号续接+原样上屏",
+                "续接或上屏失败".into(),
+            ));
+        }
+    }
+
+    println!();
+    println!("═══ InputFlow 输入准确率体检 ═══");
+    for (group, (p, n)) in &by_group {
+        let pct = if *n > 0 { p * 100 / n } else { 0 };
+        let bar = "█".repeat(pct / 5) + &"░".repeat(20 - pct / 5);
+        println!("  {group:<10} {p:>3}/{n:<3} {pct:>3}%  {bar}");
+    }
+    println!("  ──────────────────────────────");
+    println!("  总计         {pass:>3}/{total:<3} {:>3}%", pass * 100 / total);
+    if failures.is_empty() {
+        println!("  ✅ 全部通过");
+    } else {
+        println!("\n  失败明细（[分组] 按键 → 期望 ≠ 实际）:");
+        for (group, keys, want, got) in &failures {
+            println!("    [{group}] {keys} → 期望「{want}」实际「{got}」");
+        }
+    }
+    Ok(())
 }
 
 /// `xtask plugin new|check`：插件包脚手架与校验（清单由内核 crate 统一把关）。

@@ -1076,6 +1076,15 @@ final class InputFlowInputController: IMKInputController {
                 return true
             }
             guard engine.hasComposition || engine.mode == "emoji" else { return false }
+            // 英文串（网址/邮箱/英文词）：空格原样上屏并带出空格，不进候选
+            if engine.hasComposition, engine.composition.englishLike == true {
+                let keys = engine.composition.raw.count
+                if let raw = engine.commitRaw() {
+                    stats.recordCommit(chars: raw.count, keys: keys)
+                    commit(raw + " ", client: client)
+                }
+                return true
+            }
             select(index: page * CandidateWindowController.pageSize, client: client)
             return true
         default:
@@ -1105,8 +1114,11 @@ final class InputFlowInputController: IMKInputController {
                 break
             }
             if let chars = event.charactersIgnoringModifiers, let n = Int(chars), (1...9).contains(n) {
-                select(index: page * CandidateWindowController.pageSize + n - 1, client: client)
-                return true
+                // 英文串里数字是内容（v1.2），不再当候选编号
+                if engine.composition.englishLike != true {
+                    select(index: page * CandidateWindowController.pageSize + n - 1, client: client)
+                    return true
+                }
             }
         }
 
@@ -1173,6 +1185,36 @@ final class InputFlowInputController: IMKInputController {
             stats.recordKeys(fed)
             page = 0
             update(client)
+            return true
+        }
+        // 组合中的不可组合字符：先落组合再落字符，绝不穿透打乱预编辑。
+        if engine.hasComposition, let ch = chars.first {
+            let keys = engine.composition.raw.count
+            var committed: String?
+            if mode.usesChinesePunctuation, !profile.asciiPunctuation,
+               let punct = chinesePunctuation(String(ch)) {
+                // 中文流：首选上屏 + 全角标点
+                committed = engine.select(0) ?? engine.commitRaw()
+                if let text = committed {
+                    stats.recordCommit(chars: text.count, keys: keys)
+                    client.insertText(text + punct, replacementRange: NSRange(location: NSNotFound, length: 0))
+                }
+            } else {
+                // 其余符号（@ # ^ 等）：原样上屏
+                committed = engine.select(0) ?? engine.commitRaw()
+                if let text = committed {
+                    stats.recordCommit(chars: text.count, keys: keys)
+                    client.insertText(text + chars, replacementRange: NSRange(location: NSNotFound, length: 0))
+                }
+            }
+            if committed != nil {
+                recordModeSignal(strong: false)
+                persistUserModel()
+                PetWindowController.shared.react(.commit)
+                page = 0
+                update(client)
+            }
+            return true
         }
         return accepted
     }
