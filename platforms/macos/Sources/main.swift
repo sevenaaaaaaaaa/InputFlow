@@ -6,7 +6,7 @@ import InputMethodKit
 // 与 Squirrel 相同的做法：由输入法自身调用 TIS API，安装后无需注销即可被系统发现。
 
 private func inputSourceID() -> String {
-    Bundle.main.bundleIdentifier ?? "dev.inputflow.inputmethod"
+    Bundle.main.bundleIdentifier ?? "dev.inputflow.ime"
 }
 
 private func findInputSources() -> [TISInputSource] {

@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <key>TISInputSourceID</key>
-    <string>dev.inputflow.inputmethod</string>
+    <string>dev.inputflow.ime</string>
     <key>TISIntendedLanguage</key>
     <string>zh-Hans</string>
     <key>tsInputMethodCharacterRepertoireKey</key>
@@ -17,7 +17,7 @@
     <key>CFBundleIconFile</key>
     <string>InputFlow.icns</string>
     <key>CFBundleIdentifier</key>
-    <string>dev.inputflow.inputmethod</string>
+    <string>dev.inputflow.ime</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
@@ -36,10 +36,10 @@
     <dict>
         <key>tsInputModeListKey</key>
         <dict>
-            <key>dev.inputflow.inputmethod.zh</key>
+            <key>dev.inputflow.ime.zh</key>
             <dict>
                 <key>TISInputSourceID</key>
-                <string>dev.inputflow.inputmethod.zh</string>
+                <string>dev.inputflow.ime.zh</string>
                 <key>TISIntendedLanguage</key>
                 <string>zh-Hans</string>
                 <key>tsInputModeCharacterRepertoireKey</key>
@@ -66,7 +66,7 @@
         </dict>
         <key>tsVisibleInputModeOrderedArrayKey</key>
         <array>
-            <string>dev.inputflow.inputmethod.zh</string>
+            <string>dev.inputflow.ime.zh</string>
         </array>
     </dict>
     <key>InputMethodConnectionName</key>

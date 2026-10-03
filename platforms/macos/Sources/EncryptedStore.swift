@@ -30,7 +30,9 @@ final class EncryptedStore {
     private let fileURL: URL
     private var key: SymmetricKey?
     private var saveWorkItem: DispatchWorkItem?
-    private let service = Bundle.main.bundleIdentifier ?? "dev.inputflow.inputmethod"
+    /// 钥匙串服务名故意钉在最初的 bundle id 上：换 ID 后密钥不变，
+/// 旧 userdata.enc 依旧可解（bundle id 本身不参与加解密，只做钥匙串寻址）。
+    private let service = "dev.inputflow.inputmethod"
     private let account = "userdata-key"
 
     private static let magic = Data("IFUE".utf8)

@@ -9,7 +9,7 @@ PLIST="$DEST/Contents/Info.plist"
 
 # 以已安装 bundle 的实际 id 为准（支持 build.sh 的 BUNDLE_ID 覆盖）
 BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$PLIST" 2>/dev/null || true)"
-[[ -n "$BUNDLE_ID" ]] || BUNDLE_ID="dev.inputflow.inputmethod"
+[[ -n "$BUNDLE_ID" ]] || BUNDLE_ID="dev.inputflow.ime"
 
 killall "$APP" 2>/dev/null || true
 rm -rf "$DEST"

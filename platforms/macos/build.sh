@@ -32,7 +32,7 @@ CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-$(security find-identity -v -p codesigni
 if [[ -f "$HERE/.bundle-id" ]]; then
     BUNDLE_ID="${BUNDLE_ID:-$(tr -d '[:space:]' < "$HERE/.bundle-id")}"
 else
-    BUNDLE_ID="${BUNDLE_ID:-dev.inputflow.inputmethod}"
+    BUNDLE_ID="${BUNDLE_ID:-dev.inputflow.ime}"
 fi
 
 echo "==> 1/5 构建 Rust 内核静态库"
@@ -116,15 +116,15 @@ for d in "$ROOT"/examples/plugins/*/; do
 done
 
 # 覆盖 bundle id（默认与 Info.plist 一致；本机开发可用 BUNDLE_ID=... 规避系统负面缓存）
-if [[ "$BUNDLE_ID" != "dev.inputflow.inputmethod" ]]; then
+if [[ "$BUNDLE_ID" != "dev.inputflow.ime" ]]; then
     PB=/usr/libexec/PlistBuddy
     PL="$CONTENTS/Info.plist"
     "$PB" -c "Set :CFBundleIdentifier $BUNDLE_ID" "$PL"
     "$PB" -c "Set :TISInputSourceID $BUNDLE_ID" "$PL"
     CONNECTION="InputFlow_$(printf '%s' "$BUNDLE_ID" | tr '.' '_')"
     "$PB" -c "Set :InputMethodConnectionName $CONNECTION" "$PL"
-    "$PB" -c "Copy :ComponentInputModeDict:tsInputModeListKey:dev.inputflow.inputmethod.zh :ComponentInputModeDict:tsInputModeListKey:${BUNDLE_ID}.zh" "$PL"
-    "$PB" -c "Delete :ComponentInputModeDict:tsInputModeListKey:dev.inputflow.inputmethod.zh" "$PL"
+    "$PB" -c "Copy :ComponentInputModeDict:tsInputModeListKey:dev.inputflow.ime.zh :ComponentInputModeDict:tsInputModeListKey:${BUNDLE_ID}.zh" "$PL"
+    "$PB" -c "Delete :ComponentInputModeDict:tsInputModeListKey:dev.inputflow.ime.zh" "$PL"
     "$PB" -c "Set :ComponentInputModeDict:tsInputModeListKey:${BUNDLE_ID}.zh:TISInputSourceID ${BUNDLE_ID}.zh" "$PL"
     "$PB" -c "Set :ComponentInputModeDict:tsVisibleInputModeOrderedArrayKey:0 ${BUNDLE_ID}.zh" "$PL"
     echo "    bundle id 覆盖为: $BUNDLE_ID"

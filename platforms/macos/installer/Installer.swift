@@ -11,7 +11,7 @@ final class InstallerWindowController: NSWindowController {
         let plist = (Bundle.main.resourcePath ?? "") + "/InputFlow.app/Contents/Info.plist"
         let value = runShell("/usr/bin/plutil -extract CFBundleIdentifier raw \"\(plist)\" 2>/dev/null")
         let id = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return id.isEmpty ? "dev.inputflow.inputmethod" : id
+        return id.isEmpty ? "dev.inputflow.ime" : id
     }()
     private let userAppPath = NSHomeDirectory() + "/Library/Input Methods/InputFlow.app"
     private let systemAppPath = "/Library/Input Methods/InputFlow.app"
