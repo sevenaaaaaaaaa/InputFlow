@@ -22,23 +22,23 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 license = "AGPL-3.0-only"
-authors = ["InputFlow contributors"]
-repository = "https://github.com/inputflow/inputflow"
+authors = ["Liana contributors"]
+repository = "https://github.com/sevenaaaaaaaaa/InputFlow"
 description = "Privacy-first cross-platform input method: local engine, no server, LAN-only E2EE sync"
 
 [workspace.dependencies]
-inputflow-core = { path = "crates/core" }
-inputflow-dict = { path = "crates/dict" }
-inputflow-pinyin = { path = "crates/pinyin" }
-inputflow-en = { path = "crates/en" }
-inputflow-ja = { path = "crates/ja" }
-inputflow-emoji = { path = "crates/emoji" }
-inputflow-symbol = { path = "crates/symbol" }
-inputflow-sync = { path = "crates/sync" }
-inputflow-zhconv = { path = "crates/zhconv" }
-inputflow-engine = { path = "crates/engine" }
-inputflow-ai = { path = "crates/ai" }
-inputflow-plugin = { path = "crates/plugin" }
+liana-core = { path = "crates/core" }
+liana-dict = { path = "crates/dict" }
+liana-pinyin = { path = "crates/pinyin" }
+liana-en = { path = "crates/en" }
+liana-ja = { path = "crates/ja" }
+liana-emoji = { path = "crates/emoji" }
+liana-symbol = { path = "crates/symbol" }
+liana-sync = { path = "crates/sync" }
+liana-zhconv = { path = "crates/zhconv" }
+liana-engine = { path = "crates/engine" }
+liana-ai = { path = "crates/ai" }
+liana-plugin = { path = "crates/plugin" }
 
 [profile.release]
 lto = "thin"

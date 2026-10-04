@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# InputFlow 发布打包一条龙：签名 → Hardened Runtime → 公证 → DMG → staple → 校验和
+# 松萝发布打包一条龙：签名 → Hardened Runtime → 公证 → DMG → staple → 校验和
 #
 # 分级降级（证书决定能力，脚本绝不假装）：
 #   Developer ID Application  → 完整流程：hardened + 公证 + staple，任何人下载 DMG 双击即用
@@ -7,7 +7,7 @@
 #   ad-hoc                    → 仅本机调试：macOS 26+ 不收录，DMG 仅限自担风险者
 #
 # 一次性准备（付费开发者账号）：
-#   xcrun notarytool store-credentials inputflow-notary \
+#   xcrun notarytool store-credentials liana-notary \
 #       --apple-id you@example.com --team-id TEAMID --password <app-specific-password>
 #
 # 用法：
@@ -19,14 +19,14 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 BUILD="$HERE/build"
-ENTITLEMENTS="$HERE/InputFlow.entitlements"
+ENTITLEMENTS="$HERE/Liana.entitlements"
 OUT="$ROOT/dist"
-NOTARY_PROFILE="${NOTARY_PROFILE:-inputflow-notary}"
+NOTARY_PROFILE="${NOTARY_PROFILE:-liana-notary}"
 SKIP_BUILD=0
 [[ "${1:-}" == "--skip-build" ]] && SKIP_BUILD=1
 
-APP="$BUILD/InputFlow.app"
-INSTALLER="$BUILD/InputFlow 安装器.app"
+APP="$BUILD/Liana.app"
+INSTALLER="$BUILD/松萝安装器.app"
 
 log()  { printf '\033[1;36m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m⚠  %s\033[0m\n' "$*"; }
@@ -64,9 +64,9 @@ fi
 
 # 公证的硬性前提。build.sh 的签名不带 runtime 标志，这里按发布口径统一重签
 # （内嵌所有框架/Helper 一并覆盖；deep 保持与 build.sh 的自包含承诺一致）。
-log "重签（Hardened Runtime + entitlements）：InputFlow.app"
+log "重签（Hardened Runtime + entitlements）：Liana.app"
 codesign --force --sign "$IDENTITY" --options runtime --entitlements "$ENTITLEMENTS" \
-    --deep --timestamp "$APP" || die "重签 InputFlow.app 失败"
+    --deep --timestamp "$APP" || die "重签 Liana.app 失败"
 if [[ -d "$INSTALLER" ]]; then
     log "重签（Hardened Runtime + entitlements）：安装器"
     codesign --force --sign "$IDENTITY" --options runtime --entitlements "$ENTITLEMENTS" \
@@ -102,13 +102,13 @@ fi
 
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Contents/Info.plist" 2>/dev/null || echo 0.0.0)"
 BUILD_NUM="$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$APP/Contents/Info.plist" 2>/dev/null || echo 1)"
-ARCHS="$(lipo -archs "$APP/Contents/MacOS/InputFlow" 2>/dev/null | tr ' ' '-')"
+ARCHS="$(lipo -archs "$APP/Contents/MacOS/Liana" 2>/dev/null | tr ' ' '-')"
 [[ -n "$ARCHS" ]] || ARCHS="$(uname -m)"
 case "$ARCHS" in
     *x86_64*arm64*|*arm64*x86_64*) SLUG="universal" ;;
     *) SLUG="$ARCHS" ;;
 esac
-DMG_NAME="InputFlow-${VERSION}-${SLUG}.dmg"
+DMG_NAME="Liana-${VERSION}-${SLUG}.dmg"
 DMG="$OUT/$DMG_NAME"
 mkdir -p "$OUT"
 
@@ -120,7 +120,7 @@ cp -R "$APP" "$STAGING/"
 ln -s /Applications "$STAGING/Applications"
 # 附上许可证与说明，分发页面省事
 cp "$ROOT/LICENSE" "$STAGING/" 2>/dev/null || true
-hdiutil create -volname "InputFlow $VERSION" -srcfolder "$STAGING" -ov -format UDZO "$DMG" \
+hdiutil create -volname "Liana $VERSION" -srcfolder "$STAGING" -ov -format UDZO "$DMG" \
     >/dev/null || die "DMG 打包失败"
 
 if [[ "$NOTARIZED" == 1 ]]; then

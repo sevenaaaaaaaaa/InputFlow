@@ -13,7 +13,7 @@
 | 用户历史/个性化 | 记录用户常用词与纠错接受情况，优先复现 | 各家都有 |
 | 大词库 + 整句解码 | 词库越大、整句 Viterbi 越好，纠错空间越自然 | libpinyin/libime/Mozc |
 
-## InputFlow 的实现（M1）
+## 松萝的实现（M1）
 
 1. **音节级纠错变体**（`fuzzy_variants`）：对每个输入片段生成代价 1 的候选音节：
    - 相邻换位（`yign→ying`、`uagn→uang`、`ogn→ong`）

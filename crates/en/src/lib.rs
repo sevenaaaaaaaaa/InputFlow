@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock};
 
-use inputflow_core::{Candidate, CandidateKind, Decoder};
+use liana_core::{Candidate, CandidateKind, Decoder};
 
 /// 内置高频词表（`词` 或 `词<TAB>权重`）。
 const EMBEDDED: &str = include_str!("../data/words.txt");

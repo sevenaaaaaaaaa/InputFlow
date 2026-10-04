@@ -1,4 +1,4 @@
-# InputFlow 内置基础词典（约 200 条）
+# 松萝内置基础词典（约 200 条）
 # 格式：词<TAB>拼音（空格或单引号分隔，可带声调）<TAB>词频（可选，默认 1）
 # 正式词库请用：cargo run -p xtask -- dict import-rime <dict.yaml> -o base.ifd
 # 单字

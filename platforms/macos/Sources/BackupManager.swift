@@ -27,7 +27,7 @@ enum BackupManager {
 
         var errorDescription: String? {
             switch self {
-            case .notBackup: return "这不是 InputFlow 备份文件"
+            case .notBackup: return "这不是 松萝备份文件"
             case .badPassword: return "密码不对，或文件已损坏"
             case .random: return "无法生成随机盐"
             case .rejected: return "备份内容校验失败，未改动任何数据"
@@ -93,12 +93,12 @@ enum BackupManager {
     static func suggestedName(encrypted: Bool) -> String {
         let f = DateFormatter()
         f.dateFormat = "yyyyMMdd"
-        return "InputFlow-备份-\(f.string(from: Date()))." + (encrypted ? "ifbak" : "txt")
+        return "松萝-备份-\(f.string(from: Date()))." + (encrypted ? "ifbak" : "txt")
     }
 
     // MARK: - 导出
 
-    static func exportEncrypted(engine: InputFlowEngine) {
+    static func exportEncrypted(engine: LianaEngine) {
         guard let password = askPassword() else { return }
         do {
             let data = try seal(engine.exportBackup(), password: password)
@@ -108,7 +108,7 @@ enum BackupManager {
         }
     }
 
-    static func exportPlain(engine: InputFlowEngine) {
+    static func exportPlain(engine: LianaEngine) {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "导出明文备份？"
@@ -137,11 +137,11 @@ enum BackupManager {
 
     // MARK: - 恢复
 
-    static func restore(engine: InputFlowEngine, store: EncryptedStore) {
+    static func restore(engine: LianaEngine, store: EncryptedStore) {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
-        panel.message = "选择 InputFlow 备份文件（.ifbak 或明文 .txt）"
+        panel.message = "选择 松萝备份文件（.ifbak 或明文 .txt）"
         NSApp.activate(ignoringOtherApps: true)
         guard panel.runModal() == .OK, let url = panel.url,
               let data = try? Data(contentsOf: url)
@@ -224,14 +224,14 @@ enum BackupManager {
         let password = first.stringValue
         if password.isEmpty {
             report(NSError(
-                domain: "InputFlow.Backup", code: 2,
+                domain: "Liana.Backup", code: 2,
                 userInfo: [NSLocalizedDescriptionKey: "密码不能为空"]
             ))
             return nil
         }
         if let second, second.stringValue != password {
             report(NSError(
-                domain: "InputFlow.Backup", code: 3,
+                domain: "Liana.Backup", code: 3,
                 userInfo: [NSLocalizedDescriptionKey: "两次输入的密码不一致"]
             ))
             return nil
@@ -248,13 +248,13 @@ enum BackupManager {
     }
 }
 
-// MARK: - 自检（`InputFlow --backup-smoke`）
+// MARK: - 自检（`Liana --backup-smoke`）
 
 extension BackupManager {
     /// 不弹任何窗口：验证「引擎导出 → 加密 → 解密 → 导回引擎」这条链路。
     static func smokeTest() -> Bool {
         var ok = true
-        let source = InputFlowEngine(mode: "pinyin")
+        let source = LianaEngine(mode: "pinyin")
         _ = source.importUserModel("你好\t3\n@pair\t你好\t世界\t2\n@phrase\tnihaoshijie\t你好世界\t2\n")
         let packed = source.exportBackup()
         ok = ok && packed.hasPrefix("#IFBAK1")
@@ -269,7 +269,7 @@ extension BackupManager {
         ok = ok && (try? open(sealed, password: "correct horse")) == packed
         ok = ok && (try? open(sealed, password: "wrong")) == nil
 
-        let target = InputFlowEngine(mode: "pinyin")
+        let target = LianaEngine(mode: "pinyin")
         ok = ok && target.importBackup(packed, merge: false) >= 2
         ok = ok && target.exportUserModel().contains("你好\t3")
         ok = ok && target.exportUserModel().contains("@phrase\tnihaoshijie\t你好世界\t2")

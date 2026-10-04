@@ -3,10 +3,10 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP="InputFlow"
+APP="Liana"
 SRC="$HERE/build/$APP.app"
 DEST_DIR="$HOME/Library/Input Methods"
-DATA_DIR="$HOME/Library/Application Support/InputFlow"
+DATA_DIR="$HOME/Library/Application Support/Liana"
 
 if [[ ! -d "$SRC" ]]; then
     echo "未找到 $SRC，请先运行 ./build.sh" >&2
@@ -35,7 +35,7 @@ cat <<'EOF'
 安装完成。
 
 首次启用：
-  系统设置 → 键盘 → 文字输入 → 输入法 → 编辑… → + → 中文（简体）→ InputFlow
+  系统设置 → 键盘 → 文字输入 → 输入法 → 编辑… → + → 中文（简体）→ 松萝
   （若列表里没有，注销并重新登录一次）
 
 使用：

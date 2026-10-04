@@ -1,11 +1,11 @@
-//! 临时性能检查：`cargo run --release -p inputflow-pinyin --example bench`
+//! 临时性能检查：`cargo run --release -p liana-pinyin --example bench`
 //! 度量单键解码延迟（PRD 预算：P99 < 8ms）。
 
 use std::sync::Arc;
 use std::time::Instant;
 
-use inputflow_dict::Dictionary;
-use inputflow_pinyin::{Layout, PinyinDecoder};
+use liana_dict::Dictionary;
+use liana_pinyin::{Layout, PinyinDecoder};
 
 fn main() {
     let dict = match std::env::args().nth(1) {
@@ -41,7 +41,7 @@ fn main() {
     ];
     for layout in [
         Layout::Full,
-        Layout::Shuangpin(inputflow_core::Scheme::Flypy),
+        Layout::Shuangpin(liana_core::Scheme::Flypy),
     ] {
         for input in inputs {
             let d = PinyinDecoder::new(dict.clone(), layout);

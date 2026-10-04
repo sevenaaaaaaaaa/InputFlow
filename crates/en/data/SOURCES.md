@@ -34,7 +34,7 @@ with open('en_50k.txt') as f:
         merged[w] = max(merged.get(w, 0), c)
 ordered = sorted(merged.items(), key=lambda kv: (-kv[1], kv[0]))[:20000]
 with open('crates/en/data/words.txt', 'w') as out:
-    out.write("# 英文词表：hermitdave/FrequencyWords (MIT, 2018 en_50k) + InputFlow 人工校准词（×30 优先）\n")
+    out.write("# 英文词表：hermitdave/FrequencyWords (MIT, 2018 en_50k) + 松萝人工校准词（×30 优先）\n")
     out.write("# 格式：词<TAB>权重（相对序即可）；由 crates/en/data/SOURCES.md 中的脚本生成\n")
     for w, c in ordered:
         out.write(f"{w}\t{c}\n")

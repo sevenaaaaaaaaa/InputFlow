@@ -18,12 +18,12 @@ final class PetWindowController {
     }
 
     static let shared = PetWindowController()
-    private static let enabledKey = "InputFlowPetEnabled"
-    private static let originKey = "InputFlowPetOrigin"
-    private static let packKey = "InputFlowPetPackId"
-    private static let emojiKey = "InputFlowPetEmoji"
-    private static let framingKey = "InputFlowPetFraming"
-    private static let zoomKey = "InputFlowPetZoom"
+    private static let enabledKey = "LianaPetEnabled"
+    private static let originKey = "LianaPetOrigin"
+    private static let packKey = "LianaPetPackId"
+    private static let emojiKey = "LianaPetEmoji"
+    private static let framingKey = "LianaPetFraming"
+    private static let zoomKey = "LianaPetZoom"
 
     /// 画幅：full（全身）/ bust（半身），菜单可改，覆盖形象包默认
     static var framingOverride: String {
@@ -733,7 +733,7 @@ final class PetWindowController {
             keyEquivalent: ""
         )
         punct.target = self
-        punct.state = UserDefaults.standard.bool(forKey: "InputFlowForceHalfPunctuation") ? .on : .off
+        punct.state = UserDefaults.standard.bool(forKey: "LianaForceHalfPunctuation") ? .on : .off
         menu.addItem(punct)
         menu.addItem(.separator())
         let stats = NSMenuItem(title: "昨日输入总结", action: #selector(petMenuShowStats(_:)), keyEquivalent: "")
@@ -1085,7 +1085,7 @@ private final class PetQuickButton: NSButton {
 }
 
 extension Notification.Name {
-    static let petToggleLanguage = Notification.Name("InputFlowPetToggleLanguage")
-    static let petTogglePunctuation = Notification.Name("InputFlowPetTogglePunctuation")
-    static let petShowStats = Notification.Name("InputFlowPetShowStats")
+    static let petToggleLanguage = Notification.Name("LianaPetToggleLanguage")
+    static let petTogglePunctuation = Notification.Name("LianaPetTogglePunctuation")
+    static let petShowStats = Notification.Name("LianaPetShowStats")
 }

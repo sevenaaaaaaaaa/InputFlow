@@ -45,4 +45,4 @@ ADR-0005 把用户词、二元组、短语加密存进 `userdata.enc`，密钥�
 
 - 内核新增 `Session::export_backup` / `import_backup`，FFI 新增两个函数，各平台前端复用；
 - `EncryptedStore.mergeUserModel` 改为行类型无关的合并（否则短语行会在合并时被丢掉）；
-- 自检：`InputFlow --backup-smoke`（导出 → 加密 → 解密 → 导回 → 拒绝坏包）。
+- 自检：`Liana --backup-smoke`（导出 → 加密 → 解密 → 导回 → 拒绝坏包）。

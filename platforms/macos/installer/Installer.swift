@@ -1,20 +1,20 @@
 import AppKit
 import Carbon
 
-/// InputFlow 图形安装器：侧栏步骤向导（安装位置 → 配置 → 安装与验证）。
+/// 松萝图形安装器：侧栏步骤向导（安装位置 → 配置 → 安装与验证）。
 ///
 /// 签名说明：macOS 26+ 的输入源扫描器会拒绝 ad-hoc 签名的第三方输入法，
 /// 必须 Developer ID 签名（并公证）才会出现在系统输入法列表；界面会给出诊断。
 final class InstallerWindowController: NSWindowController {
-    /// 以内嵌 InputFlow.app 的实际 bundle id 为准（支持 build.sh 的 BUNDLE_ID 覆盖）。
+    /// 以内嵌Liana.app 的实际 bundle id 为准（支持 build.sh 的 BUNDLE_ID 覆盖）。
     private lazy var imeBundleID: String = {
-        let plist = (Bundle.main.resourcePath ?? "") + "/InputFlow.app/Contents/Info.plist"
+        let plist = (Bundle.main.resourcePath ?? "") + "/Liana.app/Contents/Info.plist"
         let value = runShell("/usr/bin/plutil -extract CFBundleIdentifier raw \"\(plist)\" 2>/dev/null")
         let id = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return id.isEmpty ? "dev.inputflow.ime" : id
+        return id.isEmpty ? "dev.liana.ime" : id
     }()
-    private let userAppPath = NSHomeDirectory() + "/Library/Input Methods/InputFlow.app"
-    private let systemAppPath = "/Library/Input Methods/InputFlow.app"
+    private let userAppPath = NSHomeDirectory() + "/Library/Input Methods/Liana.app"
+    private let systemAppPath = "/Library/Input Methods/Liana.app"
     private let accent = NSColor.controlAccentColor
 
     // 侧栏
@@ -71,7 +71,7 @@ final class InstallerWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "InputFlow 安装器"
+        window.title = "松萝安装器"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false
@@ -128,11 +128,11 @@ final class InstallerWindowController: NSWindowController {
         effect.addSubview(stack)
 
         let icon = NSImageView()
-        icon.image = NSImage(named: "InputFlow") ?? NSImage(named: NSImage.applicationIconName)
+        icon.image = NSImage(named: "Liana") ?? NSImage(named: NSImage.applicationIconName)
         icon.imageScaling = .scaleProportionallyUpOrDown
         icon.widthAnchor.constraint(equalToConstant: 56).isActive = true
         icon.heightAnchor.constraint(equalToConstant: 56).isActive = true
-        let name = NSTextField(labelWithString: "InputFlow")
+        let name = NSTextField(labelWithString: "松萝")
         name.font = .systemFont(ofSize: 16, weight: .semibold)
         let version = NSTextField(labelWithString: "本地输入法 · v0.1.0")
         version.font = .systemFont(ofSize: 11)
@@ -319,7 +319,7 @@ final class InstallerWindowController: NSWindowController {
         let uninstallRow = NSStackView()
         uninstallRow.orientation = .horizontal
         uninstallRow.spacing = 8
-        let uninstallButton = NSButton(title: "卸载 InputFlow", target: self, action: #selector(uninstall))
+        let uninstallButton = NSButton(title: "卸载松萝", target: self, action: #selector(uninstall))
         uninstallButton.bezelStyle = .rounded
         uninstallRow.addArrangedSubview(uninstallButton)
         uninstallRow.addArrangedSubview(purgeCheck)
@@ -423,16 +423,16 @@ final class InstallerWindowController: NSWindowController {
     @objc private func saveConfig() {
         let mode = modeOptions[modePopup.indexOfSelectedItem].0
         let defaults = UserDefaults(suiteName: imeBundleID)
-        defaults?.set(mode, forKey: "InputFlowMode")
+        defaults?.set(mode, forKey: "LianaMode")
         if mode != "en" && mode != "ja" {
-            defaults?.set(mode, forKey: "InputFlowLastChineseMode")
+            defaults?.set(mode, forKey: "LianaLastChineseMode")
         }
-        defaults?.set(traditionalCheck.state == .on, forKey: "InputFlowTraditional")
-        defaults?.set(clipboardCheck.state == .on, forKey: "InputFlowClipboardEnabled")
-        defaults?.set(petCheck.state == .on, forKey: "InputFlowPetEnabled")
-        defaults?.set(appMemoryCheck.state == .on, forKey: "InputFlowAppModeMemoryEnabled")
-        defaults?.set(statsCheck.state == .on, forKey: "InputFlowStatsEnabled")
-        defaults?.set(halfPunctCheck.state == .on, forKey: "InputFlowForceHalfPunctuation")
+        defaults?.set(traditionalCheck.state == .on, forKey: "LianaTraditional")
+        defaults?.set(clipboardCheck.state == .on, forKey: "LianaClipboardEnabled")
+        defaults?.set(petCheck.state == .on, forKey: "LianaPetEnabled")
+        defaults?.set(appMemoryCheck.state == .on, forKey: "LianaAppModeMemoryEnabled")
+        defaults?.set(statsCheck.state == .on, forKey: "LianaStatsEnabled")
+        defaults?.set(halfPunctCheck.state == .on, forKey: "LianaForceHalfPunctuation")
         defaults?.synchronize()
         log("已保存配置：模式=\(mode) · 繁体=\(onOff(traditionalCheck)) · 剪切板=\(onOff(clipboardCheck)) · 桌宠=\(onOff(petCheck))")
     }
@@ -440,7 +440,7 @@ final class InstallerWindowController: NSWindowController {
     // MARK: - 签名诊断
 
     private var sourceApp: String {
-        Bundle.main.resourcePath.map { $0 + "/InputFlow.app" } ?? ""
+        Bundle.main.resourcePath.map { $0 + "/Liana.app" } ?? ""
     }
 
     private var sourceDict: String {
@@ -448,7 +448,7 @@ final class InstallerWindowController: NSWindowController {
     }
 
     private var userDataDir: String {
-        NSHomeDirectory() + "/Library/Application Support/InputFlow"
+        NSHomeDirectory() + "/Library/Application Support/Liana"
     }
 
     private func refreshSignature() {
@@ -495,9 +495,9 @@ final class InstallerWindowController: NSWindowController {
                 try fm.copyItem(atPath: sourceDict, toPath: userDataDir + "/base.ifd")
             }
             runShell("/usr/bin/xattr -dr com.apple.quarantine \"\(dest)\"")
-            runShell("/usr/bin/killall InputFlow")
-            runShell("\"\(dest)/Contents/MacOS/InputFlow\" --register-input-source")
-            runShell("\"\(dest)/Contents/MacOS/InputFlow\" --enable-input-source")
+            runShell("/usr/bin/killall Liana")
+            runShell("\"\(dest)/Contents/MacOS/Liana\" --register-input-source")
+            runShell("\"\(dest)/Contents/MacOS/Liana\" --enable-input-source")
             runShell("/usr/bin/killall TextInputMenuAgent imklaunchagent")
             hasInstalled = true
             log("✅ 已安装到 \(dest)")
@@ -513,9 +513,9 @@ final class InstallerWindowController: NSWindowController {
         #!/bin/bash
         set -e
         SRC="\(sourceApp)"
-        DST="/Library/Input Methods/InputFlow.app"
+        DST="/Library/Input Methods/Liana.app"
         DICT_SRC="\(sourceDict)"
-        DICT_DST="/Users/\(user)/Library/Application Support/InputFlow"
+        DICT_DST="/Users/\(user)/Library/Application Support/Liana"
         mkdir -p "/Library/Input Methods"
         rm -rf "$DST"
         cp -R "$SRC" "$DST"
@@ -524,10 +524,10 @@ final class InstallerWindowController: NSWindowController {
         xattr -dr com.apple.quarantine "$DST" 2>/dev/null || true
         mkdir -p "$DICT_DST"
         if [ -f "$DICT_SRC" ]; then cp "$DICT_SRC" "$DICT_DST/base.ifd"; chown \(user) "$DICT_DST/base.ifd" || true; fi
-        "$DST/Contents/MacOS/InputFlow" --register-input-source || true
-        "$DST/Contents/MacOS/InputFlow" --enable-input-source || true
+        "$DST/Contents/MacOS/Liana" --register-input-source || true
+        "$DST/Contents/MacOS/Liana" --enable-input-source || true
         """
-        let path = NSTemporaryDirectory() + "inputflow-install.sh"
+        let path = NSTemporaryDirectory() + "liana-install.sh"
         do {
             try script.write(toFile: path, atomically: true, encoding: .utf8)
         } catch {
@@ -553,7 +553,7 @@ final class InstallerWindowController: NSWindowController {
         let installed = [userAppPath, systemAppPath].filter { FileManager.default.fileExists(atPath: $0) }
         log("安装状态：\(installed.isEmpty ? "未安装" : installed.joined(separator: "、"))")
         if isRegistered() {
-            log("✅ 系统已收录 InputFlow（可在 系统设置 → 键盘 → 文字输入 → 输入法 中添加）")
+            log("✅ 系统已收录松萝（可在 系统设置 → 键盘 → 文字输入 → 输入法 中添加）")
             setDetectPill("已收录", color: .systemGreen)
             progressTimer?.invalidate()
         } else {
@@ -570,7 +570,7 @@ final class InstallerWindowController: NSWindowController {
             guard let self else { return }
             self.pollCount += 1
             if self.isRegistered() {
-                self.log("✅ 系统已收录 InputFlow")
+                self.log("✅ 系统已收录松萝")
                 self.setDetectPill("已收录", color: .systemGreen)
                 self.progressTimer?.invalidate()
             } else if self.pollCount >= 20 {
@@ -601,10 +601,10 @@ final class InstallerWindowController: NSWindowController {
 
     @objc private func uninstall() {
         let purge = purgeCheck.state == .on
-        runShell("/usr/bin/killall InputFlow")
+        runShell("/usr/bin/killall Liana")
         for path in [userAppPath, systemAppPath] where FileManager.default.fileExists(atPath: path) {
             if path.hasPrefix("/Library") {
-                let tmp = NSTemporaryDirectory() + "inputflow-uninstall.sh"
+                let tmp = NSTemporaryDirectory() + "liana-uninstall.sh"
                 try? "#!/bin/bash\nrm -rf \"\(path)\"\n".write(toFile: tmp, atomically: true, encoding: .utf8)
                 var error: NSDictionary?
                 NSAppleScript(source: "do shell script \"/bin/bash \(tmp)\" with administrator privileges")?
@@ -633,7 +633,7 @@ final class InstallerWindowController: NSWindowController {
         }
     }
 
-    /// 离屏快照（`InputFlowInstaller --snapshot <前缀>`），用于开发时检查界面。
+    /// 离屏快照（`LianaInstaller --snapshot <前缀>`），用于开发时检查界面。
     func snapshotStep(_ index: Int, to path: String) {
         switchStep(index)
         guard let view = window?.contentView else { return }

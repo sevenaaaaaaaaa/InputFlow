@@ -1,9 +1,9 @@
 //! 日语输入（阶段一）：罗马字 → 平假名 / 片假名。
 //!
 //! 采用「最长匹配 + 促音/拨音规则」的确定性转换；假名→汉字的 Viterbi 转换在 M2
-//! （JMdict + 连接矩阵），届时复用 `inputflow-dict` 与 `inputflow-pinyin` 的 DP 思路。
+//! （JMdict + 连接矩阵），届时复用 `liana-dict` 与 `liana-pinyin` 的 DP 思路。
 
-use inputflow_core::{Candidate, CandidateKind, Decoder};
+use liana_core::{Candidate, CandidateKind, Decoder};
 
 /// 罗马字表（按长度做最长匹配；含拗音、外来语音节与常用简写）。
 const TABLE: &[(&str, &str)] = &[

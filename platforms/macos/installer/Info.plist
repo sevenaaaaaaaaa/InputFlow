@@ -5,17 +5,17 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>zh_CN</string>
     <key>CFBundleExecutable</key>
-    <string>InputFlowInstaller</string>
+    <string>LianaInstaller</string>
     <key>CFBundleIdentifier</key>
-    <string>dev.inputflow.installer</string>
+    <string>dev.liana.installer</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>InputFlow 安装器</string>
+    <string>松萝安装器</string>
     <key>CFBundleDisplayName</key>
-    <string>InputFlow 安装器</string>
+    <string>松萝安装器</string>
     <key>CFBundleIconFile</key>
-    <string>InputFlowInstaller</string>
+    <string>LianaInstaller</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

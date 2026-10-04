@@ -6,7 +6,7 @@ import InputMethodKit
 // 与 Squirrel 相同的做法：由输入法自身调用 TIS API，安装后无需注销即可被系统发现。
 
 private func inputSourceID() -> String {
-    Bundle.main.bundleIdentifier ?? "dev.inputflow.ime"
+    Bundle.main.bundleIdentifier ?? "dev.liana.ime"
 }
 
 private func findInputSources() -> [TISInputSource] {
@@ -93,7 +93,7 @@ if installArgs.count > 1 {
             exit(0)
         }
         let status = TISSelectInputSource(source)
-        print(status == noErr ? "已切换到 InputFlow" : "切换失败 (status=\(status))")
+        print(status == noErr ? "已切换到松萝" : "切换失败 (status=\(status))")
         exit(status == noErr ? 0 : 1)
 
     case "--input-source-status":
@@ -105,13 +105,13 @@ if installArgs.count > 1 {
         exit(0)
 
     case "--ai-dump":
-        for model in InputFlowEngine.aiCatalog() {
+        for model in LianaEngine.aiCatalog() {
             print(
                 "\(model.id)\t\(model.sizeBytes)\t\(model.ramMb)MB\t\(model.kinds.joined(separator: ","))\t\(model.license)"
             )
         }
         let ramMb = Int(ProcessInfo.processInfo.physicalMemory / (1024 * 1024))
-        let rec = InputFlowEngine.aiRecommend(totalRamMb: ramMb)
+        let rec = LianaEngine.aiRecommend(totalRamMb: ramMb)
         print("totalRamMb=\(rec.totalRamMb)")
         for r in rec.recommendations {
             print("\(r.kind)\t\(r.modelId ?? "-")\t\(r.levelLabel)")
@@ -125,7 +125,7 @@ if installArgs.count > 1 {
         exit(EncryptedStore.smokeTest() ? 0 : 1)
 
     case "--candidate-demo":
-        let demoEngine = InputFlowEngine(mode: "pinyin")
+        let demoEngine = LianaEngine(mode: "pinyin")
         for ch in "nihao" { _ = demoEngine.feed(ch) }
         let comp = demoEngine.composition
         let demoWindow = CandidateWindowController()
@@ -429,10 +429,59 @@ if installArgs.count > 1 {
     }
 }
 
+// MARK: - 品牌迁移（InputFlow → 松萝 / Liana，一次性、非破坏）
+
+/// 把旧品牌时代的数据搬进新位置。只复制、不删除、失败静默降级——
+/// 回滚到旧版 InputFlow 时旧数据仍完好。钥匙串密钥不受影响（服务名钉死，见 EncryptedStore）。
+private func migrateLegacyBrandData() {
+    let fm = FileManager.default
+    let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    let legacyDir = appSupport.appendingPathComponent("InputFlow", isDirectory: true)
+    let newDir = appSupport.appendingPathComponent("Liana", isDirectory: true)
+
+    // 数据目录：旧 ~/Library/Application Support/InputFlow/userdata.enc 存在、
+    // 且新目录还没有 userdata.enc 时，整目录复制过去（含 base.ifd / models / plugins）。
+    let legacyEnc = legacyDir.appendingPathComponent("userdata.enc")
+    let newEnc = newDir.appendingPathComponent("userdata.enc")
+    if fm.fileExists(atPath: legacyEnc.path), !fm.fileExists(atPath: newEnc.path) {
+        do {
+            try fm.createDirectory(at: newDir, withIntermediateDirectories: true)
+            for item in try fm.contentsOfDirectory(atPath: legacyDir.path) {
+                let dst = newDir.appendingPathComponent(item)
+                if !fm.fileExists(atPath: dst.path) {
+                    try fm.copyItem(at: legacyDir.appendingPathComponent(item), to: dst)
+                }
+            }
+            NSLog("松萝: 已从 InputFlow 迁移用户数据（用户词/知你账本/营养库/剪切板历史）")
+        } catch {
+            NSLog("松萝: 迁移旧数据失败（\(error.localizedDescription)），本次按空数据继续，旧数据未动")
+        }
+    }
+
+    // 偏好键：旧域 dev.inputflow.ime 的 InputFlow* → 新域 Liana*（前缀替换，同名规则覆盖
+    // LianaAIModel.<kind> 这类动态后缀键）。不删旧域，留作回滚。
+    let legacyDomain = "dev.inputflow.ime"
+    guard let legacy = UserDefaults.standard.persistentDomain(forName: legacyDomain), !legacy.isEmpty
+    else { return }
+    let newDefaults = UserDefaults.standard
+    var migrated = 0
+    for (key, value) in legacy where key.hasPrefix("InputFlow") {
+        let newKey = "Liana" + key.dropFirst("InputFlow".count)
+        if newDefaults.object(forKey: newKey) == nil {
+            newDefaults.set(value, forKey: newKey)
+            migrated += 1
+        }
+    }
+    if migrated > 0 {
+        NSLog("松萝: 已迁移 \(migrated) 项旧偏好设置（中英模式记忆/桌宠/皮肤等）")
+    }
+}
+
 // MARK: - 输入法主进程
 
 // M1：加密用户数据（钥匙串密钥；不可用则本次仅内存）+ 剪切板监控（默认关闭）
 _ = NSApplication.shared
+migrateLegacyBrandData()
 PluginStore.seedBundledPacks()
 _ = EncryptedStore.shared.load()
 ClipboardMonitor.shared.startIfEnabled()
@@ -446,10 +495,10 @@ NotificationCenter.default.addObserver(
 }
 
 let connectionName = Bundle.main.infoDictionary?["InputMethodConnectionName"] as? String
-    ?? "InputFlow_Connection"
+    ?? "Liana_Connection"
 
 guard let server = IMKServer(name: connectionName, bundleIdentifier: inputSourceID()) else {
-    NSLog("InputFlow: 创建 IMKServer 失败（检查 Info.plist 的 InputMethodConnectionName）")
+    NSLog("Liana: 创建 IMKServer 失败（检查 Info.plist 的 InputMethodConnectionName）")
     exit(1)
 }
 

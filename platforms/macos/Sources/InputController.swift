@@ -3,10 +3,10 @@ import InputMethodKit
 
 /// 输入控制器：把按键翻译为内核调用，并负责预编辑串与候选窗。
 /// 不做任何网络访问；预编辑内容只在内存中，提交后立即释放。
-@objc(InputFlowInputController)
-final class InputFlowInputController: IMKInputController {
-    private let engine = InputFlowEngine(
-        mode: UserDefaults.standard.string(forKey: "InputFlowMode") ?? InputFlowMode.pinyin.rawValue
+@objc(LianaInputController)
+final class LianaInputController: IMKInputController {
+    private let engine = LianaEngine(
+        mode: UserDefaults.standard.string(forKey: "LianaMode") ?? LianaMode.pinyin.rawValue
     )
     private let window = CandidateWindowController()
     private let store = EncryptedStore.shared
@@ -42,13 +42,13 @@ final class InputFlowInputController: IMKInputController {
     private var urlMode = false
     /// 表情模式（斗图）之前的中文模式，Esc 时恢复。
     private var modeBeforeEmoji: String?
-    private var lastChineseMode: InputFlowMode = {
-        UserDefaults.standard.string(forKey: "InputFlowLastChineseMode")
-            .flatMap(InputFlowMode.init(rawValue:))
+    private var lastChineseMode: LianaMode = {
+        UserDefaults.standard.string(forKey: "LianaLastChineseMode")
+            .flatMap(LianaMode.init(rawValue:))
             .flatMap { $0.isChinese ? $0 : nil } ?? .pinyin
     }()
     /// 当前活跃会话：桌宠点按/菜单动作只作用在它身上（IMK 每个客户端一个控制器实例）。
-    private static weak var activeController: InputFlowInputController?
+    private static weak var activeController: LianaInputController?
     /// 统计与发呆跟踪：上一次按键事件的时间戳。
     private var lastEventAt: TimeInterval?
     private var digestChecked = false
@@ -84,7 +84,7 @@ final class InputFlowInputController: IMKInputController {
             forName: .petTogglePunctuation, object: nil, queue: .main
         ) { [weak self] _ in
             guard Self.activeController === self else { return }
-            let key = "InputFlowForceHalfPunctuation"
+            let key = "LianaForceHalfPunctuation"
             let on = !UserDefaults.standard.bool(forKey: key)
             UserDefaults.standard.set(on, forKey: key)
             PetWindowController.shared.showToast(on ? "已强制半角标点（全局）" : "标点恢复按应用自动", duration: 4)
@@ -112,25 +112,25 @@ final class InputFlowInputController: IMKInputController {
     }
 
     private func refreshPetModeLabel() {
-        let chinese = (InputFlowMode(rawValue: engine.mode) ?? .pinyin).isChinese
+        let chinese = (LianaMode(rawValue: engine.mode) ?? .pinyin).isChinese
         PetWindowController.shared.setModeLabel(chinese: chinese)
     }
 
     /// 繁体输出开关（跨会话记住）。
-    static let traditionalKey = "InputFlowTraditional"
+    static let traditionalKey = "LianaTraditional"
 
     required init?(coder: NSCoder) { nil }
 
     // MARK: - 模式菜单
 
     override func menu() -> NSMenu! {
-        let menu = NSMenu(title: "InputFlow")
+        let menu = NSMenu(title: "松萝")
         let header = NSMenuItem(title: "输入模式", action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
 
         let current = engine.mode
-        for mode in InputFlowMode.allCases {
+        for mode in LianaMode.allCases {
             let item = NSMenuItem(title: mode.title, action: #selector(selectMode(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = mode.rawValue
@@ -170,7 +170,7 @@ final class InputFlowInputController: IMKInputController {
         menu.addItem(feed)
         let punct = NSMenuItem(title: "强制半角标点", action: #selector(toggleHalfPunctuation(_:)), keyEquivalent: "")
         punct.target = self
-        punct.state = UserDefaults.standard.bool(forKey: "InputFlowForceHalfPunctuation") ? .on : .off
+        punct.state = UserDefaults.standard.bool(forKey: "LianaForceHalfPunctuation") ? .on : .off
         menu.addItem(punct)
         let statsItem = NSMenuItem(title: "昨日输入总结", action: #selector(showYesterdayStats(_:)), keyEquivalent: "")
         statsItem.target = self
@@ -882,14 +882,14 @@ final class InputFlowInputController: IMKInputController {
     private var profile: AppProfile {
         let bundleId = currentClient?.bundleIdentifier() ?? NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         var p = AppProfile.make(bundleId: bundleId)
-        if UserDefaults.standard.bool(forKey: "InputFlowForceHalfPunctuation") {
+        if UserDefaults.standard.bool(forKey: "LianaForceHalfPunctuation") {
             p.asciiPunctuation = true
         }
         return p
     }
 
     @objc private func toggleHalfPunctuation(_ sender: NSMenuItem) {
-        let key = "InputFlowForceHalfPunctuation"
+        let key = "LianaForceHalfPunctuation"
         let on = !UserDefaults.standard.bool(forKey: key)
         UserDefaults.standard.set(on, forKey: key)
         sender.state = on ? .on : .off
@@ -902,7 +902,7 @@ final class InputFlowInputController: IMKInputController {
     @objc private func selectMode(_ sender: NSMenuItem) {
         guard
             let id = sender.representedObject as? String,
-            let mode = InputFlowMode(rawValue: id)
+            let mode = LianaMode(rawValue: id)
         else { return }
         modeBeforeEmoji = nil
         engine.setMode(id)
@@ -915,19 +915,19 @@ final class InputFlowInputController: IMKInputController {
     }
 
     @objc private func openDictionaryFolder(_ sender: Any) {
-        let path = NSHomeDirectory() + "/Library/Application Support/InputFlow"
+        let path = NSHomeDirectory() + "/Library/Application Support/Liana"
         try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
         NSWorkspace.shared.open(URL(fileURLWithPath: path))
     }
 
-    private func persist(mode: InputFlowMode) {
-        UserDefaults.standard.set(mode.rawValue, forKey: "InputFlowMode")
-        UserDefaults.standard.set(lastChineseMode.rawValue, forKey: "InputFlowLastChineseMode")
+    private func persist(mode: LianaMode) {
+        UserDefaults.standard.set(mode.rawValue, forKey: "LianaMode")
+        UserDefaults.standard.set(lastChineseMode.rawValue, forKey: "LianaLastChineseMode")
     }
 
     private func toggleLanguage() {
-        let current = InputFlowMode(rawValue: engine.mode) ?? .pinyin
-        let next: InputFlowMode
+        let current = LianaMode(rawValue: engine.mode) ?? .pinyin
+        let next: LianaMode
         if current.isChinese {
             lastChineseMode = current
             next = .en
@@ -953,9 +953,9 @@ final class InputFlowInputController: IMKInputController {
     }
 
     /// 把当前模式作为学习信号记录：手动切换是强信号，上屏是弱信号。
-    /// 表情等特殊模式不在 InputFlowMode 里，不计票。
+    /// 表情等特殊模式不在 LianaMode 里，不计票。
     private func recordModeSignal(strong: Bool) {
-        guard let mode = InputFlowMode(rawValue: engine.mode) else { return }
+        guard let mode = LianaMode(rawValue: engine.mode) else { return }
         AppModeMemory.shared.observe(appId: currentAppId, chinese: mode.isChinese, strong: strong)
     }
 
@@ -963,14 +963,14 @@ final class InputFlowInputController: IMKInputController {
     /// 样本足够（强票或明显优势）才动手；单次意外切换会被下一次切回抵消，不会纠缠。
     private func restoreModeForApp() {
         guard AppModeMemory.shared.isEnabled, modeBeforeEmoji == nil, !urlMode else { return }
-        guard let current = InputFlowMode(rawValue: engine.mode), current != .ja else { return }
+        guard let current = LianaMode(rawValue: engine.mode), current != .ja else { return }
         guard let preferChinese = AppModeMemory.shared.preferredChinese(appId: currentAppId) else { return }
         if preferChinese, !current.isChinese {
             engine.setMode(lastChineseMode.rawValue)
             persist(mode: lastChineseMode)
             showModeHint("已切回\(lastChineseMode.title)（记住的偏好）")
         } else if !preferChinese, current.isChinese {
-            engine.setMode(InputFlowMode.en.rawValue)
+            engine.setMode(LianaMode.en.rawValue)
             persist(mode: .en)
             showModeHint("已切到 English（记住的偏好）")
         }
@@ -1163,7 +1163,7 @@ final class InputFlowInputController: IMKInputController {
 
         // 中文模式下的标点映射（未组合时）：`,。？！；：、（）【】《》“”‘’…
         // 代码编辑器/终端保持半角（按应用画像自动判断，无需用户配置）。
-        let mode = InputFlowMode(rawValue: engine.mode) ?? .pinyin
+        let mode = LianaMode(rawValue: engine.mode) ?? .pinyin
         if !engine.hasComposition, mode.usesChinesePunctuation, !profile.asciiPunctuation,
            let punct = chinesePunctuation(chars) {
             client.insertText(punct, replacementRange: NSRange(location: NSNotFound, length: 0))
@@ -1286,8 +1286,8 @@ final class InputFlowInputController: IMKInputController {
         let hour = Calendar.current.component(.hour, from: Date())
         guard hour >= 18 else { return }
         let today = PetStats.dayKey()
-        guard UserDefaults.standard.string(forKey: "InputFlowDigestShown") != today else { return }
-        UserDefaults.standard.set(today, forKey: "InputFlowDigestShown")
+        guard UserDefaults.standard.string(forKey: "LianaDigestShown") != today else { return }
+        UserDefaults.standard.set(today, forKey: "LianaDigestShown")
         PetWindowController.shared.showStatsCard(yesterday: false)
     }
 

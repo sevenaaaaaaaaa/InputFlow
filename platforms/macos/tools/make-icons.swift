@@ -1,7 +1,7 @@
-// InputFlow 图标生成器：`swift tools/make-icons.swift`
+// 松萝图标生成器：`swift tools/make-icons.swift`
 //
-// 生成 assets/InputFlow.icns（输入光标 + 三条文字线）与
-// assets/InputFlowInstaller.icns（下载箭头变体）。
+// 生成 assets/Liana.icns（输入光标 + 三条文字线）与
+// assets/LianaInstaller.icns（下载箭头变体）。
 // 配色来自 docs/design-tokens.json 的 accent（oklch 62% 0.14 250）换算 sRGB。
 import AppKit
 
@@ -78,8 +78,8 @@ let assets = root.appendingPathComponent("assets", isDirectory: true)
 try? FileManager.default.createDirectory(at: assets, withIntermediateDirectories: true)
 
 let variants: [(name: String, installer: Bool)] = [
-    ("InputFlow", false),
-    ("InputFlowInstaller", true),
+    ("Liana", false),
+    ("LianaInstaller", true),
 ]
 let entries: [(String, Int)] = [
     ("icon_16x16", 16), ("icon_16x16@2x", 32),

@@ -36,7 +36,7 @@ cargo run --release -p xtask -- dict import-rime-multi \
     crates/dict/data/base.tsv:100
 
 # 3. 校验
-cargo run --release -p inputflow-pinyin --example dump -- /tmp/base-large.ifd
+cargo run --release -p liana-pinyin --example dump -- /tmp/base-large.ifd
 ```
 
 ## `base.tsv`（内置兜底词库）

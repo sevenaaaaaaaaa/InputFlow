@@ -42,39 +42,39 @@ struct SelectionEvalData: Codable {
 }
 
 /// 内核 C ABI 的 Swift 封装。会话只在本进程内存中，不做任何网络访问。
-final class InputFlowEngine {
+final class LianaEngine {
     private var handle: OpaquePointer?
 
-    /// 可选的外部词典：~/Library/Application Support/InputFlow/base.ifd
+    /// 可选的外部词典：~/Library/Application Support/Liana/base.ifd
     private static let externalDict: String? = {
-        let path = NSHomeDirectory() + "/Library/Application Support/InputFlow/base.ifd"
+        let path = NSHomeDirectory() + "/Library/Application Support/Liana/base.ifd"
         return FileManager.default.fileExists(atPath: path) ? path : nil
     }()
 
     init(mode: String = "pinyin") {
         if let dict = Self.externalDict {
-            handle = dict.withCString { path in mode.withCString { m in inputflow_new_with_dict(m, path) } }
+            handle = dict.withCString { path in mode.withCString { m in liana_new_with_dict(m, path) } }
         }
         if handle == nil {
-            handle = mode.withCString { inputflow_new($0) }
+            handle = mode.withCString { liana_new($0) }
         }
     }
 
     deinit {
         if let h = handle {
-            inputflow_free(h)
+            liana_free(h)
         }
     }
 
     private func takeString(_ ptr: UnsafeMutablePointer<CChar>?) -> String? {
         guard let ptr else { return nil }
-        defer { inputflow_free_string(ptr) }
+        defer { liana_free_string(ptr) }
         return String(cString: ptr)
     }
 
     var composition: Composition {
         guard let h = handle,
-              let json = takeString(inputflow_composition_json(h)),
+              let json = takeString(liana_composition_json(h)),
               let data = json.data(using: .utf8),
               let comp = try? JSONDecoder().decode(Composition.self, from: data)
         else { return .empty }
@@ -88,58 +88,58 @@ final class InputFlowEngine {
     @discardableResult
     func feed(_ ch: Character) -> Bool {
         guard let h = handle else { return false }
-        return String(ch).withCString { inputflow_feed(h, $0) == 1 }
+        return String(ch).withCString { liana_feed(h, $0) == 1 }
     }
 
     @discardableResult
     func backspace() -> Bool {
         guard let h = handle else { return false }
-        return inputflow_backspace(h) == 1
+        return liana_backspace(h) == 1
     }
 
     func clear() {
-        if let h = handle { inputflow_clear(h) }
+        if let h = handle { liana_clear(h) }
     }
 
     /// 候选是否以繁体呈现（学习与重排仍以简体为准）。
     var isTraditional: Bool {
         guard let h = handle else { return false }
-        return inputflow_traditional(h) == 1
+        return liana_traditional(h) == 1
     }
 
     func setTraditional(_ on: Bool) {
-        if let h = handle { _ = inputflow_set_traditional(h, on ? 1 : 0) }
+        if let h = handle { _ = liana_set_traditional(h, on ? 1 : 0) }
     }
 
     func setMode(_ id: String) {
-        if let h = handle { _ = id.withCString { inputflow_set_mode(h, $0) } }
+        if let h = handle { _ = id.withCString { liana_set_mode(h, $0) } }
     }
 
     func select(_ index: Int) -> String? {
         guard let h = handle else { return nil }
-        return takeString(inputflow_select(h, UInt32(index)))
+        return takeString(liana_select(h, UInt32(index)))
     }
 
     func commitRaw() -> String? {
         guard let h = handle else { return nil }
-        return takeString(inputflow_commit_raw(h))
+        return takeString(liana_commit_raw(h))
     }
 
     func exportUserModel() -> String {
-        guard let h = handle, let s = takeString(inputflow_user_export(h)) else { return "" }
+        guard let h = handle, let s = takeString(liana_user_export(h)) else { return "" }
         return s
     }
 
     @discardableResult
     func importUserModel(_ tsv: String) -> Int {
         guard let h = handle else { return -1 }
-        return Int(tsv.withCString { inputflow_user_import(h, $0) })
+        return Int(tsv.withCString { liana_user_import(h, $0) })
     }
 
     /// 外部上屏（语音识别结果）的学习：记词 + 二元组上下文，与打字共享一套学习。
     func recordCommit(_ text: String) {
         guard let h = handle, !text.isEmpty else { return }
-        _ = text.withCString { inputflow_record_commit(h, $0) }
+        _ = text.withCString { liana_record_commit(h, $0) }
     }
 
     // MARK: - 知你教学层（ADR-0008 E1）：选词/删除序列 → 共享账本，排序接 adjust
@@ -149,25 +149,25 @@ final class InputFlowEngine {
         guard let h = handle else { return }
         let now = UInt64(Date().timeIntervalSince1970)
         let cApp = app ?? ""
-        _ = cApp.withCString { inputflow_set_evolution_context(h, $0, hour, enabled ? 1 : 0, now) }
+        _ = cApp.withCString { liana_set_evolution_context(h, $0, hour, enabled ? 1 : 0, now) }
     }
 
     /// 选词上屏后确认一次：数字键选了第 2+ 候选时 altRank = true。
     func noteEvolutionSelection(altRank: Bool) {
         guard let h = handle else { return }
-        _ = inputflow_evolution_note_selection(h, altRank ? 1 : 0, UInt64(Date().timeIntervalSince1970))
+        _ = liana_evolution_note_selection(h, altRank ? 1 : 0, UInt64(Date().timeIntervalSince1970))
     }
 
     /// 无组合态的删除键：交给内核判定是否「选了又删」。
     func noteEvolutionDelete() {
         guard let h = handle else { return }
-        _ = inputflow_evolution_note_delete(h, UInt64(Date().timeIntervalSince1970))
+        _ = liana_evolution_note_delete(h, UInt64(Date().timeIntervalSince1970))
     }
 
     /// 取走最近一次选词的评估（note_selection 之后调用；取走即清）。
     func takeEvolutionEval() -> SelectionEvalData? {
         guard let h = handle,
-              let json = takeString(inputflow_evolution_eval_json(h)),
+              let json = takeString(liana_evolution_eval_json(h)),
               let data = json.data(using: .utf8),
               let eval = try? JSONDecoder().decode(SelectionEvalData.self, from: data)
         else { return nil }
@@ -175,18 +175,18 @@ final class InputFlowEngine {
     }
 
     func exportEvolution() -> String {
-        guard let h = handle, let s = takeString(inputflow_evolution_session_export(h)) else { return "" }
+        guard let h = handle, let s = takeString(liana_evolution_session_export(h)) else { return "" }
         return s
     }
 
     @discardableResult
     func importEvolution(_ tsv: String) -> Int {
         guard let h = handle else { return -1 }
-        return Int(tsv.withCString { inputflow_evolution_session_import(h, $0) })
+        return Int(tsv.withCString { liana_evolution_session_import(h, $0) })
     }
 
     func forgetEvolution() {
-        if let h = handle { inputflow_evolution_session_forget(h) }
+        if let h = handle { liana_evolution_session_forget(h) }
     }
 
     // MARK: - 知你喂食层（ADR-0008 E2）：术语提炼 + 营养库
@@ -194,7 +194,7 @@ final class InputFlowEngine {
     /// 术语提炼（纯函数，不经会话）：反复出现的 n-gram，次数降序。
     static func feedExtract(_ text: String) -> [FeedTerm] {
         guard !text.isEmpty,
-              let json = text.withCString({ takeStatic(inputflow_feed_extract_json($0)) }),
+              let json = text.withCString({ takeStatic(liana_feed_extract_json($0)) }),
               let data = json.data(using: .utf8),
               let terms = try? JSONDecoder().decode([FeedTerm].self, from: data)
         else { return [] }
@@ -207,14 +207,14 @@ final class InputFlowEngine {
         guard let h = handle else { return false }
         return term.withCString { t in
             source.withCString { s in
-                inputflow_nutrition_add(h, t, s, strength, UInt64(Date().timeIntervalSince1970)) == 1
+                liana_nutrition_add(h, t, s, strength, UInt64(Date().timeIntervalSince1970)) == 1
             }
         }
     }
 
     func nutritionList() -> [NutritionItem] {
         guard let h = handle,
-              let json = takeString(inputflow_nutrition_list_json(h)),
+              let json = takeString(liana_nutrition_list_json(h)),
               let data = json.data(using: .utf8),
               let items = try? JSONDecoder().decode([NutritionItem].self, from: data)
         else { return [] }
@@ -224,27 +224,27 @@ final class InputFlowEngine {
     @discardableResult
     func nutritionForget(_ term: String) -> Bool {
         guard let h = handle else { return false }
-        return term.withCString { inputflow_nutrition_forget(h, $0) == 1 }
+        return term.withCString { liana_nutrition_forget(h, $0) == 1 }
     }
 
     func nutritionForgetAll() {
-        if let h = handle { inputflow_nutrition_forget_all(h) }
+        if let h = handle { liana_nutrition_forget_all(h) }
     }
 
     func nutritionExport() -> String {
-        guard let h = handle, let s = takeString(inputflow_nutrition_export(h)) else { return "" }
+        guard let h = handle, let s = takeString(liana_nutrition_export(h)) else { return "" }
         return s
     }
 
     @discardableResult
     func nutritionImport(_ tsv: String) -> Int {
         guard let h = handle else { return -1 }
-        return Int(tsv.withCString { inputflow_nutrition_import(h, $0) })
+        return Int(tsv.withCString { liana_nutrition_import(h, $0) })
     }
 
     /// 导出备份包（明文 TSV + 版本头 + CRC32）；加密由 `BackupManager` 负责。
     func exportBackup() -> String {
-        guard let h = handle, let s = takeString(inputflow_backup_export(h)) else { return "" }
+        guard let h = handle, let s = takeString(liana_backup_export(h)) else { return "" }
         return s
     }
 
@@ -252,19 +252,19 @@ final class InputFlowEngine {
     @discardableResult
     func importBackup(_ text: String, merge: Bool) -> Int {
         guard let h = handle else { return -1 }
-        return Int(text.withCString { inputflow_backup_import(h, $0, merge ? 1 : 0) })
+        return Int(text.withCString { liana_backup_import(h, $0, merge ? 1 : 0) })
     }
 
     // MARK: - 本地 AI 增强（目录与推荐；下载由 AIModelStore 负责）
 
     private static func takeStatic(_ ptr: UnsafeMutablePointer<CChar>?) -> String? {
         guard let ptr else { return nil }
-        defer { inputflow_free_string(ptr) }
+        defer { liana_free_string(ptr) }
         return String(cString: ptr)
     }
 
     static func aiCatalog() -> [AIModelInfo] {
-        guard let json = takeStatic(inputflow_ai_catalog_json()),
+        guard let json = takeStatic(liana_ai_catalog_json()),
               let data = json.data(using: .utf8),
               let models = try? JSONDecoder().decode([AIModelInfo].self, from: data)
         else { return [] }
@@ -272,7 +272,7 @@ final class InputFlowEngine {
     }
 
     static func aiRecommend(totalRamMb: Int) -> AIRecommendationSet {
-        guard let json = takeStatic(inputflow_ai_recommend_json(UInt64(totalRamMb))),
+        guard let json = takeStatic(liana_ai_recommend_json(UInt64(totalRamMb))),
               let data = json.data(using: .utf8),
               let set = try? JSONDecoder().decode(AIRecommendationSet.self, from: data)
         else {
@@ -284,7 +284,7 @@ final class InputFlowEngine {
 
 /// 知你学习开关（默认开）。关闭即停止记账与重排；账本清空走「忘记」。
 enum EvolutionLearning {
-    static let enabledKey = "InputFlowEvolutionEnabled"
+    static let enabledKey = "LianaEvolutionEnabled"
 
     static var isEnabled: Bool {
         UserDefaults.standard.object(forKey: enabledKey) == nil
@@ -297,7 +297,7 @@ enum EvolutionLearning {
     }
 }
 
-enum InputFlowMode: String, CaseIterable {
+enum LianaMode: String, CaseIterable {
     case pinyin
     case flypy
     case mspy

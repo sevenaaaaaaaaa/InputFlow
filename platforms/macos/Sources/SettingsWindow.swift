@@ -18,7 +18,7 @@ final class AISettingsWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "InputFlow · AI 增强"
+        window.title = "松萝 · AI 增强"
         window.isReleasedWhenClosed = false
         window.center()
         self.init(window: window)

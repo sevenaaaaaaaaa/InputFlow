@@ -42,11 +42,11 @@ enum PetCatalogStore {
         var entries: [PetCatalogEntry]
     }
 
-    /// 用户目录：`~/Library/Application Support/InputFlow/pet-catalog.json`
+    /// 用户目录：`~/Library/Application Support/Liana/pet-catalog.json`
     /// 可自由添加来源（名称 / URL / 许可），与内置目录按 id 合并。
     static var userCatalogURL: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("InputFlow", isDirectory: true)
+            .appendingPathComponent("Liana", isDirectory: true)
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         return base.appendingPathComponent("pet-catalog.json")
     }
@@ -120,7 +120,7 @@ enum PetModelInstaller {
         completion: @escaping (Result<Void, Error>) -> Void
     ) {
         guard let url = URL(string: entry.url) else {
-            completion(.failure(NSError(domain: "InputFlow.Pet", code: 1, userInfo: [NSLocalizedDescriptionKey: "模型地址无效"])))
+            completion(.failure(NSError(domain: "Liana.Pet", code: 1, userInfo: [NSLocalizedDescriptionKey: "模型地址无效"])))
             return
         }
         let destinationDir = PluginStore.pluginsDir.appendingPathComponent(entry.id, isDirectory: true)
@@ -130,14 +130,14 @@ enum PetModelInstaller {
                 return
             }
             guard let temp else {
-                completion(.failure(NSError(domain: "InputFlow.Pet", code: 2, userInfo: [NSLocalizedDescriptionKey: "下载失败"])))
+                completion(.failure(NSError(domain: "Liana.Pet", code: 2, userInfo: [NSLocalizedDescriptionKey: "下载失败"])))
                 return
             }
             do {
                 let digest = try sha256(of: temp)
                 if let expected = entry.sha256, !expected.isEmpty, digest != expected.lowercased() {
                     try? FileManager.default.removeItem(at: temp)
-                    throw NSError(domain: "InputFlow.Pet", code: 3, userInfo: [NSLocalizedDescriptionKey: "sha256 校验失败，已丢弃"])
+                    throw NSError(domain: "Liana.Pet", code: 3, userInfo: [NSLocalizedDescriptionKey: "sha256 校验失败，已丢弃"])
                 }
                 let fm = FileManager.default
                 try fm.createDirectory(at: destinationDir, withIntermediateDirectories: true)

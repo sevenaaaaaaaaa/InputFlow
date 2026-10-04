@@ -1,7 +1,7 @@
 //! 回归：`lue`/`nue` 是 `lve`/`nve` 的用户拼法，词库键形为 v，切分与查词必须打通。
 
-use inputflow_dict::Dictionary;
-use inputflow_pinyin::{Layout, PinyinDecoder};
+use liana_dict::Dictionary;
+use liana_pinyin::{Layout, PinyinDecoder};
 use std::sync::Arc;
 
 fn decoder() -> PinyinDecoder {

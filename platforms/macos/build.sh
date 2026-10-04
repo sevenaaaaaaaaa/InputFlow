@@ -8,7 +8,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
-APP="InputFlow"
+APP="Liana"
 BUILD="$HERE/build"
 BUNDLE="$BUILD/$APP.app"
 CONTENTS="$BUNDLE/Contents"
@@ -32,30 +32,30 @@ CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-$(security find-identity -v -p codesigni
 if [[ -f "$HERE/.bundle-id" ]]; then
     BUNDLE_ID="${BUNDLE_ID:-$(tr -d '[:space:]' < "$HERE/.bundle-id")}"
 else
-    BUNDLE_ID="${BUNDLE_ID:-dev.inputflow.ime}"
+    BUNDLE_ID="${BUNDLE_ID:-dev.liana.ime}"
 fi
 
 echo "==> 1/5 构建 Rust 内核静态库"
 mkdir -p "$ROOT/target/release"
 if [[ "$UNIVERSAL" == "1" ]]; then
     # 零 crates 依赖，两个 target 都能干净交叉编译
-    cargo build --release --manifest-path "$ROOT/Cargo.toml" -p inputflow-ffi \
+    cargo build --release --manifest-path "$ROOT/Cargo.toml" -p liana-ffi \
         --target aarch64-apple-darwin
-    cargo build --release --manifest-path "$ROOT/Cargo.toml" -p inputflow-ffi \
+    cargo build --release --manifest-path "$ROOT/Cargo.toml" -p liana-ffi \
         --target x86_64-apple-darwin
     lipo -create \
-        "$ROOT/target/aarch64-apple-darwin/release/libinputflow_ffi.a" \
-        "$ROOT/target/x86_64-apple-darwin/release/libinputflow_ffi.a" \
-        -output "$ROOT/target/release/libinputflow_ffi.a"
+        "$ROOT/target/aarch64-apple-darwin/release/libliana_ffi.a" \
+        "$ROOT/target/x86_64-apple-darwin/release/libliana_ffi.a" \
+        -output "$ROOT/target/release/libliana_ffi.a"
 else
-    cargo build --release --manifest-path "$ROOT/Cargo.toml" -p inputflow-ffi
+    cargo build --release --manifest-path "$ROOT/Cargo.toml" -p liana-ffi
 fi
 
 echo "==> 2/5 编译 Swift 外壳（目标 macOS ${DEPLOY_TARGET}）"
 rm -rf "$BUNDLE"
 mkdir -p "$BIN_DIR" "$CONTENTS/Resources"
 # 显式链接静态库（避免链接到同目录的 .dylib，保证 app 自包含可分发）
-RUST_LIB="$ROOT/target/release/libinputflow_ffi.a"
+RUST_LIB="$ROOT/target/release/libliana_ffi.a"
 [[ -f "$RUST_LIB" ]] || { echo "缺少 $RUST_LIB" >&2; exit 1; }
 
 # swiftc 驱动不支持 -arch：逐架构编译出可执行文件，最后 lipo 合成 Universal
@@ -81,7 +81,7 @@ fi
 for arch in "${SWIFT_ARCHS[@]}"; do
     swiftc -O -wmo \
         -target "${arch}-apple-macos${DEPLOY_TARGET}" \
-        -import-objc-header "$ROOT/crates/ffi/include/inputflow.h" \
+        -import-objc-header "$ROOT/crates/ffi/include/liana.h" \
         "$RUST_LIB" \
         -framework AppKit -framework InputMethodKit -framework Carbon -framework WebKit \
         -framework Speech -framework AVFoundation -framework Vision \
@@ -97,7 +97,7 @@ fi
 
 cp "$HERE/Info.plist" "$CONTENTS/Info.plist"
 printf 'APPL????' > "$CONTENTS/PkgInfo"
-cp "$HERE/assets/InputFlow.icns" "$CONTENTS/Resources/InputFlow.icns"
+cp "$HERE/assets/Liana.icns" "$CONTENTS/Resources/Liana.icns"
 
 # 形象目录（内置可下载条目）
 cp "$HERE/assets/PetCatalog.json" "$CONTENTS/Resources/PetCatalog.json"
@@ -116,15 +116,15 @@ for d in "$ROOT"/examples/plugins/*/; do
 done
 
 # 覆盖 bundle id（默认与 Info.plist 一致；本机开发可用 BUNDLE_ID=... 规避系统负面缓存）
-if [[ "$BUNDLE_ID" != "dev.inputflow.ime" ]]; then
+if [[ "$BUNDLE_ID" != "dev.liana.ime" ]]; then
     PB=/usr/libexec/PlistBuddy
     PL="$CONTENTS/Info.plist"
     "$PB" -c "Set :CFBundleIdentifier $BUNDLE_ID" "$PL"
     "$PB" -c "Set :TISInputSourceID $BUNDLE_ID" "$PL"
-    CONNECTION="InputFlow_$(printf '%s' "$BUNDLE_ID" | tr '.' '_')"
+    CONNECTION="Liana_$(printf '%s' "$BUNDLE_ID" | tr '.' '_')"
     "$PB" -c "Set :InputMethodConnectionName $CONNECTION" "$PL"
-    "$PB" -c "Copy :ComponentInputModeDict:tsInputModeListKey:dev.inputflow.ime.zh :ComponentInputModeDict:tsInputModeListKey:${BUNDLE_ID}.zh" "$PL"
-    "$PB" -c "Delete :ComponentInputModeDict:tsInputModeListKey:dev.inputflow.ime.zh" "$PL"
+    "$PB" -c "Copy :ComponentInputModeDict:tsInputModeListKey:dev.liana.ime.zh :ComponentInputModeDict:tsInputModeListKey:${BUNDLE_ID}.zh" "$PL"
+    "$PB" -c "Delete :ComponentInputModeDict:tsInputModeListKey:dev.liana.ime.zh" "$PL"
     "$PB" -c "Set :ComponentInputModeDict:tsInputModeListKey:${BUNDLE_ID}.zh:TISInputSourceID ${BUNDLE_ID}.zh" "$PL"
     "$PB" -c "Set :ComponentInputModeDict:tsVisibleInputModeOrderedArrayKey:0 ${BUNDLE_ID}.zh" "$PL"
     echo "    bundle id 覆盖为: $BUNDLE_ID"
@@ -141,7 +141,7 @@ else
 fi
 
 echo "==> 4/5 构建图形安装器"
-INSTALLER="$BUILD/InputFlow 安装器.app"
+INSTALLER="$BUILD/松萝安装器.app"
 INSTALLER_CONTENTS="$INSTALLER/Contents"
 INSTALLER_BIN="$INSTALLER_CONTENTS/MacOS"
 INSTALLER_RES="$INSTALLER_CONTENTS/Resources"
@@ -150,14 +150,14 @@ mkdir -p "$INSTALLER_BIN" "$INSTALLER_RES"
 swiftc -O -wmo -parse-as-library \
     -target "$(uname -m)-apple-macos${DEPLOY_TARGET}" \
     -framework AppKit -framework Carbon \
-    -o "$INSTALLER_BIN/InputFlowInstaller" \
+    -o "$INSTALLER_BIN/LianaInstaller" \
     "$HERE/installer/Installer.swift"
 cp "$HERE/installer/Info.plist" "$INSTALLER_CONTENTS/Info.plist"
 printf 'APPL????' > "$INSTALLER_CONTENTS/PkgInfo"
-cp "$HERE/assets/InputFlowInstaller.icns" "$INSTALLER_RES/InputFlowInstaller.icns"
-cp "$HERE/assets/InputFlow.icns" "$INSTALLER_RES/InputFlow.icns"
+cp "$HERE/assets/LianaInstaller.icns" "$INSTALLER_RES/LianaInstaller.icns"
+cp "$HERE/assets/Liana.icns" "$INSTALLER_RES/Liana.icns"
 # 把输入法本体与词库作为安装包内嵌资源
-cp -R "$BUNDLE" "$INSTALLER_RES/InputFlow.app"
+cp -R "$BUNDLE" "$INSTALLER_RES/Liana.app"
 cp "$HERE/build/base.ifd" "$INSTALLER_RES/base.ifd"
 
 echo "==> 5/5 签名"

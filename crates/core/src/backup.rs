@@ -42,7 +42,7 @@ pub enum BackupError {
 impl std::fmt::Display for BackupError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            BackupError::NotBackup => write!(f, "不是 InputFlow 备份包"),
+            BackupError::NotBackup => write!(f, "不是 松萝备份包"),
             BackupError::Checksum => write!(f, "备份包校验失败（文件可能已损坏）"),
         }
     }

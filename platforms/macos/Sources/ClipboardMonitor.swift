@@ -6,7 +6,7 @@ import AppKit
 /// 跳过连续重复；不记录来源 App。
 final class ClipboardMonitor {
     static let shared = ClipboardMonitor()
-    static let enabledKey = "InputFlowClipboardEnabled"
+    static let enabledKey = "LianaClipboardEnabled"
 
     private var timer: Timer?
     private var lastChangeCount = NSPasteboard.general.changeCount
@@ -37,7 +37,7 @@ final class ClipboardMonitor {
     /// 启动时按用户设置恢复。
     func startIfEnabled() {
         guard isEnabled else {
-            NSLog("InputFlow: 剪切板记录未开启（默认关闭）")
+            NSLog("Liana: 剪切板记录未开启（默认关闭）")
             return
         }
         lastChangeCount = NSPasteboard.general.changeCount
@@ -84,5 +84,5 @@ final class ClipboardMonitor {
 }
 
 extension Notification.Name {
-    static let inputFlowClipboardChanged = Notification.Name("InputFlowClipboardChanged")
+    static let inputFlowClipboardChanged = Notification.Name("LianaClipboardChanged")
 }

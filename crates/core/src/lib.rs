@@ -1,4 +1,4 @@
-//! InputFlow 内核类型契约。零依赖，可被引擎、词典、平台前端独立复用。
+//! 松萝内核类型契约。零依赖，可被引擎、词典、平台前端独立复用。
 
 pub mod backup;
 pub mod syllables;

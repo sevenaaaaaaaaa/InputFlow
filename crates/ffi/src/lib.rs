@@ -1,8 +1,8 @@
 //! C ABI。所有函数内部捕获 panic，绝不跨 FFI 边界展开。
 //!
-//! 安全契约（与 `include/inputflow.h` 一致）：传入的指针必须指向有效对象；
-//! `inputflow_new*` 的字符串参数必须是 NUL 结尾的 UTF-8；返回的 `char*` 必须用
-//! `inputflow_free_string` 释放。所有 `unsafe` 导出函数都在此契约下工作。
+//! 安全契约（与 `include/liana.h` 一致）：传入的指针必须指向有效对象；
+//! `liana_new*` 的字符串参数必须是 NUL 结尾的 UTF-8；返回的 `char*` 必须用
+//! `liana_free_string` 释放。所有 `unsafe` 导出函数都在此契约下工作。
 #![allow(clippy::missing_safety_doc)]
 
 use std::ffi::{CStr, CString, c_char};
@@ -10,24 +10,24 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use inputflow_core::Mode;
-use inputflow_dict::Dictionary;
-use inputflow_engine::Session;
-use inputflow_engine::app_mode::AppModeMemory;
-use inputflow_engine::evolution::{self, EvolutionMemory};
-use inputflow_plugin::Pack as PluginPack;
+use liana_core::Mode;
+use liana_dict::Dictionary;
+use liana_engine::Session;
+use liana_engine::app_mode::AppModeMemory;
+use liana_engine::evolution::{self, EvolutionMemory};
+use liana_plugin::Pack as PluginPack;
 
-pub struct InputFlowSession {
+pub struct LianaSession {
     inner: Session,
 }
 
 /// 每应用中英模式记忆（独立于输入会话：跨应用共享一份）。
-pub struct InputFlowAppMode {
+pub struct LianaAppMode {
     inner: AppModeMemory,
 }
 
 /// 知你自进化账本（ADR-0008 决策层）。
-pub struct InputFlowEvolution {
+pub struct LianaEvolution {
     inner: EvolutionMemory,
 }
 
@@ -86,7 +86,7 @@ fn json_escape(s: &str) -> String {
     out
 }
 
-impl InputFlowSession {
+impl LianaSession {
     fn new(dict: Arc<Dictionary>, mode: Mode) -> Self {
         let mut inner = Session::with_mode(dict, mode);
         // 知你账本是进程级单例：IMK 下每个应用各有一个会话，
@@ -96,7 +96,7 @@ impl InputFlowSession {
     }
 }
 
-/// 进程内共享的知你账本。会话构造时注入；`inputflow_evolution_session_*`
+/// 进程内共享的知你账本。会话构造时注入；`liana_evolution_session_*`
 /// 系列经由任意会话读写同一份。E0 的独立句柄 API 不受影响（各自私有）。
 fn shared_evolution() -> Arc<Mutex<EvolutionMemory>> {
     static LEDGER: OnceLock<Arc<Mutex<EvolutionMemory>>> = OnceLock::new();
@@ -135,10 +135,10 @@ fn guard_int<F: FnOnce() -> i32>(f: F) -> i32 {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_new(mode: *const c_char) -> *mut InputFlowSession {
+pub unsafe extern "C" fn liana_new(mode: *const c_char) -> *mut LianaSession {
     let mode = unsafe { cstr(mode) };
     catch_unwind(AssertUnwindSafe(|| {
-        Box::into_raw(Box::new(InputFlowSession::new(
+        Box::into_raw(Box::new(LianaSession::new(
             Arc::new(Dictionary::embedded()),
             mode_of(mode),
         )))
@@ -147,10 +147,10 @@ pub unsafe extern "C" fn inputflow_new(mode: *const c_char) -> *mut InputFlowSes
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_new_with_dict(
+pub unsafe extern "C" fn liana_new_with_dict(
     mode: *const c_char,
     dict_path: *const c_char,
-) -> *mut InputFlowSession {
+) -> *mut LianaSession {
     let mode = unsafe { cstr(mode) };
     let path = unsafe { cstr(dict_path) };
     catch_unwind(AssertUnwindSafe(|| {
@@ -159,7 +159,7 @@ pub unsafe extern "C" fn inputflow_new_with_dict(
             .and_then(|p| std::fs::read(p).ok())
             .and_then(|b| Dictionary::from_bytes(&b).ok())
             .unwrap_or_else(Dictionary::embedded);
-        Box::into_raw(Box::new(InputFlowSession::new(
+        Box::into_raw(Box::new(LianaSession::new(
             Arc::new(dict),
             mode_of(mode),
         )))
@@ -168,7 +168,7 @@ pub unsafe extern "C" fn inputflow_new_with_dict(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_free(session: *mut InputFlowSession) {
+pub unsafe extern "C" fn liana_free(session: *mut LianaSession) {
     if session.is_null() {
         return;
     }
@@ -178,8 +178,8 @@ pub unsafe extern "C" fn inputflow_free(session: *mut InputFlowSession) {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_feed(
-    session: *mut InputFlowSession,
+pub unsafe extern "C" fn liana_feed(
+    session: *mut LianaSession,
     utf8_char: *const c_char,
 ) -> i32 {
     if session.is_null() {
@@ -196,7 +196,7 @@ pub unsafe extern "C" fn inputflow_feed(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_backspace(session: *mut InputFlowSession) -> i32 {
+pub unsafe extern "C" fn liana_backspace(session: *mut LianaSession) -> i32 {
     if session.is_null() {
         return 0;
     }
@@ -207,7 +207,7 @@ pub unsafe extern "C" fn inputflow_backspace(session: *mut InputFlowSession) -> 
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_clear(session: *mut InputFlowSession) {
+pub unsafe extern "C" fn liana_clear(session: *mut LianaSession) {
     if session.is_null() {
         return;
     }
@@ -218,8 +218,8 @@ pub unsafe extern "C" fn inputflow_clear(session: *mut InputFlowSession) {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_set_mode(
-    session: *mut InputFlowSession,
+pub unsafe extern "C" fn liana_set_mode(
+    session: *mut LianaSession,
     mode: *const c_char,
 ) -> i32 {
     if session.is_null() {
@@ -237,7 +237,7 @@ pub unsafe extern "C" fn inputflow_set_mode(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_mode(session: *mut InputFlowSession) -> *mut c_char {
+pub unsafe extern "C" fn liana_mode(session: *mut LianaSession) -> *mut c_char {
     if session.is_null() {
         return std::ptr::null_mut();
     }
@@ -249,7 +249,7 @@ pub unsafe extern "C" fn inputflow_mode(session: *mut InputFlowSession) -> *mut 
 
 /// 简繁显示开关：非 0 表示候选转成繁体。返回 1 表示设置成功。
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_set_traditional(session: *mut InputFlowSession, on: i32) -> i32 {
+pub unsafe extern "C" fn liana_set_traditional(session: *mut LianaSession, on: i32) -> i32 {
     if session.is_null() {
         return 0;
     }
@@ -262,7 +262,7 @@ pub unsafe extern "C" fn inputflow_set_traditional(session: *mut InputFlowSessio
 
 /// 当前是否繁体显示。
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_traditional(session: *mut InputFlowSession) -> i32 {
+pub unsafe extern "C" fn liana_traditional(session: *mut LianaSession) -> i32 {
     if session.is_null() {
         return 0;
     }
@@ -273,7 +273,7 @@ pub unsafe extern "C" fn inputflow_traditional(session: *mut InputFlowSession) -
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_composition_json(session: *mut InputFlowSession) -> *mut c_char {
+pub unsafe extern "C" fn liana_composition_json(session: *mut LianaSession) -> *mut c_char {
     if session.is_null() {
         return std::ptr::null_mut();
     }
@@ -284,8 +284,8 @@ pub unsafe extern "C" fn inputflow_composition_json(session: *mut InputFlowSessi
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_select(
-    session: *mut InputFlowSession,
+pub unsafe extern "C" fn liana_select(
+    session: *mut LianaSession,
     index: u32,
 ) -> *mut c_char {
     if session.is_null() {
@@ -301,7 +301,7 @@ pub unsafe extern "C" fn inputflow_select(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_commit_raw(session: *mut InputFlowSession) -> *mut c_char {
+pub unsafe extern "C" fn liana_commit_raw(session: *mut LianaSession) -> *mut c_char {
     if session.is_null() {
         return std::ptr::null_mut();
     }
@@ -315,7 +315,7 @@ pub unsafe extern "C" fn inputflow_commit_raw(session: *mut InputFlowSession) ->
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_user_export(session: *mut InputFlowSession) -> *mut c_char {
+pub unsafe extern "C" fn liana_user_export(session: *mut LianaSession) -> *mut c_char {
     if session.is_null() {
         return std::ptr::null_mut();
     }
@@ -326,8 +326,8 @@ pub unsafe extern "C" fn inputflow_user_export(session: *mut InputFlowSession) -
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_user_import(
-    session: *mut InputFlowSession,
+pub unsafe extern "C" fn liana_user_import(
+    session: *mut LianaSession,
     tsv: *const c_char,
 ) -> i32 {
     if session.is_null() {
@@ -344,8 +344,8 @@ pub unsafe extern "C" fn inputflow_user_import(
 /// 外部文本上屏（语音等）的学习入口：记词并更新二元组上下文。
 /// 成功返回 0，参数无效返回 -1。
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_record_commit(
-    session: *mut InputFlowSession,
+pub unsafe extern "C" fn liana_record_commit(
+    session: *mut LianaSession,
     text: *const c_char,
 ) -> i32 {
     if session.is_null() {
@@ -362,7 +362,7 @@ pub unsafe extern "C" fn inputflow_record_commit(
 
 /// 导出用户数据备份包（明文 TSV + 版本头 + CRC32）。前端负责加密落盘。
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_backup_export(session: *mut InputFlowSession) -> *mut c_char {
+pub unsafe extern "C" fn liana_backup_export(session: *mut LianaSession) -> *mut c_char {
     if session.is_null() {
         return std::ptr::null_mut();
     }
@@ -374,8 +374,8 @@ pub unsafe extern "C" fn inputflow_backup_export(session: *mut InputFlowSession)
 
 /// 导入备份包。`merge` 非 0 时同名条目取较大次数；返回条目数，失败返回 -1。
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_backup_import(
-    session: *mut InputFlowSession,
+pub unsafe extern "C" fn liana_backup_import(
+    session: *mut LianaSession,
     text: *const c_char,
     merge: i32,
 ) -> i32 {
@@ -394,7 +394,7 @@ pub unsafe extern "C" fn inputflow_backup_import(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_free_string(s: *mut c_char) {
+pub unsafe extern "C" fn liana_free_string(s: *mut c_char) {
     if s.is_null() {
         return;
     }
@@ -404,7 +404,7 @@ pub unsafe extern "C" fn inputflow_free_string(s: *mut c_char) {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn inputflow_version() -> *const c_char {
+pub extern "C" fn liana_version() -> *const c_char {
     static VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "\0");
     VERSION.as_ptr().cast()
 }
@@ -419,7 +419,7 @@ fn composition_json(session: &Session) -> String {
         && !comp
             .candidates
             .iter()
-            .any(|c| c.consumed == raw_len && c.text.chars().any(inputflow_engine::is_cjk_char));
+            .any(|c| c.consumed == raw_len && c.text.chars().any(liana_engine::is_cjk_char));
     let mut out = String::with_capacity(96 + comp.candidates.len() * 48);
     out.push_str("{\"mode\":\"");
     out.push_str(session.mode().id());
@@ -454,21 +454,21 @@ fn composition_json(session: &Session) -> String {
 
 /// 本地 AI 增强：模型目录 JSON（静态信息，前端用于渲染选择列表）。
 #[unsafe(no_mangle)]
-pub extern "C" fn inputflow_ai_catalog_json() -> *mut c_char {
-    guard_ptr(|| into_c(inputflow_ai::catalog_json()))
+pub extern "C" fn liana_ai_catalog_json() -> *mut c_char {
+    guard_ptr(|| into_c(liana_ai::catalog_json()))
 }
 
 /// 本地 AI 增强：按系统总内存给出每个用途的推荐模型 JSON。
 #[unsafe(no_mangle)]
-pub extern "C" fn inputflow_ai_recommend_json(total_ram_mb: u64) -> *mut c_char {
-    guard_ptr(|| into_c(inputflow_ai::recommend_json(total_ram_mb)))
+pub extern "C" fn liana_ai_recommend_json(total_ram_mb: u64) -> *mut c_char {
+    guard_ptr(|| into_c(liana_ai::recommend_json(total_ram_mb)))
 }
 
 /// 扫描插件目录（皮肤/桌宠/词典数据包），返回目录 JSON：
 /// `{"packs":[{"id","name","version","kind","authors","description","license","permissions","dir"}],
 ///   "errors":[{"dir","error"}]}`。坏包跳过不中断。调用方释放。
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_plugin_scan_json(dir: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn liana_plugin_scan_json(dir: *const c_char) -> *mut c_char {
     let dir = unsafe { cstr(dir) };
     guard_ptr(|| {
         let Some(dir) = dir else {
@@ -485,7 +485,7 @@ pub unsafe extern "C" fn inputflow_plugin_scan_json(dir: *const c_char) -> *mut 
 /// 后四项为 E3 评估层：首选命中率 / 反事实首选命中率 / 重选率（百分数，
 /// 无选词时为 0；反事实 = 剔除学习修正的基线排序，两者之差即学习收益）。
 #[unsafe(no_mangle)]
-pub extern "C" fn inputflow_stats_digest_json(
+pub extern "C" fn liana_stats_digest_json(
     chars: u64,
     keys: u64,
     deletes: u64,
@@ -500,7 +500,7 @@ pub extern "C" fn inputflow_stats_digest_json(
     reselects: u64,
 ) -> *mut c_char {
     guard_ptr(|| {
-        let digest = inputflow_engine::stats::Digest::compute(&inputflow_engine::stats::DayStats {
+        let digest = liana_engine::stats::Digest::compute(&liana_engine::stats::DayStats {
             chars,
             keys,
             deletes,
@@ -521,9 +521,9 @@ pub extern "C" fn inputflow_stats_digest_json(
 // ──────────────────── 知你自进化（ADR-0008 决策层） ────────────────────
 
 #[unsafe(no_mangle)]
-pub extern "C" fn inputflow_evolution_new() -> *mut InputFlowEvolution {
+pub extern "C" fn liana_evolution_new() -> *mut LianaEvolution {
     catch_unwind(AssertUnwindSafe(|| {
-        Box::into_raw(Box::new(InputFlowEvolution {
+        Box::into_raw(Box::new(LianaEvolution {
             inner: EvolutionMemory::new(),
         }))
     }))
@@ -531,7 +531,7 @@ pub extern "C" fn inputflow_evolution_new() -> *mut InputFlowEvolution {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_evolution_free(memory: *mut InputFlowEvolution) {
+pub unsafe extern "C" fn liana_evolution_free(memory: *mut LianaEvolution) {
     if memory.is_null() {
         return;
     }
@@ -543,8 +543,8 @@ pub unsafe extern "C" fn inputflow_evolution_free(memory: *mut InputFlowEvolutio
 /// 记录一次奖励：reward_x100 ∈ {100 选词, 150 重选, -200 删除, 60 次选}。
 /// lex_window 为最近上屏文本；app 可为空串；hour 0-23；now Unix 秒。
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_evolution_reward(
-    memory: *mut InputFlowEvolution,
+pub unsafe extern "C" fn liana_evolution_reward(
+    memory: *mut LianaEvolution,
     word: *const c_char,
     lex_window: *const c_char,
     app: *const c_char,
@@ -571,8 +571,8 @@ pub unsafe extern "C" fn inputflow_evolution_reward(
 /// 候选重排：输入 `[{"text":"现","score":10.5},...]`，
 /// 输出按修正后分数降序的 `[{"text":..,"score":..,"delta":..},...]`。
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_evolution_adjust_json(
-    memory: *mut InputFlowEvolution,
+pub unsafe extern "C" fn liana_evolution_adjust_json(
+    memory: *mut LianaEvolution,
     candidates_json: *const c_char,
     lex_window: *const c_char,
     app: *const c_char,
@@ -610,8 +610,8 @@ pub unsafe extern "C" fn inputflow_evolution_adjust_json(
 
 /// 决策轨道：这个词在该上下文里的贡献特征 [{"feature":..,"affinity":..},...]。
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_evolution_explain_json(
-    memory: *mut InputFlowEvolution,
+pub unsafe extern "C" fn liana_evolution_explain_json(
+    memory: *mut LianaEvolution,
     word: *const c_char,
     lex_window: *const c_char,
     app: *const c_char,
@@ -648,7 +648,7 @@ pub unsafe extern "C" fn inputflow_evolution_explain_json(
 
 /// 学习账本 TSV 导出/导入（词\t特征\t亲和度\t观察数\t最后触摸）。
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_evolution_export(memory: *mut InputFlowEvolution) -> *mut c_char {
+pub unsafe extern "C" fn liana_evolution_export(memory: *mut LianaEvolution) -> *mut c_char {
     if memory.is_null() {
         return std::ptr::null_mut();
     }
@@ -659,8 +659,8 @@ pub unsafe extern "C" fn inputflow_evolution_export(memory: *mut InputFlowEvolut
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_evolution_import(
-    memory: *mut InputFlowEvolution,
+pub unsafe extern "C" fn liana_evolution_import(
+    memory: *mut LianaEvolution,
     tsv: *const c_char,
 ) -> i32 {
     if memory.is_null() {
@@ -675,7 +675,7 @@ pub unsafe extern "C" fn inputflow_evolution_import(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_evolution_forget_all(memory: *mut InputFlowEvolution) {
+pub unsafe extern "C" fn liana_evolution_forget_all(memory: *mut LianaEvolution) {
     if memory.is_null() {
         return;
     }
@@ -689,8 +689,8 @@ pub unsafe extern "C" fn inputflow_evolution_forget_all(memory: *mut InputFlowEv
 /// 同步决策上下文与开关：`app` 可为空串；`hour` 0-23；`enabled` 非 0 开学习；
 /// `now`（Unix 秒）同时刷新重排衰减时钟。返回 1 表示已设置。
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_set_evolution_context(
-    session: *mut InputFlowSession,
+pub unsafe extern "C" fn liana_set_evolution_context(
+    session: *mut LianaSession,
     app: *const c_char,
     hour: u32,
     enabled: i32,
@@ -711,10 +711,10 @@ pub unsafe extern "C" fn inputflow_set_evolution_context(
 
 /// 前端确认一次选词：`alt_rank` 非 0 表示数字键选了第 2+ 候选（+0.6），
 /// 否则正常选词（+1.0）；删除后的窗口内重选自动升级为强正（+1.5）。
-/// 必须在 `inputflow_select` 成功后调用一次；返回 1 表示已记账。
+/// 必须在 `liana_select` 成功后调用一次；返回 1 表示已记账。
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_evolution_note_selection(
-    session: *mut InputFlowSession,
+pub unsafe extern "C" fn liana_evolution_note_selection(
+    session: *mut LianaSession,
     alt_rank: i32,
     now: u64,
 ) -> i32 {
@@ -731,7 +731,7 @@ pub unsafe extern "C" fn inputflow_evolution_note_selection(
 /// 前端看到无组合态的删除键：按「选了又删」记强负（−2）并武装重选期待。
 /// 窗口外、重复删除或无上次选词时静默忽略。返回 1 表示已记账。
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_evolution_note_delete(session: *mut InputFlowSession, now: u64) -> i32 {
+pub unsafe extern "C" fn liana_evolution_note_delete(session: *mut LianaSession, now: u64) -> i32 {
     if session.is_null() {
         return 0;
     }
@@ -746,7 +746,7 @@ pub unsafe extern "C" fn inputflow_evolution_note_delete(session: *mut InputFlow
 /// `{"actualTop1":bool,"baseTop1":bool,"reselect":bool,"altRank":bool}`；
 /// 无待取评估时返回 NULL。必须在 note_selection 之后调用。
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_evolution_eval_json(session: *mut InputFlowSession) -> *mut c_char {
+pub unsafe extern "C" fn liana_evolution_eval_json(session: *mut LianaSession) -> *mut c_char {
     if session.is_null() {
         return std::ptr::null_mut();
     }
@@ -764,7 +764,7 @@ pub unsafe extern "C" fn inputflow_evolution_eval_json(session: *mut InputFlowSe
 
 /// 共享账本 TSV 导出/导入/清空（与 E0 独立句柄同格式，经会话访问进程单例）。
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_evolution_session_export(session: *mut InputFlowSession) -> *mut c_char {
+pub unsafe extern "C" fn liana_evolution_session_export(session: *mut LianaSession) -> *mut c_char {
     if session.is_null() {
         return std::ptr::null_mut();
     }
@@ -775,8 +775,8 @@ pub unsafe extern "C" fn inputflow_evolution_session_export(session: *mut InputF
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_evolution_session_import(
-    session: *mut InputFlowSession,
+pub unsafe extern "C" fn liana_evolution_session_import(
+    session: *mut LianaSession,
     tsv: *const c_char,
 ) -> i32 {
     if session.is_null() {
@@ -791,7 +791,7 @@ pub unsafe extern "C" fn inputflow_evolution_session_import(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_evolution_session_forget(session: *mut InputFlowSession) {
+pub unsafe extern "C" fn liana_evolution_session_forget(session: *mut LianaSession) {
     if session.is_null() {
         return;
     }
@@ -805,13 +805,13 @@ pub unsafe extern "C" fn inputflow_evolution_session_forget(session: *mut InputF
 /// 术语提炼（纯函数）：输入文档文本，输出
 /// `[{"term":"县政府","count":5},...]`（次数降序，上限 50）。调用方释放。
 #[unsafe(no_mangle)]
-pub extern "C" fn inputflow_feed_extract_json(text: *const c_char) -> *mut c_char {
+pub extern "C" fn liana_feed_extract_json(text: *const c_char) -> *mut c_char {
     let text = unsafe { cstr(text) };
     guard_ptr(|| {
         let Some(text) = text else {
             return std::ptr::null_mut();
         };
-        let terms = inputflow_engine::feed::extract_terms(&text);
+        let terms = liana_engine::feed::extract_terms(&text);
         let mut out = String::from("[");
         for (i, (term, count)) in terms.iter().enumerate() {
             if i > 0 {
@@ -830,8 +830,8 @@ pub extern "C" fn inputflow_feed_extract_json(text: *const c_char) -> *mut c_cha
 
 /// 喂入一条营养词：按键串由内核按词典读音派生；返回 1 表示已入库。
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_nutrition_add(
-    session: *mut InputFlowSession,
+pub unsafe extern "C" fn liana_nutrition_add(
+    session: *mut LianaSession,
     term: *const c_char,
     source: *const c_char,
     strength: u32,
@@ -851,7 +851,7 @@ pub unsafe extern "C" fn inputflow_nutrition_add(
 /// 营养库列举（按加入时间倒序）：
 /// `[{"term":..,"keys":..,"source":..,"strength":..,"addedAt":..},...]`。调用方释放。
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_nutrition_list_json(session: *mut InputFlowSession) -> *mut c_char {
+pub unsafe extern "C" fn liana_nutrition_list_json(session: *mut LianaSession) -> *mut c_char {
     if session.is_null() {
         return std::ptr::null_mut();
     }
@@ -878,8 +878,8 @@ pub unsafe extern "C" fn inputflow_nutrition_list_json(session: *mut InputFlowSe
 
 /// 忘记一条营养词：返回 1 表示存在过并已删除。
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_nutrition_forget(
-    session: *mut InputFlowSession,
+pub unsafe extern "C" fn liana_nutrition_forget(
+    session: *mut LianaSession,
     term: *const c_char,
 ) -> i32 {
     if session.is_null() {
@@ -895,7 +895,7 @@ pub unsafe extern "C" fn inputflow_nutrition_forget(
 
 /// 清空营养库。
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_nutrition_forget_all(session: *mut InputFlowSession) {
+pub unsafe extern "C" fn liana_nutrition_forget_all(session: *mut LianaSession) {
     if session.is_null() {
         return;
     }
@@ -906,7 +906,7 @@ pub unsafe extern "C" fn inputflow_nutrition_forget_all(session: *mut InputFlowS
 
 /// 营养库 TSV 导出/导入（词\t按键串\t出处\t强度\t加入时间）。
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_nutrition_export(session: *mut InputFlowSession) -> *mut c_char {
+pub unsafe extern "C" fn liana_nutrition_export(session: *mut LianaSession) -> *mut c_char {
     if session.is_null() {
         return std::ptr::null_mut();
     }
@@ -917,8 +917,8 @@ pub unsafe extern "C" fn inputflow_nutrition_export(session: *mut InputFlowSessi
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_nutrition_import(
-    session: *mut InputFlowSession,
+pub unsafe extern "C" fn liana_nutrition_import(
+    session: *mut LianaSession,
     tsv: *const c_char,
 ) -> i32 {
     if session.is_null() {
@@ -934,9 +934,9 @@ pub unsafe extern "C" fn inputflow_nutrition_import(
 
 // ──────────────────── 每应用中英模式记忆 ────────────────────
 #[unsafe(no_mangle)]
-pub extern "C" fn inputflow_app_mode_new() -> *mut InputFlowAppMode {
+pub extern "C" fn liana_app_mode_new() -> *mut LianaAppMode {
     catch_unwind(AssertUnwindSafe(|| {
-        Box::into_raw(Box::new(InputFlowAppMode {
+        Box::into_raw(Box::new(LianaAppMode {
             inner: AppModeMemory::new(),
         }))
     }))
@@ -944,7 +944,7 @@ pub extern "C" fn inputflow_app_mode_new() -> *mut InputFlowAppMode {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_app_mode_free(memory: *mut InputFlowAppMode) {
+pub unsafe extern "C" fn liana_app_mode_free(memory: *mut LianaAppMode) {
     if memory.is_null() {
         return;
     }
@@ -956,8 +956,8 @@ pub unsafe extern "C" fn inputflow_app_mode_free(memory: *mut InputFlowAppMode) 
 /// 记录一次信号：`zh` 非 0 表示中文侧，`strong` 非 0 表示手动切换（Shift/菜单），
 /// 否则为上屏弱信号；`now` 为 Unix 秒。返回 1 表示已记录（应用 id 非法时为 0）。
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_app_mode_observe(
-    memory: *mut InputFlowAppMode,
+pub unsafe extern "C" fn liana_app_mode_observe(
+    memory: *mut LianaAppMode,
     app_id: *const c_char,
     zh: i32,
     strong: i32,
@@ -976,8 +976,8 @@ pub unsafe extern "C" fn inputflow_app_mode_observe(
 
 /// 该应用现在该用中文还是英文？返回 1 = 中文，0 = 英文，-1 = 样本不足不干预。
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_app_mode_decide(
-    memory: *mut InputFlowAppMode,
+pub unsafe extern "C" fn liana_app_mode_decide(
+    memory: *mut LianaAppMode,
     app_id: *const c_char,
     now: u64,
 ) -> i32 {
@@ -998,8 +998,8 @@ pub unsafe extern "C" fn inputflow_app_mode_decide(
 
 /// 忘记单个应用的偏好。返回 1 表示存在过并已删除。
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_app_mode_forget(
-    memory: *mut InputFlowAppMode,
+pub unsafe extern "C" fn liana_app_mode_forget(
+    memory: *mut LianaAppMode,
     app_id: *const c_char,
 ) -> i32 {
     if memory.is_null() {
@@ -1015,7 +1015,7 @@ pub unsafe extern "C" fn inputflow_app_mode_forget(
 
 /// 清空全部学习结果（关闭学习开关时调用，不留数据）。
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_app_mode_forget_all(memory: *mut InputFlowAppMode) {
+pub unsafe extern "C" fn liana_app_mode_forget_all(memory: *mut LianaAppMode) {
     if memory.is_null() {
         return;
     }
@@ -1027,7 +1027,7 @@ pub unsafe extern "C" fn inputflow_app_mode_forget_all(memory: *mut InputFlowApp
 
 /// 导出学习结果 TSV（前端负责持久化；只含 bundle id 与票数，无按键内容）。
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_app_mode_export(memory: *mut InputFlowAppMode) -> *mut c_char {
+pub unsafe extern "C" fn liana_app_mode_export(memory: *mut LianaAppMode) -> *mut c_char {
     if memory.is_null() {
         return std::ptr::null_mut();
     }
@@ -1039,8 +1039,8 @@ pub unsafe extern "C" fn inputflow_app_mode_export(memory: *mut InputFlowAppMode
 
 /// 导入学习结果 TSV，返回导入行数。
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn inputflow_app_mode_import(
-    memory: *mut InputFlowAppMode,
+pub unsafe extern "C" fn liana_app_mode_import(
+    memory: *mut LianaAppMode,
     tsv: *const c_char,
 ) -> i32 {
     if memory.is_null() {
@@ -1064,98 +1064,98 @@ mod tests {
             return None;
         }
         let s = unsafe { CStr::from_ptr(p) }.to_str().ok()?.to_string();
-        unsafe { inputflow_free_string(p) };
+        unsafe { liana_free_string(p) };
         Some(s)
     }
 
     #[test]
     fn end_to_end_via_c_abi() {
-        let session = unsafe { inputflow_new(c"pinyin".as_ptr()) };
+        let session = unsafe { liana_new(c"pinyin".as_ptr()) };
         assert!(!session.is_null());
         unsafe {
             for ch in ["n", "i", "h", "a", "o"] {
                 let c = CString::new(ch).unwrap();
-                assert_eq!(inputflow_feed(session, c.as_ptr()), 1);
+                assert_eq!(liana_feed(session, c.as_ptr()), 1);
             }
-            let json = call_str(|| inputflow_composition_json(session)).unwrap();
+            let json = call_str(|| liana_composition_json(session)).unwrap();
             assert!(json.contains("\"preedit\":\"ni hao\""), "{json}");
             assert!(json.contains("你好"), "{json}");
-            let text = call_str(|| inputflow_select(session, 0)).unwrap();
+            let text = call_str(|| liana_select(session, 0)).unwrap();
             assert_eq!(text, "你好");
-            let json = call_str(|| inputflow_composition_json(session)).unwrap();
+            let json = call_str(|| liana_composition_json(session)).unwrap();
             assert!(json.contains("\"raw\":\"\""), "{json}");
-            inputflow_free(session);
+            liana_free(session);
         }
     }
 
     #[test]
     fn null_and_bad_args_are_safe() {
         unsafe {
-            assert!(inputflow_composition_json(std::ptr::null_mut()).is_null());
-            assert_eq!(inputflow_feed(std::ptr::null_mut(), c"a".as_ptr()), 0);
-            assert!(inputflow_select(std::ptr::null_mut(), 0).is_null());
-            assert_eq!(inputflow_set_mode(std::ptr::null_mut(), c"en".as_ptr()), 0);
+            assert!(liana_composition_json(std::ptr::null_mut()).is_null());
+            assert_eq!(liana_feed(std::ptr::null_mut(), c"a".as_ptr()), 0);
+            assert!(liana_select(std::ptr::null_mut(), 0).is_null());
+            assert_eq!(liana_set_mode(std::ptr::null_mut(), c"en".as_ptr()), 0);
         }
     }
 
     #[test]
     fn mode_switch_and_user_tsv_roundtrip() {
-        let session = unsafe { inputflow_new(c"en".as_ptr()) };
+        let session = unsafe { liana_new(c"en".as_ptr()) };
         unsafe {
-            let m = call_str(|| inputflow_mode(session)).unwrap();
+            let m = call_str(|| liana_mode(session)).unwrap();
             assert_eq!(m, "en");
-            assert_eq!(inputflow_set_mode(session, c"flypy".as_ptr()), 1);
-            assert_eq!(call_str(|| inputflow_mode(session)).unwrap(), "flypy");
-            assert_eq!(inputflow_user_import(session, c"你好\t3\n".as_ptr()), 1);
-            let tsv = call_str(|| inputflow_user_export(session)).unwrap();
+            assert_eq!(liana_set_mode(session, c"flypy".as_ptr()), 1);
+            assert_eq!(call_str(|| liana_mode(session)).unwrap(), "flypy");
+            assert_eq!(liana_user_import(session, c"你好\t3\n".as_ptr()), 1);
+            let tsv = call_str(|| liana_user_export(session)).unwrap();
             assert_eq!(tsv, "你好\t3\n");
-            inputflow_free(session);
+            liana_free(session);
         }
     }
 
     #[test]
     fn traditional_toggle_via_c_abi() {
-        let session = unsafe { inputflow_new(c"pinyin".as_ptr()) };
+        let session = unsafe { liana_new(c"pinyin".as_ptr()) };
         unsafe {
-            assert_eq!(inputflow_traditional(session), 0);
-            assert_eq!(inputflow_set_traditional(session, 1), 1);
-            assert_eq!(inputflow_traditional(session), 1);
+            assert_eq!(liana_traditional(session), 0);
+            assert_eq!(liana_set_traditional(session, 1), 1);
+            assert_eq!(liana_traditional(session), 1);
             for ch in ["x", "u", "e", "x", "i"] {
                 let c = CString::new(ch).unwrap();
-                inputflow_feed(session, c.as_ptr());
+                liana_feed(session, c.as_ptr());
             }
-            let json = call_str(|| inputflow_composition_json(session)).unwrap();
+            let json = call_str(|| liana_composition_json(session)).unwrap();
             assert!(json.contains("學習"), "{json}");
-            inputflow_free(session);
+            liana_free(session);
         }
     }
 
     #[test]
     fn backup_roundtrip_via_c_abi() {
-        let a = unsafe { inputflow_new(c"pinyin".as_ptr()) };
-        let b = unsafe { inputflow_new(c"pinyin".as_ptr()) };
+        let a = unsafe { liana_new(c"pinyin".as_ptr()) };
+        let b = unsafe { liana_new(c"pinyin".as_ptr()) };
         unsafe {
-            assert_eq!(inputflow_user_import(a, c"你好\t3\n".as_ptr()), 1);
-            let pack = call_str(|| inputflow_backup_export(a)).unwrap();
+            assert_eq!(liana_user_import(a, c"你好\t3\n".as_ptr()), 1);
+            let pack = call_str(|| liana_backup_export(a)).unwrap();
             assert!(pack.starts_with("#IFBAK1"), "{pack}");
 
             let c_pack = CString::new(pack).unwrap();
-            assert_eq!(inputflow_backup_import(b, c_pack.as_ptr(), 0), 1);
-            assert_eq!(call_str(|| inputflow_user_export(b)).unwrap(), "你好\t3\n");
+            assert_eq!(liana_backup_import(b, c_pack.as_ptr(), 0), 1);
+            assert_eq!(call_str(|| liana_user_export(b)).unwrap(), "你好\t3\n");
 
-            assert_eq!(inputflow_backup_import(b, c"坏包".as_ptr(), 0), -1);
+            assert_eq!(liana_backup_import(b, c"坏包".as_ptr(), 0), -1);
             assert_eq!(
-                inputflow_backup_import(std::ptr::null_mut(), c_pack.as_ptr(), 0),
+                liana_backup_import(std::ptr::null_mut(), c_pack.as_ptr(), 0),
                 -1
             );
-            inputflow_free(a);
-            inputflow_free(b);
+            liana_free(a);
+            liana_free(b);
         }
     }
 
     #[test]
     fn version_is_not_null() {
-        let p = inputflow_version();
+        let p = liana_version();
         assert!(!p.is_null());
         let v = unsafe { CStr::from_ptr(p) }.to_str().unwrap();
         assert!(!v.is_empty());
@@ -1163,64 +1163,64 @@ mod tests {
 
     #[test]
     fn ai_catalog_and_recommend_json() {
-        let cat = unsafe { call_str(|| inputflow_ai_catalog_json()) }.unwrap();
+        let cat = unsafe { call_str(|| liana_ai_catalog_json()) }.unwrap();
         assert!(cat.contains("\"id\":\"whisper-base\""), "{cat}");
 
-        let rec = unsafe { call_str(|| inputflow_ai_recommend_json(16 * 1024)) }.unwrap();
+        let rec = unsafe { call_str(|| liana_ai_recommend_json(16 * 1024)) }.unwrap();
         assert!(rec.contains("\"kind\":\"speech\""), "{rec}");
         assert!(rec.contains("\"level\":\"suggested\""), "{rec}");
     }
 
     #[test]
     fn app_mode_memory_via_c_abi() {
-        let mem = inputflow_app_mode_new();
+        let mem = liana_app_mode_new();
         assert!(!mem.is_null());
         unsafe {
             // 手动切到英文（强信号）→ 判英文；换应用 → 不干预
             assert_eq!(
-                inputflow_app_mode_observe(mem, c"com.apple.Terminal".as_ptr(), 0, 1, 1_000),
+                liana_app_mode_observe(mem, c"com.apple.Terminal".as_ptr(), 0, 1, 1_000),
                 1
             );
             assert_eq!(
-                inputflow_app_mode_decide(mem, c"com.apple.Terminal".as_ptr(), 1_000),
+                liana_app_mode_decide(mem, c"com.apple.Terminal".as_ptr(), 1_000),
                 0
             );
             assert_eq!(
-                inputflow_app_mode_decide(mem, c"com.other.app".as_ptr(), 1_000),
+                liana_app_mode_decide(mem, c"com.other.app".as_ptr(), 1_000),
                 -1
             );
 
             // 非法应用 id 被忽略
             assert_eq!(
-                inputflow_app_mode_observe(mem, c"".as_ptr(), 1, 1, 1_000),
+                liana_app_mode_observe(mem, c"".as_ptr(), 1, 1, 1_000),
                 0
             );
             assert_eq!(
-                inputflow_app_mode_observe(mem, c"a\tb".as_ptr(), 1, 1, 1_000),
+                liana_app_mode_observe(mem, c"a\tb".as_ptr(), 1, 1, 1_000),
                 0
             );
 
             // 导出 → 导入另一个实例 → 判定一致
-            let tsv = call_str(|| inputflow_app_mode_export(mem)).unwrap();
-            let other = inputflow_app_mode_new();
+            let tsv = call_str(|| liana_app_mode_export(mem)).unwrap();
+            let other = liana_app_mode_new();
             let c_tsv = CString::new(tsv).unwrap();
-            assert_eq!(inputflow_app_mode_import(other, c_tsv.as_ptr()), 1);
+            assert_eq!(liana_app_mode_import(other, c_tsv.as_ptr()), 1);
             assert_eq!(
-                inputflow_app_mode_decide(other, c"com.apple.Terminal".as_ptr(), 1_000),
+                liana_app_mode_decide(other, c"com.apple.Terminal".as_ptr(), 1_000),
                 0
             );
 
             // 忘记后不再判定
             assert_eq!(
-                inputflow_app_mode_forget(other, c"com.apple.Terminal".as_ptr()),
+                liana_app_mode_forget(other, c"com.apple.Terminal".as_ptr()),
                 1
             );
             assert_eq!(
-                inputflow_app_mode_decide(other, c"com.apple.Terminal".as_ptr(), 1_000),
+                liana_app_mode_decide(other, c"com.apple.Terminal".as_ptr(), 1_000),
                 -1
             );
-            inputflow_app_mode_free(other);
-            inputflow_app_mode_free(mem);
+            liana_app_mode_free(other);
+            liana_app_mode_free(mem);
         }
     }
 
@@ -1228,29 +1228,29 @@ mod tests {
     fn app_mode_null_and_bad_args_are_safe() {
         unsafe {
             assert_eq!(
-                inputflow_app_mode_observe(std::ptr::null_mut(), c"a".as_ptr(), 1, 1, 0),
+                liana_app_mode_observe(std::ptr::null_mut(), c"a".as_ptr(), 1, 1, 0),
                 0
             );
             assert_eq!(
-                inputflow_app_mode_decide(std::ptr::null_mut(), c"a".as_ptr(), 0),
+                liana_app_mode_decide(std::ptr::null_mut(), c"a".as_ptr(), 0),
                 -1
             );
             assert_eq!(
-                inputflow_app_mode_forget(std::ptr::null_mut(), c"a".as_ptr()),
+                liana_app_mode_forget(std::ptr::null_mut(), c"a".as_ptr()),
                 0
             );
-            assert!(inputflow_app_mode_export(std::ptr::null_mut()).is_null());
+            assert!(liana_app_mode_export(std::ptr::null_mut()).is_null());
             assert_eq!(
-                inputflow_app_mode_import(std::ptr::null_mut(), c"x".as_ptr()),
+                liana_app_mode_import(std::ptr::null_mut(), c"x".as_ptr()),
                 -1
             );
-            inputflow_app_mode_free(std::ptr::null_mut());
+            liana_app_mode_free(std::ptr::null_mut());
         }
     }
 
     #[test]
     fn evolution_via_c_abi() {
-        let mem = inputflow_evolution_new();
+        let mem = liana_evolution_new();
         assert!(!mem.is_null());
         unsafe {
             let word = CString::new("先").unwrap();
@@ -1262,17 +1262,17 @@ mod tests {
             .unwrap();
 
             // 一次奖励不足置信
-            inputflow_evolution_reward(mem, word.as_ptr(), lex.as_ptr(), app.as_ptr(), 10, 100, 1_000);
+            liana_evolution_reward(mem, word.as_ptr(), lex.as_ptr(), app.as_ptr(), 10, 100, 1_000);
             let out = call_str(|| {
-                inputflow_evolution_adjust_json(mem, cands.as_ptr(), lex.as_ptr(), app.as_ptr(), 10, 1_100)
+                liana_evolution_adjust_json(mem, cands.as_ptr(), lex.as_ptr(), app.as_ptr(), 10, 1_100)
             })
             .unwrap();
             assert!(out.starts_with("\"text\":\"现\"") || out.contains("\"text\":\"现\""), "{out}");
 
             // 两次奖励后上浮
-            inputflow_evolution_reward(mem, word.as_ptr(), lex.as_ptr(), app.as_ptr(), 10, 100, 1_200);
+            liana_evolution_reward(mem, word.as_ptr(), lex.as_ptr(), app.as_ptr(), 10, 100, 1_200);
             let out = call_str(|| {
-                inputflow_evolution_adjust_json(mem, cands.as_ptr(), lex.as_ptr(), app.as_ptr(), 10, 1_300)
+                liana_evolution_adjust_json(mem, cands.as_ptr(), lex.as_ptr(), app.as_ptr(), 10, 1_300)
             })
             .unwrap();
             assert!(out.find("\"text\":\"先\"").unwrap() < out.find("\"text\":\"现\"").unwrap(), "{out}");
@@ -1280,19 +1280,19 @@ mod tests {
 
             // 决策轨道
             let trail = call_str(|| {
-                inputflow_evolution_explain_json(mem, word.as_ptr(), lex.as_ptr(), app.as_ptr(), 10, 1_400)
+                liana_evolution_explain_json(mem, word.as_ptr(), lex.as_ptr(), app.as_ptr(), 10, 1_400)
             })
             .unwrap();
             assert!(trail.contains("\"feature\":\"lex:"), "{trail}");
 
             // 导出/导入回环
-            let tsv = call_str(|| inputflow_evolution_export(mem)).unwrap();
-            let other = inputflow_evolution_new();
+            let tsv = call_str(|| liana_evolution_export(mem)).unwrap();
+            let other = liana_evolution_new();
             let c_tsv = CString::new(tsv).unwrap();
-            assert!(inputflow_evolution_import(other, c_tsv.as_ptr()) >= 1);
-            inputflow_evolution_forget_all(other);
-            inputflow_evolution_free(other);
-            inputflow_evolution_free(mem);
+            assert!(liana_evolution_import(other, c_tsv.as_ptr()) >= 1);
+            liana_evolution_forget_all(other);
+            liana_evolution_free(other);
+            liana_evolution_free(mem);
         }
     }
 
@@ -1301,31 +1301,31 @@ mod tests {
         unsafe {
             let w = c"先".as_ptr();
             assert_eq!(
-                inputflow_evolution_reward(std::ptr::null_mut(), w, w, w, 0, 100, 0),
+                liana_evolution_reward(std::ptr::null_mut(), w, w, w, 0, 100, 0),
                 0
             );
-            assert!(inputflow_evolution_adjust_json(std::ptr::null_mut(), w, w, w, 0, 0).is_null());
-            assert!(inputflow_evolution_explain_json(std::ptr::null_mut(), w, w, w, 0, 0).is_null());
-            assert!(inputflow_evolution_export(std::ptr::null_mut()).is_null());
-            assert_eq!(inputflow_evolution_import(std::ptr::null_mut(), w), -1);
-            inputflow_evolution_free(std::ptr::null_mut());
-            inputflow_evolution_forget_all(std::ptr::null_mut());
+            assert!(liana_evolution_adjust_json(std::ptr::null_mut(), w, w, w, 0, 0).is_null());
+            assert!(liana_evolution_explain_json(std::ptr::null_mut(), w, w, w, 0, 0).is_null());
+            assert!(liana_evolution_export(std::ptr::null_mut()).is_null());
+            assert_eq!(liana_evolution_import(std::ptr::null_mut(), w), -1);
+            liana_evolution_free(std::ptr::null_mut());
+            liana_evolution_forget_all(std::ptr::null_mut());
         }
     }
 
     /// 取当前组合态首个候选文本（E1 教学序列测试用）。
-    unsafe fn first_candidate_text(session: *mut InputFlowSession) -> Option<String> {
-        let json = unsafe { call_str(|| unsafe { inputflow_composition_json(session) }) }?;
+    unsafe fn first_candidate_text(session: *mut LianaSession) -> Option<String> {
+        let json = unsafe { call_str(|| unsafe { liana_composition_json(session) }) }?;
         let key = "\"text\":\"";
         let start = json.find(key)? + key.len();
         let end = json[start..].find('"')? + start;
         Some(json[start..end].to_string())
     }
 
-    unsafe fn feed_str(session: *mut InputFlowSession, text: &str) {
+    unsafe fn feed_str(session: *mut LianaSession, text: &str) {
         for ch in text.chars() {
             let c = CString::new(ch.to_string()).unwrap();
-            assert_eq!(unsafe { inputflow_feed(session, c.as_ptr()) }, 1, "{ch}");
+            assert_eq!(unsafe { liana_feed(session, c.as_ptr()) }, 1, "{ch}");
         }
     }
 
@@ -1333,37 +1333,37 @@ mod tests {
     #[test]
     fn evolution_session_wiring_via_c_abi() {
         unsafe {
-            let s1 = inputflow_new(b"pinyin\0".as_ptr().cast());
-            let s2 = inputflow_new(b"pinyin\0".as_ptr().cast());
+            let s1 = liana_new(b"pinyin\0".as_ptr().cast());
+            let s2 = liana_new(b"pinyin\0".as_ptr().cast());
             assert!(!s1.is_null() && !s2.is_null());
             let app = CString::new("evo.session.test").unwrap();
 
             // 会话 B 也能看到会话 A 学到的东西：账本是进程单例
-            assert_eq!(inputflow_set_evolution_context(s1, app.as_ptr(), 10, 1, 1_000), 1);
+            assert_eq!(liana_set_evolution_context(s1, app.as_ptr(), 10, 1, 1_000), 1);
             feed_str(s1, "nihao");
             let top = first_candidate_text(s1).expect("应有候选");
 
             for t in [1_005u64, 1_010] {
-                assert!(!inputflow_select(s1, 0).is_null());
-                assert_eq!(inputflow_evolution_note_selection(s1, 0, t), 1);
+                assert!(!liana_select(s1, 0).is_null());
+                assert_eq!(liana_evolution_note_selection(s1, 0, t), 1);
                 // E3：每次确认都产出评估，取走即清
-                let eval = call_str(|| unsafe { inputflow_evolution_eval_json(s1) });
+                let eval = call_str(|| unsafe { liana_evolution_eval_json(s1) });
                 assert!(eval.is_some(), "note_selection 后应有评估");
                 assert!(eval.unwrap().contains("\"actualTop1\""));
                 feed_str(s1, "nihao");
             }
-            assert!(unsafe { inputflow_evolution_eval_json(s1) }.is_null(), "取走即清");
-            let shared = call_str(|| inputflow_evolution_session_export(s2)).unwrap();
+            assert!(unsafe { liana_evolution_eval_json(s1) }.is_null(), "取走即清");
+            let shared = call_str(|| liana_evolution_session_export(s2)).unwrap();
             assert!(
                 shared.lines().any(|l| l.starts_with(&format!("{top}\t"))),
                 "会话 B 应读到会话 A 的学习: {shared}"
             );
 
             // 选了又删：负亲和度落账
-            assert!(!inputflow_select(s1, 0).is_null());
-            assert_eq!(inputflow_evolution_note_selection(s1, 0, 1_015), 1);
-            assert_eq!(inputflow_evolution_note_delete(s1, 1_018), 1);
-            let tsv = call_str(|| inputflow_evolution_session_export(s1)).unwrap();
+            assert!(!liana_select(s1, 0).is_null());
+            assert_eq!(liana_evolution_note_selection(s1, 0, 1_015), 1);
+            assert_eq!(liana_evolution_note_delete(s1, 1_018), 1);
+            let tsv = call_str(|| liana_evolution_session_export(s1)).unwrap();
             assert!(
                 tsv.lines().any(|l| {
                     l.starts_with(&format!("{top}\t"))
@@ -1373,37 +1373,37 @@ mod tests {
             );
 
             // 关闭学习：选择与删除都不再记账
-            let frozen = call_str(|| inputflow_evolution_session_export(s1)).unwrap();
-            assert_eq!(inputflow_set_evolution_context(s1, app.as_ptr(), 10, 0, 2_000), 1);
+            let frozen = call_str(|| liana_evolution_session_export(s1)).unwrap();
+            assert_eq!(liana_set_evolution_context(s1, app.as_ptr(), 10, 0, 2_000), 1);
             feed_str(s1, "nihao");
-            assert!(!inputflow_select(s1, 0).is_null());
-            assert_eq!(inputflow_evolution_note_selection(s1, 0, 2_005), 1);
-            assert_eq!(inputflow_evolution_note_delete(s1, 2_008), 1);
+            assert!(!liana_select(s1, 0).is_null());
+            assert_eq!(liana_evolution_note_selection(s1, 0, 2_005), 1);
+            assert_eq!(liana_evolution_note_delete(s1, 2_008), 1);
             assert_eq!(
-                call_str(|| inputflow_evolution_session_export(s1)).unwrap(),
+                call_str(|| liana_evolution_session_export(s1)).unwrap(),
                 frozen,
                 "关闭后不得新增账目"
             );
-            assert_eq!(inputflow_set_evolution_context(s1, app.as_ptr(), 10, 1, 2_100), 1);
+            assert_eq!(liana_set_evolution_context(s1, app.as_ptr(), 10, 1, 2_100), 1);
 
             // 清空 + TSV 导入回环
             let saved = frozen.clone();
-            inputflow_evolution_session_forget(s2);
-            assert!(call_str(|| inputflow_evolution_session_export(s1)).unwrap().is_empty());
+            liana_evolution_session_forget(s2);
+            assert!(call_str(|| liana_evolution_session_export(s1)).unwrap().is_empty());
             let c_tsv = CString::new(saved).unwrap();
-            assert!(inputflow_evolution_session_import(s1, c_tsv.as_ptr()) >= 1);
+            assert!(liana_evolution_session_import(s1, c_tsv.as_ptr()) >= 1);
 
             // 空会话指针安全
-            assert_eq!(inputflow_set_evolution_context(std::ptr::null_mut(), app.as_ptr(), 0, 1, 0), 0);
-            assert_eq!(inputflow_evolution_note_selection(std::ptr::null_mut(), 0, 0), 0);
-            assert_eq!(inputflow_evolution_note_delete(std::ptr::null_mut(), 0), 0);
-            assert!(inputflow_evolution_session_export(std::ptr::null_mut()).is_null());
-            assert_eq!(inputflow_evolution_session_import(std::ptr::null_mut(), c_tsv.as_ptr()), -1);
-            inputflow_evolution_session_forget(std::ptr::null_mut());
-            assert!(inputflow_evolution_eval_json(std::ptr::null_mut()).is_null());
+            assert_eq!(liana_set_evolution_context(std::ptr::null_mut(), app.as_ptr(), 0, 1, 0), 0);
+            assert_eq!(liana_evolution_note_selection(std::ptr::null_mut(), 0, 0), 0);
+            assert_eq!(liana_evolution_note_delete(std::ptr::null_mut(), 0), 0);
+            assert!(liana_evolution_session_export(std::ptr::null_mut()).is_null());
+            assert_eq!(liana_evolution_session_import(std::ptr::null_mut(), c_tsv.as_ptr()), -1);
+            liana_evolution_session_forget(std::ptr::null_mut());
+            assert!(liana_evolution_eval_json(std::ptr::null_mut()).is_null());
 
-            inputflow_free(s1);
-            inputflow_free(s2);
+            liana_free(s1);
+            liana_free(s2);
         }
     }
 
@@ -1411,59 +1411,59 @@ mod tests {
     #[test]
     fn nutrition_feed_via_c_abi() {
         unsafe {
-            let session = inputflow_new(b"pinyin\0".as_ptr().cast());
+            let session = liana_new(b"pinyin\0".as_ptr().cast());
             assert!(!session.is_null());
 
             // 纯函数提炼：反复出现的词浮出，只出现一次的不给
             let text = CString::new("县政府发布通知，县政府要求落实。").unwrap();
-            let json = call_str(|| inputflow_feed_extract_json(text.as_ptr())).unwrap();
+            let json = call_str(|| liana_feed_extract_json(text.as_ptr())).unwrap();
             assert!(json.contains("\"term\":\"县政府\""), "{json}");
             assert!(!json.contains("通知"), "只出现一次不成词: {json}");
 
             // 喂入营养词（词典单字读音派生按键串）
             let term = CString::new("北京高").unwrap();
             let source = CString::new("会议纪要.txt").unwrap();
-            assert_eq!(inputflow_nutrition_add(session, term.as_ptr(), source.as_ptr(), 2, 1_000), 1);
+            assert_eq!(liana_nutrition_add(session, term.as_ptr(), source.as_ptr(), 2, 1_000), 1);
 
             // 列举
-            let list = call_str(|| inputflow_nutrition_list_json(session)).unwrap();
+            let list = call_str(|| liana_nutrition_list_json(session)).unwrap();
             assert!(list.contains("\"term\":\"北京高\""), "{list}");
             assert!(list.contains("\"keys\":\"beijinggao\""), "{list}");
             assert!(list.contains("\"source\":\"会议纪要.txt\""), "{list}");
 
             // 按键召回：打 beijinggao 应出现北京高
             feed_str(session, "beijinggao");
-            let comp = call_str(|| inputflow_composition_json(session)).unwrap();
+            let comp = call_str(|| liana_composition_json(session)).unwrap();
             assert!(comp.contains("北京高"), "{comp}");
-            inputflow_clear(session);
+            liana_clear(session);
 
             // TSV 回环
-            let tsv = call_str(|| inputflow_nutrition_export(session)).unwrap();
+            let tsv = call_str(|| liana_nutrition_export(session)).unwrap();
             assert!(tsv.contains("北京高\tbeijinggao"), "{tsv}");
             let c_tsv = CString::new(tsv).unwrap();
-            let fresh = inputflow_new(b"pinyin\0".as_ptr().cast());
-            assert_eq!(inputflow_nutrition_import(fresh, c_tsv.as_ptr()), 1);
-            let list2 = call_str(|| inputflow_nutrition_list_json(fresh)).unwrap();
+            let fresh = liana_new(b"pinyin\0".as_ptr().cast());
+            assert_eq!(liana_nutrition_import(fresh, c_tsv.as_ptr()), 1);
+            let list2 = call_str(|| liana_nutrition_list_json(fresh)).unwrap();
             assert!(list2.contains("\"term\":\"北京高\""), "{list2}");
 
             // 忘记
-            assert_eq!(inputflow_nutrition_forget(fresh, term.as_ptr()), 1);
-            assert_eq!(inputflow_nutrition_forget(fresh, term.as_ptr()), 0);
-            inputflow_nutrition_forget_all(fresh);
-            assert!(call_str(|| inputflow_nutrition_list_json(fresh)).unwrap() == "[]");
+            assert_eq!(liana_nutrition_forget(fresh, term.as_ptr()), 1);
+            assert_eq!(liana_nutrition_forget(fresh, term.as_ptr()), 0);
+            liana_nutrition_forget_all(fresh);
+            assert!(call_str(|| liana_nutrition_list_json(fresh)).unwrap() == "[]");
 
             // 空指针安全
             let bad = CString::new("x").unwrap();
-            assert!(inputflow_feed_extract_json(std::ptr::null()).is_null());
-            assert_eq!(inputflow_nutrition_add(std::ptr::null_mut(), bad.as_ptr(), bad.as_ptr(), 1, 0), 0);
-            assert!(inputflow_nutrition_list_json(std::ptr::null_mut()).is_null());
-            assert_eq!(inputflow_nutrition_forget(std::ptr::null_mut(), bad.as_ptr()), 0);
-            inputflow_nutrition_forget_all(std::ptr::null_mut());
-            assert!(inputflow_nutrition_export(std::ptr::null_mut()).is_null());
-            assert_eq!(inputflow_nutrition_import(std::ptr::null_mut(), bad.as_ptr()), -1);
+            assert!(liana_feed_extract_json(std::ptr::null()).is_null());
+            assert_eq!(liana_nutrition_add(std::ptr::null_mut(), bad.as_ptr(), bad.as_ptr(), 1, 0), 0);
+            assert!(liana_nutrition_list_json(std::ptr::null_mut()).is_null());
+            assert_eq!(liana_nutrition_forget(std::ptr::null_mut(), bad.as_ptr()), 0);
+            liana_nutrition_forget_all(std::ptr::null_mut());
+            assert!(liana_nutrition_export(std::ptr::null_mut()).is_null());
+            assert_eq!(liana_nutrition_import(std::ptr::null_mut(), bad.as_ptr()), -1);
 
-            inputflow_free(session);
-            inputflow_free(fresh);
+            liana_free(session);
+            liana_free(fresh);
         }
     }
 
@@ -1481,12 +1481,12 @@ mod tests {
         std::fs::write(pack.join("theme.json"), "{}").unwrap();
 
         let c_dir = CString::new(root.to_str().unwrap()).unwrap();
-        let json = unsafe { call_str(|| inputflow_plugin_scan_json(c_dir.as_ptr())) }.unwrap();
+        let json = unsafe { call_str(|| liana_plugin_scan_json(c_dir.as_ptr())) }.unwrap();
         assert!(json.contains("\"id\":\"skin-x\""), "{json}");
         assert!(json.contains("\"errors\":[]"), "{json}");
 
-        let c_missing = CString::new("/nonexistent-inputflow-plugins").unwrap();
-        let empty = unsafe { call_str(|| inputflow_plugin_scan_json(c_missing.as_ptr())) }.unwrap();
+        let c_missing = CString::new("/nonexistent-liana-plugins").unwrap();
+        let empty = unsafe { call_str(|| liana_plugin_scan_json(c_missing.as_ptr())) }.unwrap();
         assert!(empty.contains("\"packs\":[]"), "{empty}");
         let _ = std::fs::remove_dir_all(&root);
     }

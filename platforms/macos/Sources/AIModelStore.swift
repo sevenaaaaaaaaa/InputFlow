@@ -77,9 +77,9 @@ final class AIModelStore: NSObject {
     }()
 
     private override init() {
-        catalog = InputFlowEngine.aiCatalog()
+        catalog = LianaEngine.aiCatalog()
         let ramMb = Int(ProcessInfo.processInfo.physicalMemory / (1024 * 1024))
-        recommendation = InputFlowEngine.aiRecommend(totalRamMb: ramMb)
+        recommendation = LianaEngine.aiRecommend(totalRamMb: ramMb)
         super.init()
     }
 
@@ -91,7 +91,7 @@ final class AIModelStore: NSObject {
 
     var modelsDirectory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("InputFlow/models", isDirectory: true)
+            .appendingPathComponent("Liana/models", isDirectory: true)
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         return base
     }
@@ -169,7 +169,7 @@ final class AIModelStore: NSObject {
             let digest = try Self.sha256(of: destination)
             guard digest == model.sha256.lowercased() else {
                 try? FileManager.default.removeItem(at: destination)
-                throw NSError(domain: "InputFlow.AI", code: 1, userInfo: [NSLocalizedDescriptionKey: "sha256 校验失败，已删除下载文件"])
+                throw NSError(domain: "Liana.AI", code: 1, userInfo: [NSLocalizedDescriptionKey: "sha256 校验失败，已删除下载文件"])
             }
             // 本机任务完成提醒（桌宠气泡）：仅限下载/校验这类无敏感内容的事件
             DispatchQueue.main.async {
@@ -196,14 +196,14 @@ final class AIModelStore: NSObject {
     // MARK: - 启用状态（UserDefaults）
 
     static func selectedModelId(for kind: String) -> String? {
-        UserDefaults.standard.string(forKey: "InputFlowAIModel.\(kind)")
+        UserDefaults.standard.string(forKey: "LianaAIModel.\(kind)")
     }
 
     static func setSelectedModelId(_ id: String?, for kind: String) {
         if let id {
-            UserDefaults.standard.set(id, forKey: "InputFlowAIModel.\(kind)")
+            UserDefaults.standard.set(id, forKey: "LianaAIModel.\(kind)")
         } else {
-            UserDefaults.standard.removeObject(forKey: "InputFlowAIModel.\(kind)")
+            UserDefaults.standard.removeObject(forKey: "LianaAIModel.\(kind)")
         }
         NotificationCenter.default.post(name: .inputFlowAIChanged, object: nil)
     }
@@ -215,7 +215,7 @@ final class AIModelStore: NSObject {
 }
 
 extension Notification.Name {
-    static let inputFlowAIChanged = Notification.Name("InputFlowAIChanged")
+    static let inputFlowAIChanged = Notification.Name("LianaAIChanged")
 }
 
 extension AIModelStore: URLSessionDownloadDelegate {
@@ -240,7 +240,7 @@ extension AIModelStore: URLSessionDownloadDelegate {
         guard let id = downloadTask.taskDescription else { return }
         // 临时文件在本回调返回后即被删除，先搬走再校验。
         let staged = FileManager.default.temporaryDirectory
-            .appendingPathComponent("inputflow-\(id)-\(UUID().uuidString)")
+            .appendingPathComponent("liana-\(id)-\(UUID().uuidString)")
         try? FileManager.default.moveItem(at: location, to: staged)
         finishDownload(id: id, temporaryURL: staged, error: nil)
     }

@@ -115,19 +115,19 @@ struct PluginCatalog: Codable {
 }
 
 enum PluginStore {
-    /// 插件根目录：~/Library/Application Support/InputFlow/plugins
+    /// 插件根目录：~/Library/Application Support/Liana/plugins
     static var pluginsDir: URL {
         URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent("Library/Application Support/InputFlow/plugins", isDirectory: true)
+            .appendingPathComponent("Library/Application Support/Liana/plugins", isDirectory: true)
     }
 
     /// 调内核扫描（校验清单 + 权限白名单），坏包在 errors 里给出原因。
     static func scan() -> PluginCatalog {
         let dir = pluginsDir
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let result = dir.path.withCString { inputflow_plugin_scan_json($0) }
+        let result = dir.path.withCString { liana_plugin_scan_json($0) }
         guard let result else { return PluginCatalog(packs: [], errors: []) }
-        defer { inputflow_free_string(result) }
+        defer { liana_free_string(result) }
         guard
             let data = String(cString: result).data(using: .utf8),
             let catalog = try? JSONDecoder().decode(PluginCatalog.self, from: data)
@@ -175,8 +175,8 @@ enum PluginStore {
 
 /// 激活皮肤的管理：id 存 UserDefaults（"" = 跟随系统）。
 enum ThemeStore {
-    static let changedNotification = Notification.Name("InputFlowThemeChanged")
-    private static let activeKey = "InputFlowSkinId"
+    static let changedNotification = Notification.Name("LianaThemeChanged")
+    private static let activeKey = "LianaSkinId"
 
     static var activeId: String {
         get { UserDefaults.standard.string(forKey: activeKey) ?? "" }

@@ -3,9 +3,9 @@ import Vision
 
 /// 营养库发生变化（喂入 / 忘记 / 清空）：输入控制器收到后整体重导入。
 extension Notification.Name {
-    static let nutritionChanged = Notification.Name("InputFlowNutritionChanged")
+    static let nutritionChanged = Notification.Name("LianaNutritionChanged")
     /// 知你学习开关在权限中心被切换：输入控制器收到后重同步决策上下文。
-    static let evolutionToggled = Notification.Name("InputFlowEvolutionToggled")
+    static let evolutionToggled = Notification.Name("LianaEvolutionToggled")
 }
 
 /// 喂食窗（ADR-0008 E2）：截图/文档/粘贴文本 → 端上提炼 → 营养库。
@@ -15,7 +15,7 @@ final class FeedWindowController: NSWindowController {
     static let shared = FeedWindowController()
 
     /// 营养库管理走自己的会话：知你账本是进程单例，营养库随 TSV 全量对齐。
-    private let engine = InputFlowEngine(mode: "pinyin")
+    private let engine = LianaEngine(mode: "pinyin")
     private let store = EncryptedStore.shared
 
     private let textView = NSTextView()
@@ -47,7 +47,7 @@ final class FeedWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "InputFlow · 喂它一段"
+        window.title = "松萝 · 喂它一段"
         window.isReleasedWhenClosed = false
         window.center()
         window.minSize = NSSize(width: 480, height: 520)
@@ -310,7 +310,7 @@ final class FeedWindowController: NSWindowController {
         if pendingSource.isEmpty { pendingSource = "粘贴文本" }
         pendingSourceBase = pendingSource
         aiTopic = ""
-        let found = InputFlowEngine.feedExtract(text)
+        let found = LianaEngine.feedExtract(text)
         terms = found.map { CandidateTerm(term: $0.term, count: $0.count, checked: true, isAI: false) }
         rebuildTermsStack()
         feedButton.isEnabled = !terms.isEmpty
@@ -385,7 +385,7 @@ final class FeedWindowController: NSWindowController {
 
     // MARK: - AI 增强提炼（E4：本机 Gemma，零云）
 
-    private static let aiEnabledKey = "InputFlowFeedAIEnhanced"
+    private static let aiEnabledKey = "LianaFeedAIEnhanced"
 
     private func aiAvailable() -> Bool {
         TranslateClient.findRuntime() != nil && TranslateClient.translateModelPath() != nil

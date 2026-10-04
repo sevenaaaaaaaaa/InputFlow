@@ -1,4 +1,4 @@
-// InputFlow 桌宠 · VRM 渲染器（three.js + @pixiv/three-vrm）
+// 松萝桌宠 · VRM 渲染器（three.js + @pixiv/three-vrm）
 // 透明背景、跟随鼠标注视、眨眼、呼吸/摇摆、状态机（idle / typing / commit）。
 import * as THREE from 'three';
 import { GLTFLoader } from './jsm/loaders/GLTFLoader.js';

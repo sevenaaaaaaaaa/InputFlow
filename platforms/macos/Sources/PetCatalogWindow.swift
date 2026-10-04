@@ -17,7 +17,7 @@ final class PetCatalogWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "InputFlow · 形象目录"
+        window.title = "松萝 · 形象目录"
         window.isReleasedWhenClosed = false
         window.center()
         self.init(window: window)

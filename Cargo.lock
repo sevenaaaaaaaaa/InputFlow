@@ -3,99 +3,99 @@
 version = 4
 
 [[package]]
-name = "inputflow-ai"
+name = "liana-ai"
 version = "0.1.0"
 
 [[package]]
-name = "inputflow-core"
+name = "liana-core"
 version = "0.1.0"
 
 [[package]]
-name = "inputflow-dict"
+name = "liana-dict"
 version = "0.1.0"
 dependencies = [
- "inputflow-core",
+ "liana-core",
 ]
 
 [[package]]
-name = "inputflow-emoji"
+name = "liana-emoji"
 version = "0.1.0"
 dependencies = [
- "inputflow-core",
+ "liana-core",
 ]
 
 [[package]]
-name = "inputflow-en"
+name = "liana-en"
 version = "0.1.0"
 dependencies = [
- "inputflow-core",
+ "liana-core",
 ]
 
 [[package]]
-name = "inputflow-engine"
+name = "liana-engine"
 version = "0.1.0"
 dependencies = [
- "inputflow-core",
- "inputflow-dict",
- "inputflow-emoji",
- "inputflow-en",
- "inputflow-ja",
- "inputflow-pinyin",
- "inputflow-symbol",
- "inputflow-zhconv",
+ "liana-core",
+ "liana-dict",
+ "liana-emoji",
+ "liana-en",
+ "liana-ja",
+ "liana-pinyin",
+ "liana-symbol",
+ "liana-zhconv",
 ]
 
 [[package]]
-name = "inputflow-ffi"
+name = "liana-ffi"
 version = "0.1.0"
 dependencies = [
- "inputflow-ai",
- "inputflow-core",
- "inputflow-dict",
- "inputflow-engine",
- "inputflow-plugin",
+ "liana-ai",
+ "liana-core",
+ "liana-dict",
+ "liana-engine",
+ "liana-plugin",
 ]
 
 [[package]]
-name = "inputflow-ja"
+name = "liana-ja"
 version = "0.1.0"
 dependencies = [
- "inputflow-core",
+ "liana-core",
 ]
 
 [[package]]
-name = "inputflow-pinyin"
+name = "liana-pinyin"
 version = "0.1.0"
 dependencies = [
- "inputflow-core",
- "inputflow-dict",
+ "liana-core",
+ "liana-dict",
 ]
 
 [[package]]
-name = "inputflow-plugin"
+name = "liana-plugin"
 version = "0.1.0"
 
 [[package]]
-name = "inputflow-symbol"
+name = "liana-symbol"
 version = "0.1.0"
 dependencies = [
- "inputflow-core",
+ "liana-core",
 ]
 
 [[package]]
-name = "inputflow-sync"
+name = "liana-sync"
 version = "0.1.0"
 
 [[package]]
-name = "inputflow-zhconv"
+name = "liana-zhconv"
 version = "0.1.0"
 
 [[package]]
 name = "xtask"
 version = "0.1.0"
 dependencies = [
- "inputflow-core",
- "inputflow-dict",
- "inputflow-engine",
- "inputflow-plugin",
+ "liana-core",
+ "liana-dict",
+ "liana-engine",
+ "liana-plugin",
 ]

@@ -9,20 +9,20 @@ final class AppModeMemory {
     static let shared = AppModeMemory()
 
     private var handle: OpaquePointer?
-    private let enabledKey = "InputFlowAppModeMemoryEnabled"
-    private let blobKey = "InputFlowAppModeMemoryTSV"
+    private let enabledKey = "LianaAppModeMemoryEnabled"
+    private let blobKey = "LianaAppModeMemoryTSV"
 
     private init() {
-        handle = inputflow_app_mode_new()
+        handle = liana_app_mode_new()
         if let h = handle {
             let blob = UserDefaults.standard.string(forKey: blobKey) ?? ""
-            _ = blob.withCString { inputflow_app_mode_import(h, $0) }
+            _ = blob.withCString { liana_app_mode_import(h, $0) }
         }
     }
 
     deinit {
         if let h = handle {
-            inputflow_app_mode_free(h)
+            liana_app_mode_free(h)
         }
     }
 
@@ -45,7 +45,7 @@ final class AppModeMemory {
     func preferredChinese(appId: String?) -> Bool? {
         guard isEnabled, let h = handle, let appId, !appId.isEmpty else { return nil }
         let verdict = appId.withCString {
-            inputflow_app_mode_decide(h, $0, UInt64(Date().timeIntervalSince1970))
+            liana_app_mode_decide(h, $0, UInt64(Date().timeIntervalSince1970))
         }
         return verdict == 1 ? true : (verdict == 0 ? false : nil)
     }
@@ -54,7 +54,7 @@ final class AppModeMemory {
     func observe(appId: String?, chinese: Bool, strong: Bool) {
         guard isEnabled, let h = handle, let appId, !appId.isEmpty else { return }
         _ = appId.withCString {
-            inputflow_app_mode_observe(
+            liana_app_mode_observe(
                 h, $0, chinese ? 1 : 0, strong ? 1 : 0,
                 UInt64(Date().timeIntervalSince1970)
             )
@@ -65,26 +65,26 @@ final class AppModeMemory {
     /// 忘记单个应用的偏好。
     func forget(appId: String?) {
         guard let h = handle, let appId, !appId.isEmpty else { return }
-        _ = appId.withCString { inputflow_app_mode_forget(h, $0) }
+        _ = appId.withCString { liana_app_mode_forget(h, $0) }
         flush()
     }
 
     /// 清空全部学习结果。
     func forgetAll() {
         if let h = handle {
-            inputflow_app_mode_forget_all(h)
+            liana_app_mode_forget_all(h)
         }
         UserDefaults.standard.removeObject(forKey: blobKey)
     }
 
     private func flush() {
-        guard let h = handle, let blob = takeString(inputflow_app_mode_export(h)) else { return }
+        guard let h = handle, let blob = takeString(liana_app_mode_export(h)) else { return }
         UserDefaults.standard.set(blob, forKey: blobKey)
     }
 
     private func takeString(_ ptr: UnsafeMutablePointer<CChar>?) -> String? {
         guard let ptr else { return nil }
-        defer { inputflow_free_string(ptr) }
+        defer { liana_free_string(ptr) }
         return String(cString: ptr)
     }
 }

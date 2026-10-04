@@ -20,5 +20,5 @@
 ```bash
 curl -L -o STCharacters.txt https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary/STCharacters.txt
 curl -L -o STPhrases.txt   https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary/STPhrases.txt
-cargo test -p inputflow-zhconv
+cargo test -p liana-zhconv
 ```

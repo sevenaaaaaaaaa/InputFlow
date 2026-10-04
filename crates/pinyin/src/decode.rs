@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use inputflow_core::syllables::{is_syllable, is_syllable_prefix};
-use inputflow_core::{Candidate, CandidateKind, Scheme};
-use inputflow_dict::{Dictionary, Entry};
+use liana_core::syllables::{is_syllable, is_syllable_prefix};
+use liana_core::{Candidate, CandidateKind, Scheme};
+use liana_dict::{Dictionary, Entry};
 
 use crate::scheme::{Codes, MAX_SYLLABLE_LEN};
 

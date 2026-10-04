@@ -2,14 +2,14 @@
 
 use std::sync::{Arc, Mutex};
 
-use inputflow_core::backup::{self, BackupError};
-use inputflow_core::{Candidate, CandidateKind, Composition, Decoder, Mode, UserModel};
-use inputflow_dict::Dictionary;
-use inputflow_emoji::EmojiDecoder;
-use inputflow_en::EnDecoder;
-use inputflow_ja::JaDecoder;
-use inputflow_pinyin::{Layout, PinyinDecoder};
-use inputflow_symbol::SymbolDecoder;
+use liana_core::backup::{self, BackupError};
+use liana_core::{Candidate, CandidateKind, Composition, Decoder, Mode, UserModel};
+use liana_dict::Dictionary;
+use liana_emoji::EmojiDecoder;
+use liana_en::EnDecoder;
+use liana_ja::JaDecoder;
+use liana_pinyin::{Layout, PinyinDecoder};
+use liana_symbol::SymbolDecoder;
 
 use evolution::EvolutionMemory;
 
@@ -39,7 +39,7 @@ const MIN_PHRASE_QUERY: usize = 3;
 const MIN_PHRASE_EXACT: u32 = 2;
 /// 按键只是前缀（补全）时的最低学习次数——门槛更高，避免打一半就被抢。
 const MIN_PHRASE_PREFIX: u32 = 3;
-/// 短语候选的基础分（对齐整句候选的量级，见 `inputflow_pinyin` 的打分）。
+/// 短语候选的基础分（对齐整句候选的量级，见 `liana_pinyin` 的打分）。
 const PHRASE_SCORE_EXACT: f64 = 18.0;
 const PHRASE_SCORE_PREFIX: f64 = 12.0;
 
@@ -193,7 +193,7 @@ impl Session {
         &mut self.user
     }
 
-    /// 导出用户数据备份包（带版本头与 CRC32，见 `inputflow_core::backup`）。
+    /// 导出用户数据备份包（带版本头与 CRC32，见 `liana_core::backup`）。
     ///
     /// 包内是明文 TSV：写盘时由前端用本机密钥加密，导出明文须用户二次确认。
     pub fn export_backup(&self) -> String {
@@ -571,7 +571,7 @@ impl Session {
         }
         // `u` 前缀进符号模式：普通话没有以 u 开头的音节，不会和拼音抢输入。
         let symbol_hit =
-            if self.mode == Mode::Pinyin && self.buffer.starts_with(inputflow_symbol::TRIGGER) {
+            if self.mode == Mode::Pinyin && self.buffer.starts_with(liana_symbol::TRIGGER) {
                 let c = self.symbol.decode_buffer(&self.buffer);
                 (!c.is_empty()).then_some(c)
             } else {
@@ -593,7 +593,7 @@ impl Session {
             Mode::English => (self.en.decode(&self.buffer), self.buffer.clone()),
             Mode::Japanese => {
                 let preedit =
-                    inputflow_ja::to_hiragana(&self.buffer).unwrap_or_else(|| self.buffer.clone());
+                    liana_ja::to_hiragana(&self.buffer).unwrap_or_else(|| self.buffer.clone());
                 (self.ja.decode(&self.buffer), preedit)
             }
             Mode::Emoji => (self.emoji.decode(&self.buffer), self.buffer.clone()),
@@ -616,9 +616,9 @@ impl Session {
     }
 
     /// 候选收尾：分层排序 → 知你重排 → 截断 → 简繁转换 → 落到组合态。
-    fn finish(&mut self, mut cands: Vec<inputflow_core::Candidate>, preedit: String) {
+    fn finish(&mut self, mut cands: Vec<liana_core::Candidate>, preedit: String) {
         // 分层排序：literal 垫底、覆盖输入多的优先，用户词只在同层内重排。
-        cands.sort_by(inputflow_core::Candidate::rank_cmp);
+        cands.sort_by(liana_core::Candidate::rank_cmp);
         // E3 反事实基线：重排前的顺序（简体原文空间，与 select 的 learned 同空间）。
         self.base_order = if self.evolution_enabled && self.mode != Mode::Emoji && !cands.is_empty()
         {
@@ -632,7 +632,7 @@ impl Session {
             self.origins.clear();
             self.origins.reserve(cands.len());
             for c in &mut cands {
-                let converted = inputflow_zhconv::s2t(&c.text);
+                let converted = liana_zhconv::s2t(&c.text);
                 if converted == c.text {
                     self.origins.push(c.text.clone());
                 } else {
@@ -690,8 +690,8 @@ impl Session {
     ///
     /// 按键完全命中（学过 2 次）时按整句量级给分；只是前缀（学过 3 次）时给较低分，
     /// 让它出现在前几位但不抢正常整句的首位。
-    fn push_phrase_candidates(&self, cands: &mut Vec<inputflow_core::Candidate>) {
-        use inputflow_core::{Candidate, CandidateKind};
+    fn push_phrase_candidates(&self, cands: &mut Vec<liana_core::Candidate>) {
+        use liana_core::{Candidate, CandidateKind};
         let raw: String = self
             .buffer
             .chars()
@@ -735,8 +735,8 @@ impl Session {
     ///
     /// 按键完全命中时给整句量级的分；只是前缀时给补全分。与短语候选同一套
     /// 去重规则：解码器已给出同样的词时只提分，不塞重复候选。
-    fn push_nutrition_candidates(&self, cands: &mut Vec<inputflow_core::Candidate>) {
-        use inputflow_core::{Candidate, CandidateKind};
+    fn push_nutrition_candidates(&self, cands: &mut Vec<liana_core::Candidate>) {
+        use liana_core::{Candidate, CandidateKind};
         let raw: String = self
             .buffer
             .chars()
@@ -771,8 +771,8 @@ impl Session {
     ///
     /// 触发条件：输入无法完整解成中文（有残余）、或本身是长度 ≥4 的英文词、
     /// 或用户按了 Shift（大写意图）。短词（如 `he`）不触发，避免拼音噪声。
-    fn push_english_candidates(&self, cands: &mut Vec<inputflow_core::Candidate>) {
-        use inputflow_core::CandidateKind;
+    fn push_english_candidates(&self, cands: &mut Vec<liana_core::Candidate>) {
+        use liana_core::CandidateKind;
         let raw = self.buffer.as_str();
         let has_real_zh = cands.iter().any(|c| c.kind != CandidateKind::Literal);
         let lower = raw.to_ascii_lowercase();
@@ -942,12 +942,12 @@ mod tests {
 
     #[test]
     fn shuangpin_modes_work() {
-        let mut s = session(Mode::Shuangpin(inputflow_core::Scheme::Flypy));
+        let mut s = session(Mode::Shuangpin(liana_core::Scheme::Flypy));
         type_str(&mut s, "nihc");
         assert_eq!(s.composition().candidates[0].text, "你好");
         assert_eq!(s.composition().preedit, "ni hao");
 
-        s.set_mode(Mode::Shuangpin(inputflow_core::Scheme::Mspy));
+        s.set_mode(Mode::Shuangpin(liana_core::Scheme::Mspy));
         type_str(&mut s, "hk");
         assert!(s.composition().candidates.iter().any(|c| c.text == "好"));
     }
@@ -959,7 +959,7 @@ mod tests {
         let c = &s.composition().candidates;
         let zh: Vec<_> = c
             .iter()
-            .filter(|x| x.kind != inputflow_core::CandidateKind::Literal)
+            .filter(|x| x.kind != liana_core::CandidateKind::Literal)
             .collect();
         let first_partial = zh.iter().position(|x| x.consumed < 5).unwrap_or(zh.len());
         assert!(first_partial > 0, "应有覆盖全部输入的候选");
@@ -975,7 +975,7 @@ mod tests {
         );
         assert_eq!(
             c.last().map(|x| x.kind),
-            Some(inputflow_core::CandidateKind::Literal),
+            Some(liana_core::CandidateKind::Literal),
             "原样上屏永远垫底"
         );
     }
@@ -1177,7 +1177,7 @@ mod tests {
         assert!(!c.is_empty());
         assert!(
             c.iter()
-                .all(|x| x.kind == inputflow_core::CandidateKind::Symbol),
+                .all(|x| x.kind == liana_core::CandidateKind::Symbol),
             "{c:?}"
         );
 
@@ -1195,7 +1195,7 @@ mod tests {
         let c = &s.composition().candidates;
         assert!(
             c.iter()
-                .all(|x| x.kind != inputflow_core::CandidateKind::Symbol),
+                .all(|x| x.kind != liana_core::CandidateKind::Symbol),
             "无命中应退回普通管线: {c:?}"
         );
         assert!(!c.is_empty());
@@ -1210,8 +1210,8 @@ mod tests {
             s.composition()
                 .candidates
                 .iter()
-                .any(|c| c.kind == inputflow_core::CandidateKind::Char
-                    || c.kind == inputflow_core::CandidateKind::Word),
+                .any(|c| c.kind == liana_core::CandidateKind::Char
+                    || c.kind == liana_core::CandidateKind::Word),
             "{:?}",
             s.composition().candidates
         );
@@ -1274,7 +1274,7 @@ mod tests {
             .iter()
             .find(|x| x.text == "早上好")
             .expect("前缀应补全出短语");
-        assert_eq!(hit.kind, inputflow_core::CandidateKind::Phrase);
+        assert_eq!(hit.kind, liana_core::CandidateKind::Phrase);
         assert_eq!(hit.comment.as_deref(), Some("短语"));
         assert_eq!(hit.consumed, 5, "短语候选吃掉当前全部按键");
     }
@@ -1288,7 +1288,7 @@ mod tests {
             !s.composition()
                 .candidates
                 .iter()
-                .any(|x| x.kind == inputflow_core::CandidateKind::Phrase),
+                .any(|x| x.kind == liana_core::CandidateKind::Phrase),
             "只学过一次不应冒出来: {:?}",
             s.composition().candidates
         );

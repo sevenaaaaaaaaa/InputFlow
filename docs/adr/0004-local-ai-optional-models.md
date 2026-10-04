@@ -4,7 +4,7 @@
 
 ## 背景
 
-用户希望候选排序、语音输入、同声传译可以有「小模型级」的智能，但 InputFlow 的隐私
+用户希望候选排序、语音输入、同声传译可以有「小模型级」的智能，但 松萝的隐私
 承诺不允许任何云 API：按键、候选、语音都不得离开设备。因此模型必须是本地的，
 并且要么随包自带，要么由用户显式下载。
 
@@ -25,7 +25,7 @@
 3. **L2 用户显式下载的开源小模型（默认关闭）**
    - 目录内置：Gemma 3 270M / 1B、Qwen2.5 0.5B / 1.5B、Qwen3 0.6B、Whisper tiny/base/small；
    - 每个模型带 `url + size + sha256 + license + RAM 估算`，下载后校验才可用于推理；
-   - 存储：`~/Library/Application Support/InputFlow/models/<id>/`，可一键删除；
+   - 存储：`~/Library/Application Support/Liana/models/<id>/`，可一键删除；
    - **网络只在用户点击下载时建立**，没有遥测、没有模型侧信道请求。
 
 ### 内存与推荐策略

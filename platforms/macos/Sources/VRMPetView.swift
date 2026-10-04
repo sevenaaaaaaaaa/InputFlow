@@ -6,7 +6,7 @@ import WebKit
 enum PetRuntimeStore {
     static var dir: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("InputFlow/pet-runtime", isDirectory: true)
+            .appendingPathComponent("Liana/pet-runtime", isDirectory: true)
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         return base
     }

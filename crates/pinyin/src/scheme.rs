@@ -3,7 +3,7 @@
 //! 表来源：Rime 官方 schema 的 `speller/algebra` 规则
 //! （`rime-double-pinyin` 仓库的 `double_pinyin_flypy.schema.yaml` /
 //! `double_pinyin_mspy.schema.yaml` / `double_pinyin.schema.yaml`），
-//! 按规则逐条推导为「韵母 → 键位」表，可用 `cargo test -p inputflow-pinyin` 中的
+//! 按规则逐条推导为「韵母 → 键位」表，可用 `cargo test -p liana-pinyin` 中的
 //! 用例校对（如小鹤「中国 vsgo」「你好 nihc」）。
 //!
 //! 解码端采取**宽容策略**：接受方案的规范拼写与 Rime 的 derive 备选拼写，
@@ -11,8 +11,8 @@
 
 use std::collections::HashMap;
 
-use inputflow_core::Scheme;
-use inputflow_core::syllables::{SYLLABLES, split_initial};
+use liana_core::Scheme;
+use liana_core::syllables::{SYLLABLES, split_initial};
 
 /// 最长音节字符数（chuang / shuang）。
 pub const MAX_SYLLABLE_LEN: usize = 6;

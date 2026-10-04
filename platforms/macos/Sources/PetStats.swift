@@ -44,8 +44,8 @@ final class PetStats {
         }
     }
 
-    private let storeKey = "InputFlowStatsDays"
-    private let enabledKey = "InputFlowStatsEnabled"
+    private let storeKey = "LianaStatsDays"
+    private let enabledKey = "LianaStatsEnabled"
 
     var isEnabled: Bool {
         get {
@@ -158,7 +158,7 @@ final class PetStats {
 
     /// 调内核把一天计数折算成指标（速度/准确率/卡路里/选词质量）。
     static func digest(_ day: Day) -> Digest? {
-        let json = inputflow_stats_digest_json(
+        let json = liana_stats_digest_json(
             UInt64(max(0, day.chars)), UInt64(max(0, day.keys)),
             UInt64(max(0, day.deletes)), UInt64(max(0, day.enters)),
             UInt64(max(0, day.saved)), UInt64(max(0, day.voice)),
@@ -167,7 +167,7 @@ final class PetStats {
             UInt64(max(0, day.baseTop1)), UInt64(max(0, day.reselects))
         )
         guard let json else { return nil }
-        defer { inputflow_free_string(json) }
+        defer { liana_free_string(json) }
         guard
             let data = String(cString: json).data(using: .utf8),
             let digest = try? JSONDecoder().decode(Digest.self, from: data)

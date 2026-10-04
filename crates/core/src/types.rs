@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 use std::fmt;
 
-/// 双拼方案。解码端对各方案的差异持宽容态度（见 `inputflow-pinyin::scheme`）。
+/// 双拼方案。解码端对各方案的差异持宽容态度（见 `liana-pinyin::scheme`）。
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Scheme {
     Flypy,

@@ -44,7 +44,7 @@ final class PermissionCenterWindowController: NSWindowController {
 
     private func buildUI() {
         let intro = NSTextField(wrappingLabelWithString: """
-            InputFlow 的内核不发起任何网络请求。下面是这台机器上全部敏感能力与数据的位置：\
+            松萝的内核不发起任何网络请求。下面是这台机器上全部敏感能力与数据的位置：\
             每一项都可以关闭，关闭即清除对应数据；没有任何隐藏开关。
             """)
         intro.preferredMaxLayoutWidth = 520
@@ -90,14 +90,14 @@ final class PermissionCenterWindowController: NSWindowController {
         addSection(
             title: "按应用记忆中/英",
             detail: "本地统计模型只存「应用 bundle id → 模式票数」，无按键内容。",
-            dataPath: "UserDefaults（InputFlowAppModeMemoryTSV）",
+            dataPath: "UserDefaults（LianaAppModeMemoryTSV）",
             toggleTitle: "学习开关",
             wipeTitle: "清除全部学习结果"
         )
         addSection(
             title: "输入统计",
             detail: "只记次数与秒数：速度、纠错、回车、节省击键、最长发呆、卡路里估算。不记录任何按键内容，保留最近 7 天。傍晚总结走桌宠气泡，不申请系统通知权限。",
-            dataPath: "UserDefaults（InputFlowStatsDays）",
+            dataPath: "UserDefaults（LianaStatsDays）",
             toggleTitle: "统计开关",
             wipeTitle: "清除全部统计数据"
         )
@@ -190,7 +190,7 @@ final class PermissionCenterWindowController: NSWindowController {
 
     private var dataDir: URL {
         URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent("Library/Application Support/InputFlow", isDirectory: true)
+            .appendingPathComponent("Library/Application Support/Liana", isDirectory: true)
     }
 
     // MARK: - 动作
@@ -236,13 +236,13 @@ final class PermissionCenterWindowController: NSWindowController {
 
     /// 账本是进程单例：任意会话清空即全局清空。
     private func forgetEvolution() {
-        InputFlowEngine(mode: "pinyin").forgetEvolution()
+        LianaEngine(mode: "pinyin").forgetEvolution()
         EncryptedStore.shared.setEvolution("")
         PetWindowController.shared.showToast("知你学习账本已清空", duration: 3)
     }
 
     private func forgetNutrition() {
-        let engine = InputFlowEngine(mode: "pinyin")
+        let engine = LianaEngine(mode: "pinyin")
         engine.nutritionForgetAll()
         EncryptedStore.shared.setNutrition("")
         NotificationCenter.default.post(name: .nutritionChanged, object: nil)
@@ -255,7 +255,7 @@ final class PermissionCenterWindowController: NSWindowController {
 
     private func deleteAllModels() {
         let store = AIModelStore.shared
-        for model in InputFlowEngine.aiCatalog() where store.isInstalled(model) {
+        for model in LianaEngine.aiCatalog() where store.isInstalled(model) {
             store.delete(model)
         }
     }

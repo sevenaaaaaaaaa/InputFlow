@@ -1,4 +1,4 @@
-# InputFlow for macOS（M1）
+# Liana for macOS（M1）
 
 InputMethodKit 外壳 + Rust 内核静态库；候选窗在 macOS 26+ 使用系统原生 Liquid Glass，
 旧系统回退 `NSVisualEffectView`。**无网络代码**：既没有网络权限声明，也不链接任何网络库
@@ -13,19 +13,19 @@ InputMethodKit 外壳 + Rust 内核静态库；候选窗在 macOS 26+ 使用系�
 
 ## 图形安装器
 
-`build.sh` 会同时产出 `build/InputFlow 安装器.app`（内嵌 InputFlow.app、base.ifd 与图标）：
+`build.sh` 会同时产出 `build/松萝安装器.app`（内嵌 Liana.app、base.ifd 与图标）：
 
 - 侧栏三步向导：**安装位置**（用户级 / 系统级需管理员）→ **输入与隐私**（默认模式、
   简繁输出、剪切板、桌宠、按应用记忆、输入统计、标点策略）→ **安装与验证**
   （安装进度日志、收录状态实时检测、打开键盘设置、卸载）
 - 配置写入 `dev.inputflow.inputmethod` 域（与输入法本体的 UserDefaults 一致）
-- 打包 DMG 时把「InputFlow 安装器.app」与说明一起放入即可
+- 打包 DMG 时把「松萝安装器.app」与说明一起放入即可
 
 ## 图标
 
 - 源文件：`tools/make-icons.swift`（程序化绘制，配色取自 `docs/design-tokens.json` 的 accent）
-- 生成：`swift tools/make-icons.swift` → `assets/InputFlow.icns`（光标 + 文字线）
-  与 `assets/InputFlowInstaller.icns`（下载箭头变体）
+- 生成：`swift tools/make-icons.swift` → `assets/Liana.icns`（光标 + 文字线）
+  与 `assets/LianaInstaller.icns`（下载箭头变体）
 - 已提交 icns，`build.sh` 直接复制进两个 bundle 的 `Contents/Resources`
 
 ## 签名与系统收录（重要）
@@ -46,7 +46,7 @@ ad-hoc 签名，安装器会明确提示这一点。拿到签名身份后，把 
 等价于 Squirrel 的安装流程；这些命令也可以单独手动执行：
 
 ```bash
-BIN="$HOME/Library/Input Methods/InputFlow.app/Contents/MacOS/InputFlow"
+BIN="$HOME/Library/Input Methods/Liana.app/Contents/MacOS/Liana"
 "$BIN" --register-input-source   # 通知系统缓存重建
 "$BIN" --enable-input-source     # 在输入法列表中启用
 "$BIN" --select-input-source     # 立即切换为当前输入法
@@ -56,8 +56,8 @@ BIN="$HOME/Library/Input Methods/InputFlow.app/Contents/MacOS/InputFlow"
 首次启用（macOS 对输入法注册有缓存，需要重新登录一次）：
 
 1. 注销并重新登录；
-2. 系统设置 → 键盘 → 文字输入 → 输入法 → 编辑… → `+` → 中文（简体）→ **InputFlow**；
-3. 用 `Ctrl+Space` 切到 InputFlow。
+2. 系统设置 → 键盘 → 文字输入 → 输入法 → 编辑… → `+` → 中文（简体）→ **松萝**；
+3. 用 `Ctrl+Space` 切到 松萝。
 
 卸载：`./uninstall.sh`（加 `--purge` 一并删除用户数据）。
 
@@ -97,7 +97,7 @@ BIN="$HOME/Library/Input Methods/InputFlow.app/Contents/MacOS/InputFlow"
 ## 用户数据（加密持久化）
 
 - 用户词 + 上下词二元组 + 剪切板历史统一存
-  `~/Library/Application Support/InputFlow/userdata.enc`（0600）；
+  `~/Library/Application Support/Liana/userdata.enc`（0600）；
 - 密钥 256-bit 随机生成，存系统钥匙串（service `dev.inputflow.inputmethod`），
   钥匙串不可用时本次运行不落盘，绝不把密钥写到数据文件旁边；
 - 格式：`IFUE` + 版本 + ChaCha20-Poly1305（头部作为 AAD），原子写入；
@@ -113,7 +113,7 @@ BIN="$HOME/Library/Input Methods/InputFlow.app/Contents/MacOS/InputFlow"
 ## 调试命令
 
 ```bash
-BIN="$HOME/Library/Input Methods/InputFlow.app/Contents/MacOS/InputFlow"
+BIN="$HOME/Library/Input Methods/Liana.app/Contents/MacOS/Liana"
 "$BIN" --store-smoke       # 加密存储自检（临时文件，不触碰真实数据）
 "$BIN" --backup-smoke      # 备份包自检（导出→加密→解密→导回，不弹窗）
 "$BIN" --store-info        # 钥匙串可用性 + 已加载数据量
@@ -129,7 +129,7 @@ BIN="$HOME/Library/Input Methods/InputFlow.app/Contents/MacOS/InputFlow"
 - **L0 统计模型**（默认开启）：用户词频 + 历史二元组重排，内存 < 1 MB，零下载；
 - **L2 小模型**（默认关闭）：Gemma 3 / Qwen2.5 / Qwen3 / Whisper，按本机内存推荐；
   下载仅在你点击后发生，完成后做 sha256 校验，存放于
-  `~/Library/Application Support/InputFlow/models/`，可一键删除；
+  `~/Library/Application Support/Liana/models/`，可一键删除；
 - 神经模型推理运行时（llama.cpp / whisper.cpp）将在 M2 接入；
 - 设计约束见 `docs/adr/0004-local-ai-optional-models.md`。
 
@@ -137,14 +137,14 @@ BIN="$HOME/Library/Input Methods/InputFlow.app/Contents/MacOS/InputFlow"
 
 - 内置主词库 20 万词条（单字 4.6 万 + 词语 15.4 万），rime-ice 导入 + 人工校准高频词，
   来源与许可见 `crates/dict/data/SOURCES.md`；
-- 外部词典：`~/Library/Application Support/InputFlow/base.ifd`（install.sh 自动安装；重新登录或切换输入法后生效）；
+- 外部词典：`~/Library/Application Support/Liana/base.ifd`（install.sh 自动安装；重新登录或切换输入法后生效）；
 - 从 Rime 词库导入（例如雾凇拼音）：
 
 ```bash
 cd ../../
 cargo run -p xtask -- dict import-rime ~/Downloads/pinyin.dict.yaml \
     -o /tmp/base.ifd --with-base
-cp /tmp/base.ifd ~/Library/Application\ Support/InputFlow/base.ifd
+cp /tmp/base.ifd ~/Library/Application\ Support/Liana/base.ifd
 ```
 
 ## 开发说明

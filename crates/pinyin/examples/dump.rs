@@ -1,9 +1,9 @@
-//! 手动检查候选排序：`cargo run -p inputflow-pinyin --example dump [dict.ifd]`
+//! 手动检查候选排序：`cargo run -p liana-pinyin --example dump [dict.ifd]`
 
 use std::sync::Arc;
 
-use inputflow_dict::Dictionary;
-use inputflow_pinyin::{Layout, PinyinDecoder};
+use liana_dict::Dictionary;
+use liana_pinyin::{Layout, PinyinDecoder};
 
 fn main() {
     let dict = match std::env::args().nth(1) {
@@ -52,7 +52,7 @@ fn main() {
             ],
         ),
         (
-            Layout::Shuangpin(inputflow_core::Scheme::Flypy),
+            Layout::Shuangpin(liana_core::Scheme::Flypy),
             vec!["vsgo", "nihc", "uurufa", "aj"],
         ),
     ] {

@@ -8,7 +8,7 @@ pub mod scheme;
 pub use decode::{Layout, PinyinDecoder, normalize};
 pub use scheme::{Codes, MAX_SYLLABLE_LEN};
 
-use inputflow_core::{Candidate, Decoder};
+use liana_core::{Candidate, Decoder};
 
 impl Decoder for PinyinDecoder {
     fn decode(&self, input: &str) -> Vec<Candidate> {

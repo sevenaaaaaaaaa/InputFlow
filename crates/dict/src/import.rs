@@ -3,7 +3,7 @@
 //! 导入是词典进入系统的唯一入口，因此这里做严格校验（音节合法性），
 //! 并把跳过的行报告给用户，而不是静默丢弃。
 
-use inputflow_core::syllables::is_syllable;
+use liana_core::syllables::is_syllable;
 
 use crate::Dictionary;
 

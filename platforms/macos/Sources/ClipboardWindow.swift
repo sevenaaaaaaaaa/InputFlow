@@ -19,7 +19,7 @@ final class ClipboardWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "InputFlow · 剪切板历史"
+        window.title = "松萝 · 剪切板历史"
         window.isReleasedWhenClosed = false
         window.center()
         self.init(window: window)
@@ -84,7 +84,7 @@ final class ClipboardWindowController: NSWindowController {
         root.addArrangedSubview(statusLabel)
 
         let note = NSTextField(wrappingLabelWithString:
-            "历史加密保存在 ~/Library/Application Support/InputFlow/userdata.enc，"
+            "历史加密保存在 ~/Library/Application Support/Liana/userdata.enc，"
             + "密码管理器标记的敏感内容不会记录。")
         note.font = .systemFont(ofSize: 11)
         note.textColor = .tertiaryLabelColor

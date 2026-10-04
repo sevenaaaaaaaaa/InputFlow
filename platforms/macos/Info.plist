@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <key>TISInputSourceID</key>
-    <string>dev.inputflow.ime</string>
+    <string>dev.liana.ime</string>
     <key>TISIntendedLanguage</key>
     <string>zh-Hans</string>
     <key>tsInputMethodCharacterRepertoireKey</key>
@@ -13,17 +13,17 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>zh_CN</string>
     <key>CFBundleExecutable</key>
-    <string>InputFlow</string>
+    <string>Liana</string>
     <key>CFBundleIconFile</key>
-    <string>InputFlow.icns</string>
+    <string>Liana.icns</string>
     <key>CFBundleIdentifier</key>
-    <string>dev.inputflow.ime</string>
+    <string>dev.liana.ime</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>InputFlow</string>
+    <string>Liana</string>
     <key>CFBundleDisplayName</key>
-    <string>InputFlow</string>
+    <string>松萝</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleSignature</key>
@@ -36,10 +36,10 @@
     <dict>
         <key>tsInputModeListKey</key>
         <dict>
-            <key>dev.inputflow.ime.zh</key>
+            <key>dev.liana.ime.zh</key>
             <dict>
                 <key>TISInputSourceID</key>
-                <string>dev.inputflow.ime.zh</string>
+                <string>dev.liana.ime.zh</string>
                 <key>TISIntendedLanguage</key>
                 <string>zh-Hans</string>
                 <key>tsInputModeCharacterRepertoireKey</key>
@@ -57,24 +57,24 @@
                 <key>tsInputModeKeyEquivalentModifiersKey</key>
                 <integer>4608</integer>
                 <key>tsInputModeMenuIconFileKey</key>
-                <string>InputFlow.icns</string>
+                <string>Liana.icns</string>
                 <key>tsInputModePaletteIconFileKey</key>
-                <string>InputFlow.icns</string>
+                <string>Liana.icns</string>
                 <key>tsInputModeAlternateMenuIconFileKey</key>
-                <string>InputFlow.icns</string>
+                <string>Liana.icns</string>
             </dict>
         </dict>
         <key>tsVisibleInputModeOrderedArrayKey</key>
         <array>
-            <string>dev.inputflow.ime.zh</string>
+            <string>dev.liana.ime.zh</string>
         </array>
     </dict>
     <key>InputMethodConnectionName</key>
-    <string>InputFlow_Connection</string>
+    <string>Liana_Connection</string>
     <key>InputMethodServerControllerClass</key>
-    <string>InputFlowInputController</string>
+    <string>LianaInputController</string>
     <key>InputMethodServerDelegateClass</key>
-    <string>InputFlowInputController</string>
+    <string>LianaInputController</string>
     <key>LSBackgroundOnly</key>
     <false/>
     <key>LSUIElement</key>

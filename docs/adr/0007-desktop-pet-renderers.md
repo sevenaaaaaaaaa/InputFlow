@@ -62,7 +62,7 @@
 
 ### 4. 资产管理
 
-- 形象包放 `~/Library/Application Support/InputFlow/plugins/<id>/`，随包分发的示例在
+- 形象包放 `~/Library/Application Support/Liana/plugins/<id>/`，随包分发的示例在
   `examples/plugins/`，版本变化自动更新；
 - 角色资产不进 Git 大文件：分发走独立资源包（复用 AI 模型目录的 sha256 校验机制）；
 - 授权字段必填（`license`），非商用/需署名资产必须在 `plugin.json` 里写明。

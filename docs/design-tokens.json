@@ -1,5 +1,5 @@
 {
-  "$comment": "InputFlow 设计令牌单一来源。继承 OpenFlow/ThirdC 契约：全 oklch、零 hex、圆角三档、弹簧动效。生成器见 xtask tokens（M1）。",
+  "$comment": "松萝设计令牌单一来源。继承 OpenFlow/ThirdC 契约：全 oklch、零 hex、圆角三档、弹簧动效。生成器见 xtask tokens（M1）。",
   "version": 1,
   "color": {
     "light": {

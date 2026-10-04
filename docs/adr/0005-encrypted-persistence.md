@@ -12,7 +12,7 @@ M0 的用户词只在内存，重启即失；候选重排与「上下词预测�
 
 ### 存储容器
 
-- 单文件：`~/Library/Application Support/InputFlow/userdata.enc`，权限 0600。
+- 单文件：`~/Library/Application Support/Liana/userdata.enc`，权限 0600。
 - 格式：`magic("IFUE") + version(1) + ChaChaPoly combined(nonce ‖ ciphertext ‖ tag)`；
   头部作为 AEAD 的 AAD 一并认证，防止版本降级/篡改。
 - 明文载荷是 JSON（`userModelTsv` + `clipboard` 数组），带 `schemaVersion` 字段；

@@ -5,7 +5,7 @@
 
 use std::sync::OnceLock;
 
-use inputflow_core::{Candidate, CandidateKind, Decoder};
+use liana_core::{Candidate, CandidateKind, Decoder};
 
 mod data;
 

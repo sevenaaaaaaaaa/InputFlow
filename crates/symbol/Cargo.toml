@@ -1,10 +1,10 @@
 [package]
-name = "inputflow-symbol"
+name = "liana-symbol"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "InputFlow 符号输入：常用符号 / 序号 / 货币 / 数学表与拼音检索（零依赖）"
+description = "松萝符号输入：常用符号 / 序号 / 货币 / 数学表与拼音检索（零依赖）"
 
 [dependencies]
-inputflow-core = { workspace = true }
+liana-core = { workspace = true }

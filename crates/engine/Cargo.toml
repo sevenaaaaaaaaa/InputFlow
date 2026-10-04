@@ -1,17 +1,17 @@
 [package]
-name = "inputflow-engine"
+name = "liana-engine"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "InputFlow 会话编排：模式切换、选词提交、学习重排"
+description = "松萝会话编排：模式切换、选词提交、学习重排"
 
 [dependencies]
-inputflow-core = { workspace = true }
-inputflow-dict = { workspace = true }
-inputflow-pinyin = { workspace = true }
-inputflow-en = { workspace = true }
-inputflow-ja = { workspace = true }
-inputflow-emoji = { workspace = true }
-inputflow-symbol = { workspace = true }
-inputflow-zhconv = { workspace = true }
+liana-core = { workspace = true }
+liana-dict = { workspace = true }
+liana-pinyin = { workspace = true }
+liana-en = { workspace = true }
+liana-ja = { workspace = true }
+liana-emoji = { workspace = true }
+liana-symbol = { workspace = true }
+liana-zhconv = { workspace = true }

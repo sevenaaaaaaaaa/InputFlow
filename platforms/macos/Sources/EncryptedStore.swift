@@ -30,8 +30,9 @@ final class EncryptedStore {
     private let fileURL: URL
     private var key: SymmetricKey?
     private var saveWorkItem: DispatchWorkItem?
-    /// 钥匙串服务名故意钉在最初的 bundle id 上：换 ID 后密钥不变，
-/// 旧 userdata.enc 依旧可解（bundle id 本身不参与加解密，只做钥匙串寻址）。
+    /// 钥匙串服务名故意钉死在初代产品（InputFlow）的 bundle id 上，品牌升级为
+    /// 松萝 / Liana、换 bundle id（dev.liana.ime）都不跟着改：换 ID 后密钥不变，
+    /// 旧 userdata.enc 依旧可解（bundle id 本身不参与加解密，只做钥匙串寻址）。
     private let service = "dev.inputflow.inputmethod"
     private let account = "userdata-key"
 
@@ -50,7 +51,7 @@ final class EncryptedStore {
 
     convenience init() {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("InputFlow", isDirectory: true)
+            .appendingPathComponent("Liana", isDirectory: true)
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         self.init(fileURL: base.appendingPathComponent("userdata.enc"))
     }
@@ -64,7 +65,7 @@ final class EncryptedStore {
             self.key = k
             self.keyAvailable = true
         } else {
-            NSLog("InputFlow: 钥匙串不可用，本次运行的用户词/剪切板不会落盘")
+            NSLog("Liana: 钥匙串不可用，本次运行的用户词/剪切板不会落盘")
         }
     }
 
@@ -83,7 +84,7 @@ final class EncryptedStore {
             clipboard = payload.clipboard
             return true
         } catch {
-            NSLog("InputFlow: userdata.enc 解析失败（\(error.localizedDescription)），按空数据处理")
+            NSLog("Liana: userdata.enc 解析失败（\(error.localizedDescription)），按空数据处理")
             let backup = fileURL.appendingPathExtension("corrupt")
             try? FileManager.default.removeItem(at: backup)
             try? FileManager.default.moveItem(at: fileURL, to: backup)
@@ -213,7 +214,7 @@ final class EncryptedStore {
             try sealed.write(to: fileURL, options: [.atomic])
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
         } catch {
-            NSLog("InputFlow: 用户数据落盘失败（\(error.localizedDescription)）")
+            NSLog("Liana: 用户数据落盘失败（\(error.localizedDescription)）")
         }
     }
 
@@ -226,7 +227,7 @@ final class EncryptedStore {
 
     private static func open(_ data: Data, key: SymmetricKey) throws -> Data {
         guard data.count > header.count, data.prefix(header.count) == header else {
-            throw NSError(domain: "InputFlow.Store", code: 1, userInfo: [NSLocalizedDescriptionKey: "文件头不匹配"])
+            throw NSError(domain: "Liana.Store", code: 1, userInfo: [NSLocalizedDescriptionKey: "文件头不匹配"])
         }
         let box = try ChaChaPoly.SealedBox(combined: data.dropFirst(header.count))
         return try ChaChaPoly.open(box, using: key, authenticating: header)
@@ -324,13 +325,13 @@ final class EncryptedStore {
     }
 }
 
-// MARK: - 自检（`InputFlow --store-smoke`）
+// MARK: - 自检（`Liana --store-smoke`）
 
 extension EncryptedStore {
     /// 加密存储往返自检：临时文件 + 随机密钥，不触碰真实钥匙串与用户文件。
     static func smokeTest() -> Bool {
         let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("inputflow-store-smoke-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("liana-store-smoke-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let url = dir.appendingPathComponent("userdata.enc")

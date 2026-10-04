@@ -4,7 +4,7 @@ import Foundation
 /// 同声传译运行时：llama.cpp 的 `llama-server` 独立进程 + 127.0.0.1 回环 HTTP。
 ///
 /// ADR-0004 边界：
-/// - 运行时不由 InputFlow 下载（用户自行 `brew install llama.cpp`），这里只做检测与引导；
+/// - 运行时不由 松萝下载（用户自行 `brew install llama.cpp`），这里只做检测与引导；
 /// - 模型走 `AIModelStore`（点击下载 + sha256 校验），未安装时拒绝启动；
 /// - 只连接回环地址：原文与译文不离开设备，没有遥测、没有外部请求。
 final class TranslateClient {
@@ -41,7 +41,7 @@ final class TranslateClient {
 
     /// 查找 llama-server：环境变量 → 常见路径 → PATH。
     static func findRuntime() -> String? {
-        if let p = ProcessInfo.processInfo.environment["INPUTFLOW_LLAMA_SERVER"],
+        if let p = ProcessInfo.processInfo.environment["LIANA_LLAMA_SERVER"],
            FileManager.default.isExecutableFile(atPath: p) {
             return p
         }
@@ -259,7 +259,7 @@ final class TranslateClient {
                 completion(.failure(TranslateError.modelMissing)); return
             }
             let payload: [String: Any] = [
-                "model": "inputflow",
+                "model": "liana",
                 "messages": [
                     ["role": "system", "content": system],
                     ["role": "user", "content": user],

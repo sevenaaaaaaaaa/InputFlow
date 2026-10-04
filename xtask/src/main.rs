@@ -1,4 +1,4 @@
-//! InputFlow 构建工具（零依赖）。
+//! 松萝构建工具（零依赖）。
 //!
 //! ```text
 //! xtask dict build <input.tsv> -o <output.ifd> [--with-base]
@@ -11,9 +11,9 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use inputflow_dict::Dictionary;
-use inputflow_dict::import::{ImportReport, parse_rime_dict, parse_rime_dicts, parse_tsv};
-use inputflow_plugin::Pack;
+use liana_dict::Dictionary;
+use liana_dict::import::{ImportReport, parse_rime_dict, parse_rime_dicts, parse_tsv};
+use liana_plugin::Pack;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -51,8 +51,8 @@ fn accuracy_cmd() -> Result<(), String> {
     use std::collections::BTreeMap;
     use std::sync::Arc;
 
-    use inputflow_core::Mode;
-    use inputflow_engine::Session;
+    use liana_core::Mode;
+    use liana_engine::Session;
 
     let tsv = std::fs::read_to_string("crates/dict/data/base-large.tsv")
         .map_err(|e| format!("读不到 crates/dict/data/base-large.tsv: {e}（请在仓库根目录运行）"))?;
@@ -239,7 +239,7 @@ fn accuracy_cmd() -> Result<(), String> {
     }
 
     println!();
-    println!("═══ InputFlow 输入准确率体检 ═══");
+    println!("═══ 松萝输入准确率体检 ═══");
     for (group, (p, n)) in &by_group {
         let pct = if *n > 0 { p * 100 / n } else { 0 };
         let bar = "█".repeat(pct / 5) + &"░".repeat(20 - pct / 5);
