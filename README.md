@@ -76,6 +76,17 @@
 
 ## 快速上手
 
+### 普通用户（最简单，零命令行）
+
+1. 双击 **松萝安装器.app**（或从 DMG 打开）
+2. 点 **「一键安装（推荐）」** —— 自动装到 `~/Library/Input Methods`
+3. 安装器会自动打开 **键盘设置**：点 **+** → **中文（简体）** → **松萝**，即可用
+
+> 若「松萝」不在列表里，**注销并重新登录一次**即可（macOS 对全新输入法需重新扫描）。
+> 首次打开若被 Gatekeeper 拦下：右键安装器 → **打开**（免此步骤需 Developer ID 公证版本）。
+
+### 从源码构建（开发者）
+
 ```bash
 cargo test                                  # 内核 214 项测试,全绿是合并底线
 
@@ -83,9 +94,6 @@ cargo test                                  # 内核 214 项测试,全绿是合�
 ./platforms/macos/build.sh                  # 构建自动选用可用签名身份
 ./platforms/macos/install.sh                # 安装到 ~/Library/Input Methods
 ```
-
-启用:**系统设置 → 键盘 → 输入法 → + → 中文(简体)→ 松萝**
-(macOS 26 仅收录有效签名;ad-hoc 构建需注销重登录或先配置签名身份)
 
 发布分发:`./platforms/macos/dist.sh`(签名 → Hardened Runtime → 公证 → DMG → staple);签名三级降级如实标注产物,绝不假装可分发。
 
