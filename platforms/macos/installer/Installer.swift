@@ -52,6 +52,7 @@ final class InstallerWindowController: NSWindowController {
     private var progressTimer: Timer?
     private var pollCount = 0
     private var hasInstalled = false
+    private var promptedSettings = false
 
     private let modeOptions: [(String, String)] = [
         ("pinyin", "拼音（全拼，推荐）"),
@@ -237,6 +238,23 @@ final class InstallerWindowController: NSWindowController {
         systemCard.widthAnchor.constraint(equalToConstant: 460).isActive = true
         stack.addArrangedSubview(userCard)
         stack.addArrangedSubview(systemCard)
+
+        let express = NSButton(title: "一键安装（推荐）", target: self, action: #selector(expressInstall))
+        express.bezelStyle = .rounded
+        express.bezelColor = accent
+        express.controlSize = .large
+        express.font = .systemFont(ofSize: 15, weight: .semibold)
+        express.keyEquivalent = "\r"
+        express.widthAnchor.constraint(equalToConstant: 460).isActive = true
+        express.heightAnchor.constraint(equalToConstant: 40).isActive = true
+        stack.setCustomSpacing(18, after: systemCard)
+        stack.addArrangedSubview(express)
+        let note = NSTextField(wrappingLabelWithString:
+            "用推荐设置直接装好：仅当前用户 · 拼音 · 隐私优先。想自选模式/选项请点「下一步」。")
+        note.font = .systemFont(ofSize: 11)
+        note.textColor = .tertiaryLabelColor
+        note.preferredMaxLayoutWidth = 460
+        stack.addArrangedSubview(note)
         return stack
     }
 
@@ -395,12 +413,17 @@ final class InstallerWindowController: NSWindowController {
         }
     }
 
+    @objc private func expressInstall() {
+        selectLocation(system: false)
+        switchStep(2)
+        install()
+    }
+
     @objc private func goBack() {
         switchStep(max(0, step - 1))
     }
 
-    @objc private func goNext() {
-        if step == 2 {
+    @objc private func goNext() {        if step == 2 {
             window?.close()
             NSApp.terminate(nil)
             return
@@ -509,6 +532,7 @@ final class InstallerWindowController: NSWindowController {
             runShell("/usr/bin/killall Liana")
             runShell("\"\(dest)/Contents/MacOS/Liana\" --register-input-source")
             runShell("\"\(dest)/Contents/MacOS/Liana\" --enable-input-source")
+            runShell("\"\(dest)/Contents/MacOS/Liana\" --dedupe-input-source")
             runShell("/usr/bin/killall TextInputMenuAgent imklaunchagent")
             hasInstalled = true
             log("✅ 已安装到 \(dest)")
@@ -537,6 +561,7 @@ final class InstallerWindowController: NSWindowController {
         if [ -f "$DICT_SRC" ]; then cp "$DICT_SRC" "$DICT_DST/base.ifd"; chown \(user) "$DICT_DST/base.ifd" || true; fi
         "$DST/Contents/MacOS/Liana" --register-input-source || true
         "$DST/Contents/MacOS/Liana" --enable-input-source || true
+        "$DST/Contents/MacOS/Liana" --dedupe-input-source || true
         """
         let path = NSTemporaryDirectory() + "liana-install.sh"
         do {
@@ -584,9 +609,13 @@ final class InstallerWindowController: NSWindowController {
                 self.log("✅ 系统已收录松萝")
                 self.setDetectPill("已收录", color: .systemGreen)
                 self.progressTimer?.invalidate()
-            } else if self.pollCount >= 20 {
-                self.log("⏳ 等待超时：系统未收录（ad-hoc 签名被拒属预期；有效签名请注销重登）")
-                self.setDetectPill("未收录", color: .systemOrange)
+            } else if self.pollCount == 5, !self.promptedSettings {
+                self.promptedSettings = true
+                self.log("👉 正在打开「键盘设置」：点 + → 中文（简体）→ 松萝 即可开始使用")
+                self.openKeyboardSettings()
+            } else if self.pollCount >= 24 {
+                self.log("⏳ 仍未收录。若「松萝」不在列表里，注销并重新登录一次即可。")
+                self.setDetectPill("需手动添加", color: .systemOrange)
                 self.progressTimer?.invalidate()
             }
         }
