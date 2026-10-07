@@ -44,6 +44,54 @@ private func describe(_ source: TISInputSource) -> String {
     return "\(sourceIdentifier(source)) enabled=\(enabled) selectable=\(selectable) selected=\(selected)"
 }
 
+// 修复跨注册表双写：第三方输入法的启用态可能同时落在
+//   ~/Library/Preferences/com.apple.HIToolbox.plist（AppleEnabledInputSources）与
+//   ~/Library/Preferences/com.apple.inputsources.plist（AppleEnabledThirdPartyInputSources）
+// 两处，TIS 合并枚举时会各读一次 → 输入法菜单出现两个同名条目。
+// 规则：同一输入源只保留第三方表，HIToolbox 中的同名条目删除（仅当第三方表确含本输入法）。
+private func dedupeInputSourcePersistence() -> (hitoolboxRemoved: Int, thirdPartyCount: Int, thirdPartyDupes: Int) {
+    let bid = inputSourceID()
+    let tpDomain = "com.apple.inputsources" as CFString
+    let tpKey = "AppleEnabledThirdPartyInputSources" as CFString
+    let hbDomain = "com.apple.HIToolbox" as CFString
+    let hbKey = "AppleEnabledInputSources" as CFString
+
+    func readArray(_ domain: CFString, _ key: CFString) -> [[String: Any]] {
+        (CFPreferencesCopyAppValue(key, domain) as? [[String: Any]]) ?? []
+    }
+    func entryKey(_ e: [String: Any]) -> String {
+        "\(e["Bundle ID"] ?? "")|\(e["Input Mode"] ?? "")|\(e["InputSourceKind"] ?? "")"
+    }
+    func isOurs(_ e: [String: Any]) -> Bool { (e["Bundle ID"] as? String) == bid }
+
+    // 第三方表：去掉内部完全重复的条目
+    let tp = readArray(tpDomain, tpKey)
+    var seen = Set<String>()
+    var tpClean: [[String: Any]] = []
+    for e in tp where !seen.contains(entryKey(e)) {
+        seen.insert(entryKey(e))
+        tpClean.append(e)
+    }
+    let tpDupes = tp.count - tpClean.count
+    if tpDupes > 0 {
+        CFPreferencesSetAppValue(tpKey, tpClean as CFArray, tpDomain)
+        CFPreferencesAppSynchronize(tpDomain)
+    }
+
+    // 仅当第三方表仍包含本输入法时，才移除 HIToolbox 里的同名条目，避免把关掉唯一注册
+    var removed = 0
+    if tpClean.contains(where: isOurs) {
+        let hb = readArray(hbDomain, hbKey)
+        let hbClean = hb.filter { !isOurs($0) }
+        removed = hb.count - hbClean.count
+        if removed > 0 {
+            CFPreferencesSetAppValue(hbKey, hbClean as CFArray, hbDomain)
+            CFPreferencesAppSynchronize(hbDomain)
+        }
+    }
+    return (removed, tpClean.count, tpDupes)
+}
+
 let installArgs = CommandLine.arguments
 if installArgs.count > 1 {
     switch installArgs[1] {
@@ -81,7 +129,16 @@ if installArgs.count > 1 {
                 allOK = false
             }
         }
+        let dedupe = dedupeInputSourcePersistence()
+        if dedupe.hitoolboxRemoved > 0 || dedupe.thirdPartyDupes > 0 {
+            print("去重: HIToolbox 移除 \(dedupe.hitoolboxRemoved) 条，第三方表内部重复 \(dedupe.thirdPartyDupes) 条")
+        }
         exit(allOK ? 0 : 1)
+
+    case "--dedupe-input-source":
+        let r = dedupeInputSourcePersistence()
+        print("去重完成: HIToolbox 移除 \(r.hitoolboxRemoved) 条，第三方表 \(r.thirdPartyCount) 条（内部重复 \(r.thirdPartyDupes)）")
+        exit(0)
 
     case "--select-input-source":
         guard let source = findInputSource(), boolProperty(source, kTISPropertyInputSourceIsEnabled) == true else {

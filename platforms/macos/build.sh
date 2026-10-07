@@ -130,6 +130,21 @@ if [[ "$BUNDLE_ID" != "dev.liana.ime" ]]; then
     echo "    bundle id 覆盖为: $BUNDLE_ID"
 fi
 
+# 输入模式的本地化显示名：以模式的 TISInputSourceID 为 key 写入 InfoPlist.strings，
+# 否则切换器/系统设置里会显示裸 bundle id（如 dev.liana.ime.zh），既长又难认。
+MODE_ID="${BUNDLE_ID}.zh"
+mkdir -p "$CONTENTS/Resources/zh-Hans.lproj" "$CONTENTS/Resources/Base.lproj"
+write_strings() {
+    local path="$1" name="$2"
+    cat > "$path" <<EOF
+"${MODE_ID}" = "${name}";
+"CFBundleDisplayName" = "${name}";
+"CFBundleName" = "${name}";
+EOF
+}
+write_strings "$CONTENTS/Resources/zh-Hans.lproj/InfoPlist.strings" "松萝"
+write_strings "$CONTENTS/Resources/Base.lproj/InfoPlist.strings" "松萝"
+
 echo "==> 3/5 生成外部词典（base.ifd，20 万词条）"
 DICT_OUT="$HERE/build/base.ifd"
 DICT_SRC="$ROOT/crates/dict/data/base-large.tsv"

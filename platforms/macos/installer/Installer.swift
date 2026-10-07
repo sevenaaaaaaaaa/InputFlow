@@ -137,7 +137,10 @@ final class InstallerWindowController: NSWindowController {
         let version = NSTextField(labelWithString: "本地输入法 · v0.1.0")
         version.font = .systemFont(ofSize: 11)
         version.textColor = .secondaryLabelColor
-        let header = NSStackView(views: [icon, name, version])
+        let tagline = NSTextField(labelWithString: "输入即生长 · 零云 · 零遥测")
+        tagline.font = .systemFont(ofSize: 11)
+        tagline.textColor = .tertiaryLabelColor
+        let header = NSStackView(views: [icon, name, version, tagline])
         header.orientation = .vertical
         header.alignment = .leading
         header.spacing = 4
@@ -301,6 +304,14 @@ final class InstallerWindowController: NSWindowController {
         detectPill.widthAnchor.constraint(equalToConstant: 220).isActive = true
         stack.addArrangedSubview(detectPill)
         setDetectPill("未检测", color: .tertiaryLabelColor)
+
+        let guide = NSTextField(wrappingLabelWithString:
+            "首次启用：打开「键盘设置」→ 文字输入 → 编辑… → + → 中文（简体）→ 松萝。"
+            + "若列表里暂时没有，注销并重新登录一次即可（macOS 对全新输入法需重新扫描）。")
+        guide.font = .systemFont(ofSize: 12)
+        guide.textColor = .secondaryLabelColor
+        guide.preferredMaxLayoutWidth = 440
+        stack.addArrangedSubview(card(guide))
 
         let logScroll = NSScrollView()
         logScroll.hasVerticalScroller = true
