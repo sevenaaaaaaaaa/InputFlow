@@ -13,7 +13,7 @@ PLIST="$DEST/Contents/Info.plist"
 
 # 以已安装 bundle 的实际 id 为准（支持 build.sh 的 BUNDLE_ID 覆盖）
 BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$PLIST" 2>/dev/null || true)"
-[[ -n "$BUNDLE_ID" ]] || BUNDLE_ID="dev.liana.ime"
+[[ -n "$BUNDLE_ID" ]] || BUNDLE_ID="dev.liana.inputmethod.ime"
 LEGACY_BUNDLE_ID="dev.inputflow.ime"
 # 钥匙串服务名钉死在初代 bundle id 上（EncryptedStore.swift），不随品牌/bundle id 变
 KEYCHAIN_SERVICE="dev.inputflow.inputmethod"

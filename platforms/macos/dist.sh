@@ -69,6 +69,11 @@ codesign --force --sign "$IDENTITY" --options runtime --entitlements "$ENTITLEME
     --deep --timestamp "$APP" || die "重签 Liana.app 失败"
 if [[ -d "$INSTALLER" ]]; then
     log "重签（Hardened Runtime + entitlements）：安装器"
+    # --deep 不递归 Resources/ 下的内嵌 .app，先显式重签内嵌输入法再签外层
+    if [[ -d "$INSTALLER/Contents/Resources/Liana.app" ]]; then
+        codesign --force --sign "$IDENTITY" --options runtime --entitlements "$ENTITLEMENTS" \
+            --deep --timestamp "$INSTALLER/Contents/Resources/Liana.app" || die "重签内嵌输入法失败"
+    fi
     codesign --force --sign "$IDENTITY" --options runtime --entitlements "$ENTITLEMENTS" \
         --deep --timestamp "$INSTALLER" || die "重签安装器失败"
 fi

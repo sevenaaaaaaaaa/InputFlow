@@ -6,7 +6,7 @@ import InputMethodKit
 // 与 Squirrel 相同的做法：由输入法自身调用 TIS API，安装后无需注销即可被系统发现。
 
 private func inputSourceID() -> String {
-    Bundle.main.bundleIdentifier ?? "dev.liana.ime"
+    Bundle.main.bundleIdentifier ?? "dev.liana.inputmethod.ime"
 }
 
 private func findInputSources() -> [TISInputSource] {
@@ -403,6 +403,11 @@ if installArgs.count > 1 {
         NSApplication.shared.run()
         exit(0)
 
+    case "--avatar-creator":
+        AvatarCreatorWindowController.shared.show()
+        NSApplication.shared.run()
+        exit(0)
+
     case "--pet-catalog":
         PluginStore.seedBundledPacks()
         for entry in PetCatalogStore.entries() {
@@ -423,6 +428,22 @@ if installArgs.count > 1 {
         RunLoop.main.run()
         exit(0)
 
+    case "--pet-catalog-fetch":
+        guard installArgs.count > 2,
+              let entry = PetCatalogStore.entries().first(where: { $0.id == installArgs[2] }) else {
+            print("用法: --pet-catalog-fetch <id>（用 --pet-catalog 查看）")
+            exit(1)
+        }
+        PetModelInstaller.install(entry, onProgress: { _ in }) { result in
+            switch result {
+            case .success: print("installed \(entry.id)")
+            case .failure(let error): print("failed: \(error.localizedDescription)")
+            }
+            exit(0)
+        }
+        RunLoop.main.run()
+        exit(0)
+
     case "--pet-vrm-check":
         PluginStore.seedBundledPacks()
         PetWindowController.activePackId = "pet-vrm-sample"
@@ -434,6 +455,21 @@ if installArgs.count > 1 {
         RunLoop.main.run(until: Date().addingTimeInterval(0.6))
         PetWindowController.shared.captureVrmPNG(to: "/tmp/petshots/vrm-live.png") { ok in
             print("capture=\(ok)")
+            exit(0)
+        }
+        RunLoop.main.run()
+        exit(0)
+
+    case "--pet-capture":
+        // JS canvas 抓图（能捕获 WebGL，--pet-demo 的 takeSnapshot 抓不到 VRM）
+        PluginStore.seedBundledPacks()
+        let pid = installArgs.count > 2 ? installArgs[2] : "pet-vrm-sample"
+        let out = installArgs.count > 3 ? installArgs[3] : "/tmp/pet-capture.png"
+        PetWindowController.activePackId = pid
+        PetWindowController.setEnabled(true)
+        RunLoop.main.run(until: Date().addingTimeInterval(6))
+        PetWindowController.shared.captureVrmPNG(to: out) { ok in
+            print("capture \(pid) ok=\(ok) -> \(out)")
             exit(0)
         }
         RunLoop.main.run()
@@ -515,18 +551,27 @@ private func migrateLegacyBrandData() {
         }
     }
 
-    // 偏好键：旧域 dev.inputflow.ime 的 InputFlow* → 新域 Liana*（前缀替换，同名规则覆盖
-    // LianaAIModel.<kind> 这类动态后缀键）。不删旧域，留作回滚。
-    let legacyDomain = "dev.inputflow.ime"
-    guard let legacy = UserDefaults.standard.persistentDomain(forName: legacyDomain), !legacy.isEmpty
-    else { return }
+    // 偏好键：旧域 → 新域。bundle id 迁移过多次，逐个源域搬运，同名规则覆盖
+    // LianaAIModel.<kind> 这类动态后缀键。不删旧域，留作回滚。
+    //   dev.inputflow.ime / dev.inputflow.inputmethod : InputFlow* → Liana*
+    //   dev.liana.ime                                 : Liana*      → Liana*（仅换域）
+    let legacyPrefDomains: [(domain: String, prefix: String)] = [
+        ("dev.inputflow.ime", "InputFlow"),
+        ("dev.inputflow.inputmethod", "InputFlow"),
+        ("dev.liana.ime", "Liana"),
+    ]
     let newDefaults = UserDefaults.standard
     var migrated = 0
-    for (key, value) in legacy where key.hasPrefix("InputFlow") {
-        let newKey = "Liana" + key.dropFirst("InputFlow".count)
-        if newDefaults.object(forKey: newKey) == nil {
-            newDefaults.set(value, forKey: newKey)
-            migrated += 1
+    for source in legacyPrefDomains {
+        guard let legacy = newDefaults.persistentDomain(forName: source.domain),
+              !legacy.isEmpty else { continue }
+        let replacement = source.prefix == "InputFlow" ? "Liana" : source.prefix
+        for (key, value) in legacy where key.hasPrefix(source.prefix) {
+            let newKey = replacement + key.dropFirst(source.prefix.count)
+            if newDefaults.object(forKey: newKey) == nil {
+                newDefaults.set(value, forKey: newKey)
+                migrated += 1
+            }
         }
     }
     if migrated > 0 {
@@ -552,7 +597,7 @@ NotificationCenter.default.addObserver(
 }
 
 let connectionName = Bundle.main.infoDictionary?["InputMethodConnectionName"] as? String
-    ?? "Liana_Connection"
+    ?? "dev.liana.inputmethod.ime_Connection"
 
 guard let server = IMKServer(name: connectionName, bundleIdentifier: inputSourceID()) else {
     NSLog("Liana: 创建 IMKServer 失败（检查 Info.plist 的 InputMethodConnectionName）")

@@ -1,7 +1,7 @@
 {
   "id": "pet-vrm-sample",
-  "name": "小春（VRM 样例）",
-  "version": "1.0.0",
+  "name": "VRM 样例形象",
+  "version": "1.0.1",
   "kind": "pet",
   "authors": ["pixiv/three-vrm (MIT sample)"],
   "description": "VRM 3D 形象：透明渲染、跟随鼠标注视、眨眼、呼吸与状态动效；可在菜单中选择「导入 VRM…」换成你自己的 VRoid 角色",

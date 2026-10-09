@@ -59,6 +59,9 @@ let ready = false;
 
 const headTarget = new THREE.Vector3();
 let headHeight = 1.4;
+// 手臂下垂基准角：VRM0 与 VRM1 的归一化骨骼朝向相反，load 后按 metaVersion 自适应，
+// 否则 VRoid(VRM0) 这类模型会一直举着手。
+let armBase = { z: -1.16 };
 
 function post(message) {
   try {
@@ -140,14 +143,16 @@ function updateBlink(dt) {
 
 function applyBasePose() {
   const h = vrm.humanoid;
+  const isVRM0 = !!(vrm.meta && String(vrm.meta.metaVersion) === '0');
+  armBase.z = isVRM0 ? 1.16 : -1.16;
   const lu = h.getNormalizedBoneNode('leftUpperArm');
   const ru = h.getNormalizedBoneNode('rightUpperArm');
   const ll = h.getNormalizedBoneNode('leftLowerArm');
   const rl = h.getNormalizedBoneNode('rightLowerArm');
-  if (lu) lu.rotation.z = -1.16;      // 手臂自然下垂（VRM 默认 T-pose）
-  if (ru) ru.rotation.z = 1.16;
-  if (ll) ll.rotation.z = -0.22;
-  if (rl) rl.rotation.z = 0.22;
+  if (lu) lu.rotation.z = armBase.z;
+  if (ru) ru.rotation.z = -armBase.z;
+  if (ll) ll.rotation.z = armBase.z * 0.19;
+  if (rl) rl.rotation.z = -armBase.z * 0.19;
 }
 
 // ───────────────── 姿态库（状态 + 随机小动作） ─────────────────
@@ -204,19 +209,30 @@ function poseIdle(t) {
     head.rotation.y = Math.sin(t * 3.2) * 0.42;
   } else if (idleAction === 'tilt' && head) {
     head.rotation.z = Math.sin(t * 2.4) * 0.22;
+  } else if (idleAction === 'nod' && head) {
+    head.rotation.x = 0.06 + Math.sin(t * 6) * 0.2;
+  } else if (idleAction === 'sway') {
+    if (chest) chest.rotation.z = Math.sin(t * 1.8) * 0.06;
+    if (head) head.rotation.z = Math.sin(t * 1.8 + 0.6) * 0.08;
+  } else if (idleAction === 'peek' && head) {
+    head.rotation.y = 0.5;
+    head.rotation.z = -0.2;
   } else if (idleAction === 'hop') {
     vrm.scene.position.y = Math.abs(Math.sin(t * 5.5)) * 0.05;
+  } else if (idleAction === 'bounce') {
+    vrm.scene.position.y = Math.abs(Math.sin(t * 6)) * 0.03;
+    if (head) head.rotation.x = -0.05;
   } else if (idleAction === 'stretch') {
     const l = node('leftUpperArm');
     const r = node('rightUpperArm');
     const k = Math.sin(Math.min(1, t / 1.2) * Math.PI);
-    if (l) l.rotation.z = -1.16 - k * 0.7;
-    if (r) r.rotation.z = 1.16 + k * 0.7;
+    if (l) l.rotation.z = armBase.z - k * 0.7;
+    if (r) r.rotation.z = -armBase.z + k * 0.7;
   } else if (idleAction === 'wave') {
     const r = node('rightUpperArm');
     const rl = node('rightLowerArm');
-    if (r) r.rotation.z = 1.16 - 0.9;
-    if (rl) rl.rotation.z = 0.22 + Math.sin(t * 9) * 0.5;
+    if (r) r.rotation.z = -armBase.z - 0.9;
+    if (rl) rl.rotation.z = -armBase.z * 0.19 + Math.sin(t * 9) * 0.5;
   }
 }
 
@@ -312,7 +328,7 @@ function step() {
         idleAction = null;
         nextIdleAt = nowMs / 1000 + 3.5 + Math.random() * 4;
       } else if (!idleAction && nowMs / 1000 > nextIdleAt) {
-        idleAction = pick(['lookAround', 'tilt', 'hop', 'stretch', 'wave']);
+        idleAction = pick(['lookAround', 'tilt', 'nod', 'sway', 'peek', 'hop', 'bounce', 'stretch', 'wave']);
         idleUntil = nowMs + 1400;
       }
       poseIdle(elapsed);
@@ -409,7 +425,16 @@ window.petSetMood = (level) => {
   moodLevel = Math.max(0, Math.min(3, level | 0));
 };
 window.petGreet = (period) => {
+  idleAction = 'wave';
+  idleUntil = performance.now() + 1600;
   say(LINES[period] || LINES.idle);
+};
+// 戳一戳：惊讶反应（Swift 侧可接 petPoke）
+window.petPoke = () => {
+  pettedUntil = performance.now() + 900;
+  setExpression('surprised', 1);
+  setTimeout(() => setExpression('surprised', 0), 900);
+  say(['哎呀！', '干嘛呀～', '戳我干嘛']);
 };
 window.petSetGaze = (x, y) => {
   gaze.x = Math.max(-1, Math.min(1, x));

@@ -32,7 +32,7 @@ CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-$(security find-identity -v -p codesigni
 if [[ -f "$HERE/.bundle-id" ]]; then
     BUNDLE_ID="${BUNDLE_ID:-$(tr -d '[:space:]' < "$HERE/.bundle-id")}"
 else
-    BUNDLE_ID="${BUNDLE_ID:-dev.liana.ime}"
+    BUNDLE_ID="${BUNDLE_ID:-dev.liana.inputmethod.ime}"
 fi
 
 echo "==> 1/5 构建 Rust 内核静态库"
@@ -69,8 +69,13 @@ SWIFT_SOURCES=("$HERE/Sources/main.swift" "$HERE/Sources/Engine.swift" \
     "$HERE/Sources/PermissionCenter.swift" "$HERE/Sources/PetStats.swift" \
     "$HERE/Sources/FeedWindow.swift" \
     "$HERE/Sources/VRMPetView.swift" \
+    "$HERE/Sources/PetWebView.swift" \
+    "$HERE/Sources/Live2DPetView.swift" \
+    "$HERE/Sources/PetRuntimeStore.swift" \
     "$HERE/Sources/PetCatalog.swift" \
     "$HERE/Sources/PetCatalogWindow.swift" \
+    "$HERE/Sources/PetImporter.swift" \
+    "$HERE/Sources/AvatarCreatorWindow.swift" \
     "$HERE/Sources/VoiceInput.swift" \
     "$HERE/Sources/TranslateClient.swift")
 if [[ "$UNIVERSAL" == "1" ]]; then
@@ -116,15 +121,16 @@ for d in "$ROOT"/examples/plugins/*/; do
 done
 
 # 覆盖 bundle id（默认与 Info.plist 一致；本机开发可用 BUNDLE_ID=... 规避系统负面缓存）
-if [[ "$BUNDLE_ID" != "dev.liana.ime" ]]; then
+if [[ "$BUNDLE_ID" != "dev.liana.inputmethod.ime" ]]; then
     PB=/usr/libexec/PlistBuddy
     PL="$CONTENTS/Info.plist"
     "$PB" -c "Set :CFBundleIdentifier $BUNDLE_ID" "$PL"
     "$PB" -c "Set :TISInputSourceID $BUNDLE_ID" "$PL"
-    CONNECTION="Liana_$(printf '%s' "$BUNDLE_ID" | tr '.' '_')"
+    # IMK 强制约定：连接名必须是 <bundle-id>_Connection
+    CONNECTION="${BUNDLE_ID}_Connection"
     "$PB" -c "Set :InputMethodConnectionName $CONNECTION" "$PL"
-    "$PB" -c "Copy :ComponentInputModeDict:tsInputModeListKey:dev.liana.ime.zh :ComponentInputModeDict:tsInputModeListKey:${BUNDLE_ID}.zh" "$PL"
-    "$PB" -c "Delete :ComponentInputModeDict:tsInputModeListKey:dev.liana.ime.zh" "$PL"
+    "$PB" -c "Copy :ComponentInputModeDict:tsInputModeListKey:dev.liana.inputmethod.ime.zh :ComponentInputModeDict:tsInputModeListKey:${BUNDLE_ID}.zh" "$PL"
+    "$PB" -c "Delete :ComponentInputModeDict:tsInputModeListKey:dev.liana.inputmethod.ime.zh" "$PL"
     "$PB" -c "Set :ComponentInputModeDict:tsInputModeListKey:${BUNDLE_ID}.zh:TISInputSourceID ${BUNDLE_ID}.zh" "$PL"
     "$PB" -c "Set :ComponentInputModeDict:tsVisibleInputModeOrderedArrayKey:0 ${BUNDLE_ID}.zh" "$PL"
     echo "    bundle id 覆盖为: $BUNDLE_ID"
@@ -180,12 +186,17 @@ if [[ -n "$CODESIGN_IDENTITY" ]]; then
     echo "    使用签名身份: $CODESIGN_IDENTITY"
     codesign --force --deep --sign "$CODESIGN_IDENTITY" "$BUNDLE" >/dev/null 2>&1 \
         || echo "（签名失败，退化为 ad-hoc）"
+    # --deep 不递归 Resources/ 下的内嵌 .app；漏签会让安装器装出未签名输入法，系统静默拒绝收录
+    codesign --force --deep --sign "$CODESIGN_IDENTITY" "$INSTALLER_RES/Liana.app" >/dev/null 2>&1 \
+        || echo "（内嵌输入法签名失败）"
     codesign --force --deep --sign "$CODESIGN_IDENTITY" "$INSTALLER" >/dev/null 2>&1 \
         || echo "（安装器签名失败）"
 else
     echo "    未找到有效签名身份，使用 ad-hoc（macOS 26+ 不会被系统收录）"
     codesign --force --deep --sign - "$BUNDLE" >/dev/null 2>&1 \
         || echo "（签名失败不影响本地安装）"
+    codesign --force --deep --sign - "$INSTALLER_RES/Liana.app" >/dev/null 2>&1 \
+        || echo "（内嵌输入法签名失败不影响本地使用）"
     codesign --force --deep --sign - "$INSTALLER" >/dev/null 2>&1 \
         || echo "（安装器签名失败不影响本地使用）"
 fi

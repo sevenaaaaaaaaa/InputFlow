@@ -37,9 +37,9 @@ final class PetWindowController {
         set { UserDefaults.standard.set(newValue, forKey: zoomKey); shared.rebuild() }
     }
 
-    /// 内置 emoji 形象（未选形象包时使用）。默认猫。
+    /// 内置 emoji 形象（未选形象包时使用）。默认女孩。
     static var builtinEmoji: String {
-        get { UserDefaults.standard.string(forKey: emojiKey) ?? "🐱" }
+        get { UserDefaults.standard.string(forKey: emojiKey) ?? "👧" }
         set {
             UserDefaults.standard.set(newValue, forKey: emojiKey)
             // emoji 形象与形象包互斥：清掉形象包
@@ -52,19 +52,56 @@ final class PetWindowController {
     }
 
     static var isEnabled: Bool {
-        UserDefaults.standard.bool(forKey: enabledKey)
+        // 默认开启：仅当用户显式关过（键已存在且为 false）时才关闭。
+        if UserDefaults.standard.object(forKey: enabledKey) == nil { return true }
+        return UserDefaults.standard.bool(forKey: enabledKey)
     }
 
-    /// 激活的形象包 id；"" = 内置小猫。
+    /// 激活的形象包 id；"" = 内置 emoji 形象。未显式选择时按首选渲染器解析（默认 live2d）。
     static var activePackId: String {
-        get { UserDefaults.standard.string(forKey: packKey) ?? "" }
+        get {
+            if let stored = UserDefaults.standard.string(forKey: packKey) { return stored }
+            return resolvedDefaultPackId()
+        }
         set {
+            NSLog("松萝桌宠: 切换形象包 → \(newValue)")
             UserDefaults.standard.set(newValue, forKey: packKey)
             shared.rebuild()
             if isEnabled {
                 shared.show()
             }
         }
+    }
+
+    private static let rendererKey = "LianaPetRenderer"
+    /// 首选渲染器：live2d（默认）/ vrm / emoji。仅在用户未显式选择形象包时生效。
+    static var preferredRenderer: String {
+        get { UserDefaults.standard.string(forKey: rendererKey) ?? "live2d" }
+        set {
+            UserDefaults.standard.set(newValue, forKey: rendererKey)
+            shared.rebuild()
+        }
+    }
+
+    /// 默认形象包解析（未显式选择时）：首选 live2d 且已装 live2d 包 → 用之；否则内置 VRM 样例。
+    static func resolvedDefaultPackId() -> String {
+        if preferredRenderer == "live2d", let id = firstLive2DPackId() { return id }
+        return "pet-vrm-sample"
+    }
+
+    /// 扫描已安装形象包中第一个 renderer=live2d 的（读 pet.json）。
+    private static func firstLive2DPackId() -> String? {
+        for pack in availablePets() {
+            let pet = PluginStore.pluginsDir
+                .appendingPathComponent(pack.id, isDirectory: true)
+                .appendingPathComponent("pet.json")
+            if let data = try? Data(contentsOf: pet),
+               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               (obj["renderer"] as? String) == "live2d" {
+                return pack.id
+            }
+        }
+        return nil
     }
 
     static func setEnabled(_ on: Bool) {
@@ -87,12 +124,12 @@ final class PetWindowController {
     }
 
     private var panel: NSPanel?
-    private let face = NSTextField(labelWithString: "🐱")
+    private let face = NSTextField(labelWithString: "👧")
     private var imageView: NSImageView?
     private var emojiLabel: NSTextField?
     private var propLabel: NSTextField?
     private var unsupportedRenderer: String?
-    private var vrmView: VRMPetView?
+    private var petView: PetWebView?
     private var gazeTick = 0
     /// 最后一次输入/互动时间：长时间无输入就让桌宠发呆睡着
     private var lastActivity = Date()
@@ -129,6 +166,8 @@ final class PetWindowController {
         /// 构图：full（全身，默认）/ bust（半身）
         var framing: String = "full"
         var zoom: Double = 1.0
+        /// Live2D 专属：模型整体缩放（构图微调，独立于用户 zoom）
+        var scale: Double = 1.0
 
         static func load(dir: URL) -> PetPack? {
             guard
@@ -171,6 +210,7 @@ final class PetWindowController {
             if let h = json.height, h >= 100, h <= 800 { pack.height = CGFloat(h) }
             if let f = json.framing, !f.isEmpty { pack.framing = f }
             if let z = json.zoom, z >= 0.4, z <= 2.0 { pack.zoom = z }
+            if let sc = json.scale, sc >= 0.4, sc <= 2.0 { pack.scale = sc }
             if pack.renderer == "emoji" && pack.emoji == nil && !pack.idle.isEmpty {
                 pack.renderer = "sprites"
             }
@@ -198,6 +238,7 @@ final class PetWindowController {
             var height: Double?
             var framing: String?
             var zoom: Double?
+            var scale: Double?
 
             struct StateFiles: Codable {
                 var idle: String?
@@ -235,7 +276,7 @@ final class PetWindowController {
         imageView = nil
         emojiLabel = nil
         propLabel = nil
-        vrmView = nil
+        petView = nil
         unsupportedRenderer = nil
         particleEmitter = nil
         loadPack()
@@ -254,7 +295,7 @@ final class PetWindowController {
         startMouseTrackingIfNeeded()
         startAnimTimerIfNeeded()
         react(.idle)
-        vrmView?.setMood(moodLevel())
+        petView?.setMood(moodLevel())
         greetedPeriod = ""
         if let renderer = unsupportedRenderer {
             showToast("该形象包需要 \(renderer.uppercased()) 渲染器（尚未接入，见 ADR-0007）", duration: 5)
@@ -295,8 +336,8 @@ final class PetWindowController {
         let period = hour < 11 ? "morning" : (hour < 18 ? "afternoon" : "evening")
         guard period != greetedPeriod else { return }
         greetedPeriod = period
-        if let vrmView {
-            vrmView.greet(period)
+        if let petView {
+            petView.greet(period)
         } else {
             let text = period == "morning" ? "早上好呀" : (period == "afternoon" ? "下午好" : "晚上好")
             showToast(text, duration: 3.5)
@@ -334,20 +375,20 @@ final class PetWindowController {
         switch name {
         case "typing": react(.composing)
         case "commit": react(.commit)
-        case "petted", "happy": vrmView?.petted()
-        case "sleepy": vrmView?.setSleepy(true)
-        case "drag": vrmView?.setDragging(true)
+        case "petted", "happy": petView?.petted()
+        case "sleepy": petView?.setSleepy(true)
+        case "drag": petView?.setDragging(true)
         default: react(.idle)
         }
     }
 
     /// 开发用：抓取 VRM 画面到 PNG。
     func captureVrmPNG(to path: String, completion: @escaping (Bool) -> Void) {
-        guard let vrmView else {
+        guard let petView else {
             completion(false)
             return
         }
-        vrmView.capturePNG { data in
+        petView.capturePNG { data in
             guard let data else {
                 completion(false)
                 return
@@ -359,8 +400,8 @@ final class PetWindowController {
 
     /// 开发用：VRM 页面内部状态。
     func vrmDebugState(_ completion: @escaping (String) -> Void) {
-        if let vrmView {
-            vrmView.debugState(completion)
+        if let petView {
+            petView.debugState(completion)
         } else {
             completion("no-vrm-view")
         }
@@ -368,8 +409,8 @@ final class PetWindowController {
 
     /// 异步快照：VRM（WKWebView/WebGL）需要 takeSnapshot 才能截到内容。
     func snapshotAsync(to path: String, completion: @escaping (Bool) -> Void) {
-        if let vrmView {
-            vrmView.capturePNG { data in
+        if let petView {
+            petView.capturePNG { data in
                 guard let data else {
                     completion(false)
                     return
@@ -419,10 +460,10 @@ final class PetWindowController {
     private func tick() {
         guard panel?.isVisible == true else { return }
         // VRM：状态给 JS 处理；这里只按鼠标更新注视（约 20fps 节流）
-        if let vrmView {
+        if let petView {
             // 90 秒无输入 → 发呆打盹；有输入时 react() 会唤醒
             if Date().timeIntervalSince(lastActivity) > 90 {
-                vrmView.setSleepy(true)
+                petView.setSleepy(true)
             }
             greetIfNeeded()
             gazeTick += 1
@@ -430,7 +471,7 @@ final class PetWindowController {
                 let mouse = NSEvent.mouseLocation
                 let dx = (mouse.x - panel.frame.midX) / max(120, panel.frame.width)
                 let dy = (mouse.y - panel.frame.midY) / max(120, panel.frame.height)
-                vrmView.setGaze(dx: Double(dx), dy: Double(dy))
+                petView.setGaze(dx: Double(dx), dy: Double(dy))
             }
             return
         }
@@ -472,7 +513,7 @@ final class PetWindowController {
         resetWorkItem?.cancel()
         if state == .composing || state == .commit {
             lastActivity = Date()
-            vrmView?.setSleepy(false)
+            petView?.setSleepy(false)
         }
         // 形象包：切状态、帧归零、按状态换帧率
         if let pack, let imageView {
@@ -490,11 +531,11 @@ final class PetWindowController {
             }
             return
         }
-        // VRM 3D：状态交给 JS（poseIdle/poseTyping/poseCommit）
-        if let pack, let vrmView, pack.renderer == "vrm" {
+        // WebKit 渲染器（VRM / Live2D）：状态交给 JS（poseIdle/poseTyping/poseCommit）
+        if let pack, let petView, pack.renderer == "vrm" || pack.renderer == "live2d" {
             currentState = state
             restartAnimTimer()
-            vrmView.setState(state == .composing ? "typing" : (state == .commit ? "commit" : "idle"))
+            petView.setState(state == .composing ? "typing" : (state == .commit ? "commit" : "idle"))
             if state == .commit {
                 if pack.commitParticles { emitSparks() }
                 let item = DispatchWorkItem { [weak self] in self?.react(.idle) }
@@ -569,7 +610,7 @@ final class PetWindowController {
         }
         background.onDragChanged = { [weak self] dragging in
             self?.lastActivity = Date()
-            self?.vrmView?.setDragging(dragging)
+            self?.petView?.setDragging(dragging)
         }
 
         if let pack, pack.renderer == "vrm" {
@@ -586,12 +627,35 @@ final class PetWindowController {
                     self?.showToast("VRM 加载失败：\(message)", duration: 6)
                 }
                 background.addSubview(view)
-                vrmView = view
+                petView = view
             } else {
                 unsupportedRenderer = "vrm(缺少模型)"
             }
-        } else if let pack, pack.renderer == "live2d" || pack.renderer == "rive" {
-            // 高级渲染器（VRM 3D / Live2D / Rive）尚未接入：明确提示，不用程序化丑图糊弄
+        } else if let pack, pack.renderer == "live2d" {
+            // Live2D：WKWebView + pixi-live2d-display（方案 A：自带运行时，见 ADR-0009）
+            if PetRuntimeStore.live2DCoreAvailable(),
+               let modelPath = PetRuntimeStore.live2DModelPath(for: Self.activePackId, entry: pack.entry) {
+                let view = Live2DPetView(
+                    frame: background.bounds,
+                    modelPath: modelPath,
+                    framing: Self.framingOverride,
+                    zoom: pack.zoom * Self.zoomOverride,
+                    scale: pack.scale
+                )
+                view.autoresizingMask = [.width, .height]
+                view.onError = { [weak self] message in
+                    self?.showToast("Live2D 加载失败：\(message)", duration: 6)
+                }
+                view.onNeedsRuntime = { [weak self] in
+                    self?.showToast("Live2D 运行时未就绪（见 ADR-0009：需自备 Cubism Core）", duration: 6)
+                }
+                background.addSubview(view)
+                petView = view
+            } else {
+                unsupportedRenderer = "live2d(缺少运行时/模型)"
+            }
+        } else if let pack, pack.renderer == "rive" {
+            // 高级渲染器（Rive）尚未接入：明确提示，不用程序化丑图糊弄
             let note = NSTextField(wrappingLabelWithString:
                 "\(pack.renderer.uppercased()) 形象\n渲染器未接入\n（见 ADR-0007）")
             note.font = .systemFont(ofSize: 11)
@@ -695,8 +759,8 @@ final class PetWindowController {
     private func tapBody() {
         pulse(scale: 1.12, duration: 0.2)
         lastActivity = Date()
-        if let vrmView {
-            vrmView.petted()
+        if let petView {
+            petView.petted()
         } else {
             showToast(pickPetLine(["嘿嘿～", "好舒服", "再摸一下嘛", "我在呢"]), duration: 2.5)
         }
@@ -710,7 +774,7 @@ final class PetWindowController {
     private func hoverBody(_ hovering: Bool) {
         modeButton?.isHidden = !hovering
         statsButton?.isHidden = !hovering
-        vrmView?.setHover(hovering)
+        petView?.setHover(hovering)
         guard hovering else { return }
         pulse(scale: 1.06, duration: 0.16)
         let now = Date().timeIntervalSince1970
@@ -735,6 +799,35 @@ final class PetWindowController {
         punct.target = self
         punct.state = UserDefaults.standard.bool(forKey: "LianaForceHalfPunctuation") ? .on : .off
         menu.addItem(punct)
+        // 桌宠形象：直接在桌宠上右键切换（最直接、可发现）
+        let petImage = NSMenuItem(title: "桌宠形象", action: nil, keyEquivalent: "")
+        let imageMenu = NSMenu(title: "桌宠形象")
+        let activePack = Self.activePackId
+        let installed = Self.availablePets()
+        let installedIds = Set(installed.map { $0.id })
+        for pack in installed {
+            let item = NSMenuItem(title: pack.name, action: #selector(petMenuSelectPack(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = pack.id
+            item.state = pack.id == activePack ? .on : .off
+            imageMenu.addItem(item)
+        }
+        for entry in PetCatalogStore.entries() where !installedIds.contains(entry.id) {
+            let item = NSMenuItem(
+                title: "\(entry.name)（未装 · \(entry.sizeText)）",
+                action: #selector(petMenuDownloadPack(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = entry.id
+            item.toolTip = "\(entry.license) · 点击下载并切换"
+            imageMenu.addItem(item)
+        }
+        petImage.submenu = imageMenu
+        menu.addItem(petImage)
+        let more = NSMenuItem(title: "更多 VRM 形象…", action: #selector(petMenuOpenCatalog(_:)), keyEquivalent: "")
+        more.target = self
+        menu.addItem(more)
         menu.addItem(.separator())
         let stats = NSMenuItem(title: "昨日输入总结", action: #selector(petMenuShowStats(_:)), keyEquivalent: "")
         stats.target = self
@@ -747,6 +840,43 @@ final class PetWindowController {
 
     @objc private func petMenuToggleLanguage(_ sender: Any) {
         NotificationCenter.default.post(name: .petToggleLanguage, object: nil)
+    }
+
+    @objc private func petMenuSelectPack(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        Self.activePackId = id
+        for item in sender.menu?.items ?? [] {
+            item.state = (item.representedObject as? String) == id ? .on : .off
+        }
+        showToast("已切换桌宠形象：\(sender.title)", duration: 2.5)
+    }
+
+    @objc private func petMenuOpenCatalog(_ sender: Any) {
+        PetCatalogWindowController.shared.show()
+    }
+
+    /// 右键菜单里点未安装的目录条目：下载（sha256 校验）后切换。
+    @objc private func petMenuDownloadPack(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String,
+              let entry = PetCatalogStore.entries().first(where: { $0.id == id }) else { return }
+        if Self.availablePets().contains(where: { $0.id == id }) {
+            Self.activePackId = id
+            showToast("已切换：\(entry.name)", duration: 2.5)
+            return
+        }
+        showToast("下载 \(entry.name)（\(entry.sizeText)）…", duration: 4)
+        PetModelInstaller.install(entry, onProgress: { _ in }) { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success:
+                    PetWindowController.activePackId = id
+                    if !PetWindowController.isEnabled { PetWindowController.setEnabled(true) }
+                    PetWindowController.shared.showToast("\(entry.name) 已下载并切换（sha256 校验通过）", duration: 5)
+                case .failure(let error):
+                    PetWindowController.shared.showToast("下载失败：\(error.localizedDescription)", duration: 6)
+                }
+            }
+        }
     }
 
     @objc private func petMenuTogglePunctuation(_ sender: Any) {

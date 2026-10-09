@@ -11,7 +11,7 @@ final class InstallerWindowController: NSWindowController {
         let plist = (Bundle.main.resourcePath ?? "") + "/Liana.app/Contents/Info.plist"
         let value = runShell("/usr/bin/plutil -extract CFBundleIdentifier raw \"\(plist)\" 2>/dev/null")
         let id = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return id.isEmpty ? "dev.liana.ime" : id
+        return id.isEmpty ? "dev.liana.inputmethod.ime" : id
     }()
     private let userAppPath = NSHomeDirectory() + "/Library/Input Methods/Liana.app"
     private let systemAppPath = "/Library/Input Methods/Liana.app"
@@ -269,7 +269,7 @@ final class InstallerWindowController: NSWindowController {
         modePopup.selectItem(at: 0)
         traditionalCheck.state = .off
         clipboardCheck.state = .off
-        petCheck.state = .off
+        petCheck.state = .on
         appMemoryCheck.state = .on
         statsCheck.state = .on
         halfPunctCheck.state = .off

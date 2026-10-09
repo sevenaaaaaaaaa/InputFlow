@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Liana Pet · Live2D</title>
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
+  #c { display: block; width: 100vw; height: 100vh; background: transparent; }
+  #hint {
+    position: fixed; inset: 0; display: none;
+    align-items: center; justify-content: center; text-align: center;
+    font: 12px -apple-system, system-ui, sans-serif; color: rgba(255,255,255,0.85);
+    background: rgba(0,0,0,0.35); padding: 12px; box-sizing: border-box; white-space: pre-wrap;
+  }
+</style>
+<!--
+  Live2D 运行时（方案 A：Bring-Your-Own）。随包只分发：
+    - 我们自己的 pet-live2d.js
+    - MIT 依赖：vendor/pixi.min.js、vendor/pixi-live2d-display.min.js
+  以下文件由用户自备，放入 ~/Library/Application Support/Liana/live2d-user/core/，
+  由 PetRuntimeStore 合入本目录：
+    - live2dcubismcore.min.js（Live2D Cubism Core，专有，见 ADR-0009）
+-->
+<script src="./vendor/pixi.min.js"></script>
+<script src="./live2dcubismcore.min.js"></script>
+<script src="./vendor/pixi-live2d-display.min.js"></script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hint"></div>
+<script src="./pet-live2d.js"></script>
+</body>
+</html>

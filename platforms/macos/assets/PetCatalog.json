@@ -1,16 +1,16 @@
 {
   "entries": [
     {
-      "id": "pet-seed-san",
-      "name": "Seed-san（官方样例）",
-      "url": "https://raw.githubusercontent.com/vrm-c/vrm-specification/master/samples/Seed-san/vrm/Seed-san.vrm",
-      "sha256": "624d0d554bc205bbdc33e22a68a2c3c20edebb3e573011ead8878a65e5329b23",
-      "bytes": 10917800,
-      "license": "VRM Public License 1.0",
-      "author": "VRM Consortium",
-      "homepage": "https://github.com/vrm-c/vrm-specification",
-      "tags": ["official", "stylized"],
-      "note": "VRM Consortium 官方样例形象；3D 注视/眨眼/物理自动生效"
+      "id": "pet-vroid-darkness",
+      "name": "暗色 Shibu（VRoid CC0）",
+      "url": "https://raw.githubusercontent.com/madjin/vrm-samples/master/vroid/beta/Darkness_Shibu.vrm",
+      "sha256": "0b50573d2d054d98c0a6fc5a5ce872e1b2c8bff8718476ff72a9a68c48674fd8",
+      "bytes": 20423112,
+      "license": "CC0-1.0",
+      "author": "VRoid Project（CC0）",
+      "homepage": "https://vroid.pixiv.help/hc/en-us/articles/4402614652569",
+      "tags": ["vroid", "cc0", "stylized"],
+      "note": "VRoid CC0 样例：可自由使用/修改/分发（版权豁免）"
     }
   ]
 }

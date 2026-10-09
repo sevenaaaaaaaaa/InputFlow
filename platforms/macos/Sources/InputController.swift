@@ -363,23 +363,10 @@ final class LianaInputController: IMKInputController {
         }
     }
 
-    /// 桌宠形象子菜单：内置 emoji 形象 + 社区形象包。
+    /// 桌宠形象子菜单：只保留形象包（内置 emoji 已下线）。
     private func petSubmenu() -> NSMenu {
         let submenu = NSMenu(title: "桌宠形象")
         let active = PetWindowController.activePackId
-
-        // 内置 emoji 形象（默认推荐：系统绘制，干净不糊）
-        let emojiHeader = NSMenuItem(title: "内置表情", action: nil, keyEquivalent: "")
-        emojiHeader.isEnabled = false
-        submenu.addItem(emojiHeader)
-        let emojis = ["🐱", "🐶", "🦊", "🐼", "🐹", "🐰", "🐧", "🤖", "👧", "🧑‍🎨"]
-        for emoji in emojis {
-            let item = NSMenuItem(title: "\(emoji)  内置表情", action: #selector(selectPetEmoji(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = emoji
-            item.state = (active.isEmpty && PetWindowController.builtinEmoji == emoji) ? .on : .off
-            submenu.addItem(item)
-        }
 
         let framingMenu = NSMenu(title: "画幅")
         for (title, value) in [("全身（显身材）", "full"), ("半身（看表情）", "bust")] {
@@ -408,23 +395,22 @@ final class LianaInputController: IMKInputController {
         catalogItem.target = self
         submenu.addItem(catalogItem)
 
-        let seedItem = NSMenuItem(
-            title: "下载官方样例 Seed-san（VRM Public License 1.0）…",
-            action: #selector(downloadSeedSan(_:)),
-            keyEquivalent: ""
-        )
-        seedItem.target = self
-        submenu.addItem(seedItem)
-
         let importItem = NSMenuItem(title: "导入 VRM 模型…", action: #selector(importVRM(_:)), keyEquivalent: "")
         importItem.target = self
         submenu.addItem(importItem)
 
+        let cloudItem = NSMenuItem(title: "图片生成 VRM（云端 VTubeMe）…", action: #selector(openAvatarCreator(_:)), keyEquivalent: "")
+        cloudItem.target = self
+        submenu.addItem(cloudItem)
+
         submenu.addItem(.separator())
-        let packHeader = NSMenuItem(title: "形象包", action: nil, keyEquivalent: "")
+        let packHeader = NSMenuItem(title: "形象包（未装的点一下即下载）", action: nil, keyEquivalent: "")
         packHeader.isEnabled = false
         submenu.addItem(packHeader)
-        for pack in PetWindowController.availablePets() {
+        // 已安装：直接切换
+        let installed = PetWindowController.availablePets()
+        let installedIds = Set(installed.map { $0.id })
+        for pack in installed {
             let item = NSMenuItem(
                 title: "\(pack.name)（v\(pack.version)）",
                 action: #selector(selectPetPack(_:)),
@@ -436,23 +422,24 @@ final class LianaInputController: IMKInputController {
             item.state = pack.id == active ? .on : .off
             submenu.addItem(item)
         }
+        // 目录中未安装：点击下载（sha256 校验）并切换
+        for entry in PetCatalogStore.entries() where !installedIds.contains(entry.id) {
+            let item = NSMenuItem(
+                title: "\(entry.name)（未装 · \(entry.sizeText)）",
+                action: #selector(downloadCatalogPack(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = entry.id
+            item.toolTip = "\(entry.license) · \(entry.author ?? "")；点击下载并切换"
+            submenu.addItem(item)
+        }
         return submenu
-    }
-
-    @objc private func selectPetEmoji(_ sender: NSMenuItem) {
-        guard let emoji = sender.representedObject as? String else { return }
-        PetWindowController.builtinEmoji = emoji
-        if !PetWindowController.isEnabled {
-            PetWindowController.setEnabled(true)
-        }
-        for item in sender.menu?.items ?? [] {
-            item.state = (item.representedObject as? String) == emoji ? .on : .off
-        }
-        PetWindowController.shared.showToast("已切换桌宠形象：\(emoji)", duration: 2.5)
     }
 
     @objc private func selectPetPack(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }
+        NSLog("松萝桌宠: 菜单选择形象包 → \(id)")
         PetWindowController.activePackId = id
         if !PetWindowController.isEnabled {
             PetWindowController.setEnabled(true)
@@ -814,6 +801,61 @@ final class LianaInputController: IMKInputController {
         PetCatalogWindowController.shared.show()
     }
 
+    /// 「更多 VRM 形象」子菜单：已装的直接切换，未装的点击下载后切换。
+    private func moreVRMSubmenu() -> NSMenu {
+        let menu = NSMenu(title: "更多 VRM 形象")
+        let installed = Set(PetWindowController.availablePets().map { $0.id })
+        let entries = PetCatalogStore.entries()
+        if entries.isEmpty {
+            let empty = NSMenuItem(title: "（目录为空）", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            menu.addItem(empty)
+            return menu
+        }
+        for entry in entries {
+            let isInstalled = installed.contains(entry.id)
+            let title = isInstalled
+                ? "\(entry.name)（已装，点击切换）"
+                : "\(entry.name)  ·  \(entry.sizeText)"
+            let item = NSMenuItem(title: title, action: #selector(downloadCatalogPack(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = entry.id
+            item.toolTip = "\(entry.license) · \(entry.author ?? "")"
+            item.state = entry.id == PetWindowController.activePackId ? .on : .off
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        let openItem = NSMenuItem(title: "打开形象目录…", action: #selector(openPetCatalog(_:)), keyEquivalent: "")
+        openItem.target = self
+        menu.addItem(openItem)
+        return menu
+    }
+
+    /// 目录条目：已装则切换，未装则下载（sha256 校验）后切换。
+    @objc private func downloadCatalogPack(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String,
+              let entry = PetCatalogStore.entries().first(where: { $0.id == id }) else { return }
+        if PetWindowController.availablePets().contains(where: { $0.id == id }) {
+            PetWindowController.activePackId = id
+            if !PetWindowController.isEnabled { PetWindowController.setEnabled(true) }
+            PetWindowController.shared.showToast("已切换：\(entry.name)", duration: 2.5)
+            return
+        }
+        PetWindowController.shared.showToast("下载 \(entry.name)（\(entry.sizeText)）…", duration: 4)
+        PetModelInstaller.install(entry, onProgress: { _ in }) { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success:
+                    PetWindowController.activePackId = id
+                    if !PetWindowController.isEnabled { PetWindowController.setEnabled(true) }
+                    PetWindowController.shared.showToast("\(entry.name) 已下载并切换（sha256 校验通过）", duration: 5)
+                case .failure(let error):
+                    PetWindowController.shared.showToast("下载失败：\(error.localizedDescription)", duration: 6)
+                }
+            }
+        }
+    }
+
     /// 一键下载官方样例 VRM（用户点击才联网，sha256 校验后才安装）。
     @objc private func downloadSeedSan(_ sender: Any) {
         PetWindowController.shared.showToast("开始下载 Seed-san（约 10MB，VRM 官方样例）…", duration: 5)
@@ -846,23 +888,8 @@ final class LianaInputController: IMKInputController {
             panel.allowedContentTypes = [.init(filenameExtension: "vrm") ?? .data]
         }
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        let fm = FileManager.default
-        let dest = PluginStore.pluginsDir.appendingPathComponent("vrm-custom", isDirectory: true)
         do {
-            try fm.createDirectory(at: dest, withIntermediateDirectories: true)
-            let model = dest.appendingPathComponent("model.vrm")
-            try? fm.removeItem(at: model)
-            try fm.copyItem(at: url, to: model)
-            let plugin = """
-            {"id":"vrm-custom","name":"自定义 VRM","version":"1.0.0","kind":"pet",\
-            "authors":["user"],"description":"导入的 VRM 模型：\(url.lastPathComponent)","license":"user-provided","permissions":[]}
-            """
-            let pet = """
-            {"renderer":"vrm","size":220,"fps":30,"fps_idle":30,"fps_typing":60,\
-            "entry":"model.vrm","follow_cursor":false,"typing_bounce":true,"commit_particles":true}
-            """
-            try plugin.data(using: .utf8)?.write(to: dest.appendingPathComponent("plugin.json"))
-            try pet.data(using: .utf8)?.write(to: dest.appendingPathComponent("pet.json"))
+            try PetImporter.importVRM(from: url)
             PetWindowController.activePackId = "vrm-custom"
             if !PetWindowController.isEnabled {
                 PetWindowController.setEnabled(true)
@@ -871,6 +898,11 @@ final class LianaInputController: IMKInputController {
         } catch {
             PetWindowController.shared.showToast("导入失败：\(error.localizedDescription)", duration: 6)
         }
+    }
+
+    /// 打开云端「图片 → VRM」生成窗口（B1：VTubeMe）。
+    @objc private func openAvatarCreator(_ sender: Any) {
+        AvatarCreatorWindowController.shared.show()
     }
 
     @objc private func openPermissionCenter(_ sender: Any) {

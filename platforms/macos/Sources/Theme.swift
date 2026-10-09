@@ -139,9 +139,16 @@ enum PluginStore {
         catalog.packs.filter { $0.kind == kind }
     }
 
+    /// 已下线的内置示例形象包：升级时从用户插件目录清理，避免菜单里残留。
+    private static let retiredPackIds: [String] = [
+        "pet-neko", "pet-orange-cat", "pet-oriental-beauty",
+        "pet-robot", "pet-shiba", "pet-western-beauty",
+    ]
+
     /// 把 app 内随包分发的示例插件（Resources/Plugins/*）seeding 到用户插件目录。
     /// 未安装则复制；已安装但版本不同则更新（用户自建包不受影响）。
     static func seedBundledPacks() {
+        pruneRetiredPacks()
         guard let resources = Bundle.main.resourceURL else { return }
         let source = resources.appendingPathComponent("Plugins", isDirectory: true)
         let fm = FileManager.default
@@ -158,6 +165,16 @@ enum PluginStore {
             if bundledVersion(of: item) != bundledVersion(of: target) {
                 try? fm.removeItem(at: target)
                 try? fm.copyItem(at: item, to: target)
+            }
+        }
+    }
+
+    private static func pruneRetiredPacks() {
+        let fm = FileManager.default
+        for id in retiredPackIds {
+            let dir = pluginsDir.appendingPathComponent(id, isDirectory: true)
+            if fm.fileExists(atPath: dir.path) {
+                try? fm.removeItem(at: dir)
             }
         }
     }
