@@ -403,6 +403,16 @@ final class LianaInputController: IMKInputController {
         cloudItem.target = self
         submenu.addItem(cloudItem)
 
+        let live2dItem = NSMenuItem(title: "导入 Live2D 模型（文件夹/ZIP）…", action: #selector(importLive2D(_:)), keyEquivalent: "")
+        live2dItem.target = self
+        submenu.addItem(live2dItem)
+        let live2dCoreItem = NSMenuItem(title: "获取 Live2D Cubism Core…（官网）", action: #selector(openLive2DCorePage(_:)), keyEquivalent: "")
+        live2dCoreItem.target = self
+        submenu.addItem(live2dCoreItem)
+        let live2dDirItem = NSMenuItem(title: "打开 Core 放置目录…", action: #selector(openLive2DCoreFolder(_:)), keyEquivalent: "")
+        live2dDirItem.target = self
+        submenu.addItem(live2dDirItem)
+
         submenu.addItem(.separator())
         let packHeader = NSMenuItem(title: "形象包（未装的点一下即下载）", action: nil, keyEquivalent: "")
         packHeader.isEnabled = false
@@ -903,6 +913,43 @@ final class LianaInputController: IMKInputController {
     /// 打开云端「图片 → VRM」生成窗口（B1：VTubeMe）。
     @objc private func openAvatarCreator(_ sender: Any) {
         AvatarCreatorWindowController.shared.show()
+    }
+
+    /// 导入 Live2D 模型（文件夹或 .zip）：装成 live2d-custom 形象包并切换。
+    @objc private func importLive2D(_ sender: Any) {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = true
+        panel.message = "选择 Live2D 模型文件夹（含 *.model3.json）或 .zip"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try PetImporter.importLive2D(from: url)
+            PetWindowController.activePackId = "live2d-custom"
+            if !PetWindowController.isEnabled {
+                PetWindowController.setEnabled(true)
+            }
+            if PetRuntimeStore.live2DCoreAvailable() {
+                PetWindowController.shared.showToast("已导入并切换 Live2D：\(url.lastPathComponent)", duration: 4)
+            } else {
+                PetWindowController.shared.showToast(
+                    "已导入 Live2D；还缺 Cubism Core：请用「获取 Live2D Cubism Core…」下载后放进「Core 放置目录」，重启输入法生效",
+                    duration: 9
+                )
+            }
+        } catch {
+            PetWindowController.shared.showToast("导入失败：\(error.localizedDescription)", duration: 6)
+        }
+    }
+
+    @objc private func openLive2DCorePage(_ sender: Any) {
+        if let url = URL(string: "https://www.live2d.com/en/sdk/download/web/") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    @objc private func openLive2DCoreFolder(_ sender: Any) {
+        NSWorkspace.shared.open(PetRuntimeStore.userLive2DCoreDir)
     }
 
     @objc private func openPermissionCenter(_ sender: Any) {

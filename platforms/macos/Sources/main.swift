@@ -408,6 +408,19 @@ if installArgs.count > 1 {
         NSApplication.shared.run()
         exit(0)
 
+    case "--live2d-import":
+        guard installArgs.count > 2 else {
+            print("用法: --live2d-import <模型文件夹或zip>")
+            exit(1)
+        }
+        do {
+            let id = try PetImporter.importLive2D(from: URL(fileURLWithPath: installArgs[2]))
+            print("imported \(id); coreAvailable=\(PetRuntimeStore.live2DCoreAvailable())")
+        } catch {
+            print("failed: \(error.localizedDescription)")
+        }
+        exit(0)
+
     case "--pet-catalog":
         PluginStore.seedBundledPacks()
         for entry in PetCatalogStore.entries() {
