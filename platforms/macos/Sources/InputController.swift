@@ -1211,13 +1211,18 @@ final class LianaInputController: IMKInputController {
 
         guard let chars = event.charactersIgnoringModifiers else { return false }
 
+        // 真实按键字符：按住 Shift 时用 event.characters（大写字母 / Shift 后的符号），
+        // 否则沿用 charactersIgnoringModifiers。修复「按住 Shift 打不出大写英文」。
+        let shiftHeld = flags.contains(.shift)
+        let inputChars: String = shiftHeld ? (event.characters ?? chars) : chars
+
         // 语音进行中遇到普通按键：先落下顶部候选，再继续处理本键（说→打无缝衔接）
         if voice.isListening || voiceSettledSource != nil {
             absorbVoice(client: client)
         }
 
         // 连按两下 a：浏览器 → 网址模式；聊天工具 → 表情模式（斗图）。
-        if chars == "a", !event.isARepeat, !flags.contains(.shift) {
+        if chars == "a", !event.isARepeat, !shiftHeld {
             let now = ProcessInfo.processInfo.systemUptime
             if engine.composition.raw == "a", now - lastAAt < 0.3 {
                 lastAAt = 0
@@ -1240,11 +1245,24 @@ final class LianaInputController: IMKInputController {
             lastAAt = now
         }
 
+        // 按住 Shift + 字母：英文意图，直接上屏大写字母（先落掉进行中的组合）。
+        if shiftHeld, inputChars.count == 1, let c = inputChars.first, c.isASCII, c.isLetter {
+            if engine.hasComposition, let raw = engine.commitRaw() {
+                stats.recordCommit(chars: raw.count, keys: raw.count)
+                client.insertText(raw, replacementRange: NSRange(location: NSNotFound, length: 0))
+            }
+            client.insertText(String(c), replacementRange: NSRange(location: NSNotFound, length: 0))
+            PetWindowController.shared.react(.commit)
+            page = 0
+            update(client)
+            return true
+        }
+
         // 中文模式下的标点映射（未组合时）：`,。？！；：、（）【】《》“”‘’…
         // 代码编辑器/终端保持半角（按应用画像自动判断，无需用户配置）。
         let mode = LianaMode(rawValue: engine.mode) ?? .pinyin
         if !engine.hasComposition, mode.usesChinesePunctuation, !profile.asciiPunctuation,
-           let punct = chinesePunctuation(chars) {
+           let punct = chinesePunctuation(inputChars) {
             client.insertText(punct, replacementRange: NSRange(location: NSNotFound, length: 0))
             window.hide()
             return true
@@ -1252,7 +1270,7 @@ final class LianaInputController: IMKInputController {
 
         var accepted = false
         var fed = 0
-        for ch in chars {
+        for ch in inputChars {
             if engine.feed(ch) {
                 accepted = true
                 fed += 1
@@ -1267,7 +1285,7 @@ final class LianaInputController: IMKInputController {
             return true
         }
         // 组合中的不可组合字符：先落组合再落字符，绝不穿透打乱预编辑。
-        if engine.hasComposition, let ch = chars.first {
+        if engine.hasComposition, let ch = inputChars.first {
             let keys = engine.composition.raw.count
             var committed: String?
             if mode.usesChinesePunctuation, !profile.asciiPunctuation,
@@ -1283,7 +1301,7 @@ final class LianaInputController: IMKInputController {
                 committed = engine.select(0) ?? engine.commitRaw()
                 if let text = committed {
                     stats.recordCommit(chars: text.count, keys: keys)
-                    client.insertText(text + chars, replacementRange: NSRange(location: NSNotFound, length: 0))
+                    client.insertText(text + inputChars, replacementRange: NSRange(location: NSNotFound, length: 0))
                 }
             }
             if committed != nil {

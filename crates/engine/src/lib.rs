@@ -224,8 +224,10 @@ impl Session {
         if !ok {
             // 英文串续接：lovart.ai、http://、someone@example.com、v1.2——
             // 符号与数字直接进组合，空格/回车由前端原样上屏。
+            // url_prefix_like 额外放行 `www.`/`http:` 这类「首字符点」：否则 `www`
+            // 会命中整词短拼候选（万维网）被当作中文，网址就打不下去。
             if matches!(self.mode, Mode::Pinyin | Mode::Shuangpin(_) | Mode::English)
-                && self.english_like()
+                && (self.english_like() || self.url_prefix_like())
                 && (ch.is_ascii_punctuation() || ch.is_ascii_digit())
             {
                 self.buffer.push(ch);
@@ -253,6 +255,19 @@ impl Session {
             && !self.comp.candidates.iter().any(|c| {
                 c.consumed == raw_len && c.text.chars().any(is_phrase_char)
             })
+    }
+
+    /// 网址/邮箱常见前缀（`www`/`http`/`https`/`ftp`/`mailto`），或已含 `.` `/` `@` `:`
+    /// 的纯 ASCII 串。用于让 `www.` 的首个 `.` 不被中文候选（万维网）阻断。
+    fn url_prefix_like(&self) -> bool {
+        if self.buffer.is_empty() || !self.buffer.is_ascii() {
+            return false;
+        }
+        let b = self.buffer.to_ascii_lowercase();
+        if b.contains(&['.', '/', '@', ':'][..]) {
+            return true;
+        }
+        matches!(b.as_str(), "www" | "http" | "https" | "ftp" | "mailto")
     }
 
     pub fn backspace(&mut self) -> bool {
@@ -1666,6 +1681,20 @@ mod tests {
         }
         assert!(s.feed('.'), "lov 只剩字面候选，应视为英文串");
         assert_eq!(s.buffer(), "lov.");
+    }
+
+    /// `www` 会命中整词短拼候选（万维网），但仍应能续接 `.` 打成网址。
+    #[test]
+    fn www_prefix_continues_as_url() {
+        let mut s = session(Mode::Pinyin);
+        type_str(&mut s, "www");
+        assert!(s.feed('.'), "www 后应可续接 .（网址意图）");
+        assert_eq!(s.buffer(), "www.");
+        for ch in "nownexts.com".chars() {
+            assert!(s.feed(ch), "{ch}");
+        }
+        assert_eq!(s.buffer(), "www.nownexts.com");
+        assert_eq!(s.commit_raw().as_deref(), Some("www.nownexts.com"));
     }
 
     /// 无重排语境：选中首选 → 实际/反事实都命中；选非首选 → 都不命中。
