@@ -35,6 +35,8 @@ pub struct Dictionary {
     initials: OnceLock<Vec<(Box<str>, Box<str>)>>,
     /// 字 → 拼音音节（取词频最高的读音）；喂食层给营养词派生按键串用。
     char_pinyin: OnceLock<HashMap<char, Box<str>>>,
+    /// ln(全部词频之和)：把词频换算成对数概率的归一化常数（解码器整句打分用）。
+    log_total: OnceLock<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -125,6 +127,20 @@ impl Dictionary {
         self.prefix = OnceLock::new();
         self.initials = OnceLock::new();
         self.char_pinyin = OnceLock::new();
+        self.log_total = OnceLock::new();
+    }
+
+    /// ln(Σ词频)：词频 → 对数概率的归一化常数。空词典返回 0。
+    pub fn log_total(&self) -> f64 {
+        *self.log_total.get_or_init(|| {
+            let sum: f64 = self
+                .map
+                .values()
+                .flat_map(|v| v.iter())
+                .map(|e| f64::from(e.freq))
+                .sum();
+            if sum > 0.0 { sum.ln() } else { 0.0 }
+        })
     }
 
     /// 按 key 查候选（词频降序，同频按字典序）。
@@ -367,6 +383,9 @@ impl Dictionary {
         self.map = new_map;
         self.entries = new_entries;
         self.prefix = OnceLock::new();
+        self.initials = OnceLock::new();
+        self.char_pinyin = OnceLock::new();
+        self.log_total = OnceLock::new();
         (kept_singles, kept_multi)
     }
 

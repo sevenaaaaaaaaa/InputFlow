@@ -77,7 +77,11 @@ SWIFT_SOURCES=("$HERE/Sources/main.swift" "$HERE/Sources/Engine.swift" \
     "$HERE/Sources/PetImporter.swift" \
     "$HERE/Sources/AvatarCreatorWindow.swift" \
     "$HERE/Sources/VoiceInput.swift" \
-    "$HERE/Sources/TranslateClient.swift")
+    "$HERE/Sources/TranslateClient.swift" \
+    "$HERE/Sources/LianaUI.swift" \
+    "$HERE/Sources/LianaActions.swift" \
+    "$HERE/Sources/QuickPanel.swift" \
+    "$HERE/Sources/SettingsCenter.swift")
 if [[ "$UNIVERSAL" == "1" ]]; then
     SWIFT_ARCHS=(arm64 x86_64)
 else
@@ -89,7 +93,7 @@ for arch in "${SWIFT_ARCHS[@]}"; do
         -import-objc-header "$ROOT/crates/ffi/include/liana.h" \
         "$RUST_LIB" \
         -framework AppKit -framework InputMethodKit -framework Carbon -framework WebKit \
-        -framework Speech -framework AVFoundation -framework Vision \
+        -framework Speech -framework AVFoundation -framework Vision -framework SwiftUI \
         -o "$BIN_DIR/$APP.$arch" \
         "${SWIFT_SOURCES[@]}"
 done
@@ -170,7 +174,7 @@ rm -rf "$INSTALLER"
 mkdir -p "$INSTALLER_BIN" "$INSTALLER_RES"
 swiftc -O -wmo -parse-as-library \
     -target "$(uname -m)-apple-macos${DEPLOY_TARGET}" \
-    -framework AppKit -framework Carbon \
+    -framework AppKit -framework Carbon -framework SwiftUI \
     -o "$INSTALLER_BIN/LianaInstaller" \
     "$HERE/installer/Installer.swift"
 cp "$HERE/installer/Info.plist" "$INSTALLER_CONTENTS/Info.plist"

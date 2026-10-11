@@ -32,6 +32,9 @@ fn run(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         Some("dict") => dict_cmd(&args[1..]),
         Some("plugin") => plugin_cmd(&args[1..]),
+        Some("accuracy") if args.get(1).map(String::as_str) == Some("--hard") => {
+            accuracy_hard_cmd()
+        }
         Some("accuracy") => accuracy_cmd(),
         Some("-h") | Some("--help") => {
             usage();
@@ -54,8 +57,9 @@ fn accuracy_cmd() -> Result<(), String> {
     use liana_core::Mode;
     use liana_engine::Session;
 
-    let tsv = std::fs::read_to_string("crates/dict/data/base-large.tsv")
-        .map_err(|e| format!("读不到 crates/dict/data/base-large.tsv: {e}（请在仓库根目录运行）"))?;
+    let tsv = std::fs::read_to_string("crates/dict/data/base-large.tsv").map_err(|e| {
+        format!("读不到 crates/dict/data/base-large.tsv: {e}（请在仓库根目录运行）")
+    })?;
     let (dict, _) = parse_tsv(&tsv);
     let dict = Arc::new(dict);
     println!("词库: {} 词条，开始体检…", dict.entry_count());
@@ -246,7 +250,10 @@ fn accuracy_cmd() -> Result<(), String> {
         println!("  {group:<10} {p:>3}/{n:<3} {pct:>3}%  {bar}");
     }
     println!("  ──────────────────────────────");
-    println!("  总计         {pass:>3}/{total:<3} {:>3}%", pass * 100 / total);
+    println!(
+        "  总计         {pass:>3}/{total:<3} {:>3}%",
+        pass * 100 / total
+    );
     if failures.is_empty() {
         println!("  ✅ 全部通过");
     } else {
@@ -594,4 +601,135 @@ fn usage() {
          xtask plugin check <包目录>\n      \
              用内核校验一个插件包，打印通过/失败原因。"
     );
+}
+
+/// `xtask accuracy --hard`：困难评测集（单字/口语/简拼/半截/长整句/成语/科技）+ 学习能力。
+/// 同时报 Top-1 与 Top-5：Top-1 决定「一次打对」，Top-5 决定「翻页成本」。
+fn accuracy_hard_cmd() -> Result<(), String> {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    use liana_core::Mode;
+    use liana_engine::Session;
+
+    let tsv = std::fs::read_to_string("crates/dict/data/base-large.tsv")
+        .map_err(|e| format!("读不到 base-large.tsv: {e}（请在仓库根目录运行）"))?;
+    let (dict, _) = parse_tsv(&tsv);
+    let dict = Arc::new(dict);
+    let cases_src = std::fs::read_to_string("xtask/data/accuracy-hard.tsv")
+        .map_err(|e| format!("读不到 xtask/data/accuracy-hard.tsv: {e}"))?;
+
+    let run = |keys: &str| -> Vec<String> {
+        let mut s = Session::with_mode(dict.clone(), Mode::Pinyin);
+        for ch in keys.chars() {
+            s.feed(ch);
+        }
+        s.composition()
+            .candidates
+            .iter()
+            .take(5)
+            .map(|c| c.text.clone())
+            .collect()
+    };
+
+    let mut groups: BTreeMap<String, (usize, usize, usize)> = BTreeMap::new();
+    let mut fails = Vec::new();
+    let (mut t1, mut t5, mut n) = (0usize, 0usize, 0usize);
+    for line in cases_src.lines() {
+        if line.starts_with('#') || line.trim().is_empty() {
+            continue;
+        }
+        let f: Vec<&str> = line.split('\t').collect();
+        if f.len() < 3 {
+            continue;
+        }
+        let (g, keys, want) = (f[0], f[1], f[2]);
+        let got = run(keys);
+        let e = groups.entry(g.to_string()).or_insert((0, 0, 0));
+        e.2 += 1;
+        n += 1;
+        if got.first().map(String::as_str) == Some(want) {
+            e.0 += 1;
+            t1 += 1;
+        } else {
+            fails.push(format!("[{g}] {keys} → 期望「{want}」实际 {:?}", got));
+        }
+        if got.iter().any(|c| c == want) {
+            e.1 += 1;
+            t5 += 1;
+        }
+    }
+
+    // 学习能力：在 setup 按键下选中一次目标词后，test 按键的首选应体现它。
+    // 前两条考「选一次就记住」，后两条考「个人词进入整句解码」。
+    let learn_cases = [
+        ("shiyan", "试验", "shiyan", "试验"),
+        ("gongshi", "攻势", "gongshi", "攻势"),
+        ("huifu", "回复", "wohuijinkuaihuifuni", "我会尽快回复你"),
+        ("kuaidi", "快递", "kuaididaole", "快递到了"),
+    ];
+    let mut learn_ok = 0;
+    for (setup, word, test, want) in learn_cases {
+        let mut s = Session::with_mode(dict.clone(), Mode::Pinyin);
+        for ch in setup.chars() {
+            s.feed(ch);
+        }
+        let found = match s
+            .composition()
+            .candidates
+            .iter()
+            .position(|c| c.text == word)
+        {
+            Some(i) => {
+                s.select(i);
+                true
+            }
+            None => {
+                s.clear();
+                false
+            }
+        };
+        s.reset_context();
+        for ch in test.chars() {
+            s.feed(ch);
+        }
+        let top = s
+            .composition()
+            .candidates
+            .first()
+            .map(|c| c.text.clone())
+            .unwrap_or_default();
+        if found && top == want {
+            learn_ok += 1;
+        } else {
+            fails.push(format!(
+                "[学习] 选一次「{word}」后 {test} 首选「{top}」≠「{want}」(候选里{})",
+                if found { "有" } else { "没有" }
+            ));
+        }
+    }
+
+    println!("\n═══ 松萝困难评测集 ═══");
+    println!("  {:<8} {:>9} {:>9}", "分组", "Top-1", "Top-5");
+    for (g, (a, b, c)) in &groups {
+        println!(
+            "  {g:<8} {a:>3}/{c:<3}{:>3}%  {b:>3}/{c:<3}{:>3}%",
+            a * 100 / c,
+            b * 100 / c
+        );
+    }
+    println!("  ──────────────────────────────");
+    println!(
+        "  总计     {t1:>3}/{n:<3}{:>3}%  {t5:>3}/{n:<3}{:>3}%",
+        t1 * 100 / n,
+        t5 * 100 / n
+    );
+    println!("  学习     {learn_ok}/{}", learn_cases.len());
+    if !fails.is_empty() {
+        println!("\n  失败明细:");
+        for f in &fails {
+            println!("    {f}");
+        }
+    }
+    Ok(())
 }

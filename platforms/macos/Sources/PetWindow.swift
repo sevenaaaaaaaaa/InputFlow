@@ -900,7 +900,11 @@ final class PetWindowController {
     /// 桌宠头顶气泡：任务完成提醒 / 模式反馈 / 统计卡片都走这里。
     /// 只展示本机任务与本地统计，绝不承载任何商务、付款类内容。
     func showToast(_ text: String, duration: TimeInterval = 5) {
-        guard panel != nil else { return }  // 桌宠模式关闭时不弹气泡
+        // 桌宠关闭时改用屏幕顶部的玻璃气泡：语音 / 同传 / 模式反馈不能因为没开桌宠就消失
+        guard let petPanel = panel, petPanel.isVisible else {
+            GlassToast.shared.show(text, duration: min(duration, 8))
+            return
+        }
         let panel = ensureToastPanel()
         toastLabel.stringValue = text
         toastLabel.preferredMaxLayoutWidth = 200

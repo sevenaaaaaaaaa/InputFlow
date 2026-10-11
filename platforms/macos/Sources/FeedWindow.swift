@@ -62,6 +62,12 @@ final class FeedWindowController: NSWindowController {
         window?.makeKeyAndOrderFront(nil)
     }
 
+    /// 带着现成文本打开（截图快速学习的「逐个审阅」入口）。
+    func show(text: String, source: String) {
+        show()
+        setPending(text, source: source)
+    }
+
     // MARK: - 界面
 
     private func buildUI() {

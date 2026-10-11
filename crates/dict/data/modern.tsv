@@ -1,0 +1,63 @@
+# 松萝当代高频词补丁（本项目维护，AGPL-3.0-only）
+# 语料词频（wordfreq）截止较早，新平台名、新科技词、网络用语偏低；这里按「聊天/工作场景」
+# 的真实使用量给出词频（与 base-large.tsv 同尺度：10^(zipf-0.6)），重排时取 max(语料, 本表)。
+# 格式：词<TAB>拼音（空格分隔）<TAB>词频
+小红书	xiao hong shu	12000
+抖音	dou yin	20000
+快手	kuai shou	8000
+微信	wei xin	60000
+公众号	gong zhong hao	12000
+小程序	xiao cheng xu	10000
+朋友圈	peng you quan	15000
+视频号	shi pin hao	5000
+支付宝	zhi fu bao	15000
+淘宝	tao bao	20000
+拼多多	pin duo duo	8000
+美团	mei tuan	8000
+饿了么	e le me	5000
+滴滴	di di	6000
+京东	jing dong	15000
+二维码	er wei ma	15000
+验证码	yan zheng ma	12000
+外卖	wai mai	15000
+快递	kuai di	20000
+直播	zhi bo	25000
+带货	dai huo	5000
+网红	wang hong	8000
+打卡	da ka	8000
+种草	zhong cao	4000
+拔草	ba cao	2000
+内卷	nei juan	6000
+躺平	tang ping	5000
+摆烂	bai lan	3000
+破防	po fang	3000
+打工人	da gong ren	4000
+社恐	she kong	3000
+搭子	da zi	2500
+显眼包	xian yan bao	1500
+大模型	da mo xing	12000
+人工智能	ren gong zhi neng	30000
+智能体	zhi neng ti	6000
+提示词	ti shi ci	5000
+算力	suan li	6000
+鸿蒙	hong meng	5000
+开源	kai yuan	12000
+云端	yun duan	8000
+接口	jie kou	12000
+回复	hui fu	30000
+截图	jie tu	10000
+复盘	fu pan	6000
+对齐	dui qi	10000
+颗粒度	ke li du	3000
+闭环	bi huan	5000
+赋能	fu neng	4000
+抓手	zhua shou	3000
+排期	pai qi	3000
+需求	xu qiu	40000
+上线	shang xian	15000
+迭代	die dai	8000
+埋点	mai dian	2000
+留存	liu cun	4000
+拉新	la xin	2000
+日活	ri huo	3000
+转化率	zhuan hua lv	5000

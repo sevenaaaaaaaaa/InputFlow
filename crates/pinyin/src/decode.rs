@@ -16,7 +16,7 @@ pub const MAX_INPUT_CHARS: usize = 64;
 /// 尾部无法成音节的残余最多按这么长当作未输完的尾巴保留。
 const MAX_GARBAGE_TAIL: usize = 3;
 /// 整句切分时每个「词」的惩罚（≈ ln 语料规模），使 N 个单字不敌一个常用词。
-const WORD_PENALTY: f64 = 17.0;
+const WORD_PENALTY: f64 = 0.8;
 /// 完全无法成词时的旁路惩罚（保留原样音节）。
 const PASS_THROUGH_PENALTY: f64 = -40.0;
 /// 候选排序中每个音节的长度加成（覆盖输入越多越靠前）。
@@ -26,7 +26,7 @@ const COVERAGE_BONUS: f64 = 4.0;
 /// 未输完音节时，补全候选每个已按键字符的加成（让 `nih`→你好 压过 `ni`→你）。
 const COMPLETION_BONUS: f64 = 3.0;
 /// 每个模糊/纠错代价的扣分（保证精确拼写优先）。
-const FUZZY_PENALTY: f64 = 1.6;
+const FUZZY_PENALTY: f64 = 2.4;
 /// 单音节完整输入时，词组前缀候选的降权（优先单字）。
 const SINGLE_SYLLABLE_PREFIX_PENALTY: f64 = 3.5;
 /// 单次解码参与打分/解码的路径数上限（按覆盖音节数取前 N 条）。
@@ -98,6 +98,8 @@ struct Hyp {
     score: f64,
     /// 不加惩罚的 ln 频率之和（用于与词候选同尺度排序）
     sum_ln: f64,
+    /// 路径里的词数（含旁路音节）：整句换算回「单词尺度」时用
+    words: usize,
     /// 由真实词典词覆盖的音节数（旁路音节不计入长度加成）
     matched: usize,
     /// 旁路（未成词、原样保留）的音节数
@@ -130,6 +132,13 @@ impl PinyinDecoder {
     }
 
     pub fn candidates(&self, input: &str) -> Vec<Candidate> {
+        self.candidates_with(input, &|_| 0.0)
+    }
+
+    /// 带个人词频的解码：`boost(词)` 返回该词的对数加分（用户常用词），
+    /// 直接参与整句 Viterbi——常打的「回复」在长句里也会压过「恢复」，
+    /// 而不只是在单词候选上重排。
+    pub fn candidates_with(&self, input: &str, boost: &dyn Fn(&str) -> f64) -> Vec<Candidate> {
         let (chars, orig) = normalize(input);
         if chars.is_empty() {
             return Vec::new();
@@ -213,7 +222,7 @@ impl PinyinDecoder {
             if usable.is_empty() {
                 continue;
             }
-            if let Some(h) = self.viterbi(&usable) {
+            if let Some(h) = self.viterbi(&usable, boost) {
                 let consumed = orig[usable.last().expect("非空").end - 1] + 1;
                 let path_fuzzy: f64 = usable.iter().map(|s| s.fuzzy).sum();
                 let cover = (
@@ -222,9 +231,13 @@ impl PinyinDecoder {
                     usable.len(),
                     path_fuzzy,
                 );
-                let better = best.as_ref().is_none_or(|(cur, cur_consumed, _, cur_fuzzy)| {
-                    cover.0 > cur.score - cur_fuzzy * FUZZY_PENALTY + COVERAGE_BONUS * *cur_consumed as f64
-                });
+                let better = best
+                    .as_ref()
+                    .is_none_or(|(cur, cur_consumed, _, cur_fuzzy)| {
+                        cover.0
+                            > cur.score - cur_fuzzy * FUZZY_PENALTY
+                                + COVERAGE_BONUS * *cur_consumed as f64
+                    });
                 if better {
                     best = Some((h, consumed, usable.len(), path_fuzzy));
                 }
@@ -241,7 +254,11 @@ impl PinyinDecoder {
             };
             // 旁路音节重罚：避免「词 + 未成词残字」凑出的伪整句（如 专区+du）压过真词；
             // 路径的模糊代价也计入整句——模糊读音的整句不得压过精确读音的词。
-            let score = hyp.sum_ln + LEN_BONUS * hyp.matched as f64 + 1.0
+            // sum_ln 是各词 ln(词频) 之和；每多一个词就多算了一次归一化常数 ln Z，
+            // 必须扣回去，整句才和单个词处在同一尺度（否则「吗上」会压过「马上」）。
+            let ln_z = self.dict.log_total();
+            let sum_ln = hyp.sum_ln - hyp.words.saturating_sub(1) as f64 * ln_z;
+            let score = sum_ln + LEN_BONUS * hyp.matched as f64 + 1.0
                 - hyp.garbage as f64 * 30.0
                 - path_fuzzy * FUZZY_PENALTY;
             let mut c = Candidate::new(hyp.text, consumed, kind, score);
@@ -476,8 +493,11 @@ impl PinyinDecoder {
     }
 
     /// Viterbi：按「词惩罚」选择最佳切分，返回唯一最佳假设。
-    fn viterbi(&self, segs: &[&Seg]) -> Option<Hyp> {
+    fn viterbi(&self, segs: &[&Seg], boost: &dyn Fn(&str) -> f64) -> Option<Hyp> {
         let n = segs.len();
+        // 词频 → 对数概率：每个词按 ln(f/Z) 计分，真正的 unigram 语言模型；
+        // WORD_PENALTY 只是额外的少量「分词惩罚」，偏好更长的词。
+        let ln_z = self.dict.log_total();
         let mut dp: Vec<Option<Hyp>> = vec![None; n + 1];
         dp[0] = Some(Hyp::default());
         for i in 0..n {
@@ -500,11 +520,19 @@ impl PinyinDecoder {
                         continue;
                     }
                 } else {
-                    let e = &entries[0];
-                    let ln = (e.freq as f64).ln();
+                    // 同读音里取「词频 + 个人加分」最高的词；只看前几条，保持性能。
+                    // 并列时保留词典靠前的那条（严格大于才替换）。
+                    let first = &entries[0];
+                    let (e, ln) = entries.iter().take(8).skip(1).fold(
+                        (first, (first.freq as f64).ln() + boost(&first.word)),
+                        |best, e| {
+                            let score = (e.freq as f64).ln() + boost(&e.word);
+                            if score > best.1 { (e, score) } else { best }
+                        },
+                    );
                     (
                         e.word.clone(),
-                        ln - WORD_PENALTY,
+                        ln - ln_z - WORD_PENALTY,
                         ln,
                         k,
                         key.split('\'').map(str::to_string).collect::<Vec<_>>(),
@@ -516,6 +544,7 @@ impl PinyinDecoder {
                 let cand = Hyp {
                     score: base.score + wscore - fuzzy_cost * FUZZY_PENALTY,
                     sum_ln: base.sum_ln + sum_ln,
+                    words: base.words + 1,
                     matched: base.matched + matched,
                     garbage: base.garbage + usize::from(pass_through),
                     text: format!("{}{}", base.text, text),

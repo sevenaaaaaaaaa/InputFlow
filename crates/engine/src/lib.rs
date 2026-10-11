@@ -597,13 +597,17 @@ impl Session {
             return;
         }
         let (mut cands, preedit) = match self.mode {
-            Mode::Pinyin => {
-                let d = PinyinDecoder::new(self.dict.clone(), Layout::Full);
-                (d.candidates(&self.buffer), d.preedit(&self.buffer))
-            }
-            Mode::Shuangpin(s) => {
-                let d = PinyinDecoder::new(self.dict.clone(), Layout::Shuangpin(s));
-                (d.candidates(&self.buffer), d.preedit(&self.buffer))
+            Mode::Pinyin | Mode::Shuangpin(_) => {
+                let layout = match self.mode {
+                    Mode::Shuangpin(s) => Layout::Shuangpin(s),
+                    _ => Layout::Full,
+                };
+                let d = PinyinDecoder::new(self.dict.clone(), layout);
+                // 个人词频与营养词进入整句解码（不只是事后重排）
+                let user = &self.user;
+                let nutrition = &self.nutrition;
+                let boost = |w: &str| user.decode_bonus(w) + nutrition.bonus(w);
+                (d.candidates_with(&self.buffer, &boost), d.preedit(&self.buffer))
             }
             Mode::English => (self.en.decode(&self.buffer), self.buffer.clone()),
             Mode::Japanese => {

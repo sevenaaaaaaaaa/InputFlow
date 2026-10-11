@@ -159,7 +159,30 @@ impl UserModel {
     /// 重排加分：对数增长，避免个别词完全压过语言模型。
     pub fn bonus(&self, text: &str) -> f64 {
         let c = self.count(text);
-        if c == 0 { 0.0 } else { 1.0 + (c as f64).ln() }
+        // 选一次就要能跨过常见的同音词频差（ln 1~1.5），多次后继续缓慢增长。
+        if c == 0 {
+            0.0
+        } else {
+            1.6 + 1.2 * (c as f64).ln()
+        }
+    }
+
+    /// 解码用加分：整词加分 + 词内含有用户常用词时的部分加分
+    /// （选过「回复」后，词库里的「尽快回复」也要压过「尽快恢复」）。
+    pub fn decode_bonus(&self, text: &str) -> f64 {
+        let whole = self.bonus(text);
+        let chars: Vec<char> = text.chars().collect();
+        if chars.len() < 3 || self.counts.is_empty() {
+            return whole;
+        }
+        let mut part = 0.0f64;
+        for len in 2..chars.len() {
+            for start in 0..=chars.len() - len {
+                let sub: String = chars[start..start + len].iter().collect();
+                part = part.max(self.bonus(&sub));
+            }
+        }
+        whole.max(part * 0.8)
     }
 
     /// 二元组加分：能跨过常见词频差（ln 2~3），但设上限避免过度自信。

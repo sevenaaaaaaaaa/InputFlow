@@ -13,6 +13,22 @@
 | rime-ice / cn_dicts/others.dict.yaml | 补充词条 | GPL-3.0-only |
 | `data/base.tsv`（本项目） | 人工校准的常用词/短句频次，×100 权重优先 | AGPL-3.0-only |
 
+### 词频重排（2026-10）
+
+rime-ice 的权重为配合其语法模型设计，常用词大量挤在同一档（大家/等级/点击/好的≈500k），
+单独做 unigram 排序时首选经常不对。现行 `base-large.tsv` 的词频由 `tools/reweight_dict.py`
+重排：以 [wordfreq](https://github.com/rspeer/wordfreq)（多语料融合词频，数据 CC BY-SA 4.0，
+可单向兼容 GPL-3.0）为主信号，rime-ice 权重做单调校准兜底与多音字读音分摊，
+再叠加本项目维护的 `modern.tsv`（当代平台名/科技词/网络用语，AGPL-3.0-only）。
+词频尺度为 10^(zipf-0.6)（「的」≈1e7）。
+
+```bash
+pip install wordfreq
+python3 tools/reweight_dict.py <上一步生成的 base-large.tsv> crates/dict/data/base.tsv \
+    crates/dict/data/modern.tsv > /tmp/new.tsv && mv /tmp/new.tsv crates/dict/data/base-large.tsv
+cargo run --release -p xtask -- accuracy --hard   # 困难评测集 + 学习能力
+```
+
 rime-ice 的许可证全文见 `LICENSE-rime-ice.txt`（GPL-3.0-only）。本项目按 AGPL-3.0-only
 分发，与 GPL-3.0 的兼容性见 AGPL-3.0 第 13 条；词库数据本身仍为 GPL-3.0-only。
 

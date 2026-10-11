@@ -103,6 +103,27 @@ final class LianaInputController: IMKInputController {
             self.engine.nutritionForgetAll()
             _ = self.engine.nutritionImport(self.store.nutritionTsv)
         }
+        // 功能面板 / 设置中心：会话级动作只交给活跃会话
+        NotificationCenter.default.addObserver(
+            forName: .lianaControllerAction, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let self, Self.activeController === self,
+                  let action = note.userInfo?["action"] as? String else { return }
+            self.performControllerAction(action)
+        }
+        // 设置中心切了繁体输出：所有会话同步
+        NotificationCenter.default.addObserver(
+            forName: .lianaTraditionalChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.engine.setTraditional(UserDefaults.standard.bool(forKey: Self.traditionalKey))
+        }
+        // 设置中心改了默认模式：所有会话同步（下次激活即是新模式）
+        NotificationCenter.default.addObserver(
+            forName: .lianaModeChanged, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let self, let id = note.userInfo?["mode"] as? String else { return }
+            self.applyMode(id, announce: false, learn: false)
+        }
         // 权限中心切了知你学习开关：活跃会话即时重同步
         NotificationCenter.default.addObserver(
             forName: .evolutionToggled, object: nil, queue: .main
@@ -115,6 +136,11 @@ final class LianaInputController: IMKInputController {
         let chinese = (LianaMode(rawValue: engine.mode) ?? .pinyin).isChinese
         PetWindowController.shared.setModeLabel(chinese: chinese)
     }
+
+    /// 主键盘数字 1–9 的 keyCode（功能面板直达用）。
+    private static let digitKeyCodes: [UInt16: Int] = [
+        18: 1, 19: 2, 20: 3, 21: 4, 23: 5, 22: 6, 26: 7, 28: 8, 25: 9,
+    ]
 
     /// 繁体输出开关（跨会话记住）。
     static let traditionalKey = "LianaTraditional"
@@ -138,53 +164,19 @@ final class LianaInputController: IMKInputController {
             menu.addItem(item)
         }
         menu.addItem(.separator())
-        let pet = NSMenuItem(title: "桌宠模式", action: #selector(togglePetMode(_:)), keyEquivalent: "")
-        pet.target = self
-        pet.state = PetWindowController.isEnabled ? .on : .off
-        menu.addItem(pet)
-        let petSkin = NSMenuItem(title: "桌宠形象", action: nil, keyEquivalent: "")
-        petSkin.submenu = petSubmenu()
-        menu.addItem(petSkin)
-        let skins = NSMenuItem(title: "皮肤", action: nil, keyEquivalent: "")
-        skins.submenu = skinSubmenu()
-        menu.addItem(skins)
-        let perms = NSMenuItem(title: "权限与隐私…", action: #selector(openPermissionCenter(_:)), keyEquivalent: "")
-        perms.target = self
-        menu.addItem(perms)
-        let mem = NSMenuItem(title: "按应用记忆中/英", action: #selector(toggleAppModeMemory(_:)), keyEquivalent: "")
-        mem.target = self
-        mem.state = AppModeMemory.shared.isEnabled ? .on : .off
-        menu.addItem(mem)
-        let forgetMem = NSMenuItem(title: "忘记此应用的中英偏好", action: #selector(forgetAppModeMemory(_:)), keyEquivalent: "")
-        forgetMem.target = self
-        menu.addItem(forgetMem)
-        let evo = NSMenuItem(title: "知你学习（越用越懂你）", action: #selector(toggleEvolutionLearning(_:)), keyEquivalent: "")
-        evo.target = self
-        evo.state = EvolutionLearning.isEnabled ? .on : .off
-        menu.addItem(evo)
-        let forgetEvo = NSMenuItem(title: "清空知你学习账本", action: #selector(forgetEvolutionLedger(_:)), keyEquivalent: "")
-        forgetEvo.target = self
-        menu.addItem(forgetEvo)
-        let feed = NSMenuItem(title: "喂它一段…", action: #selector(openFeedWindow(_:)), keyEquivalent: "")
-        feed.target = self
-        menu.addItem(feed)
-        let punct = NSMenuItem(title: "强制半角标点", action: #selector(toggleHalfPunctuation(_:)), keyEquivalent: "")
-        punct.target = self
-        punct.state = UserDefaults.standard.bool(forKey: "LianaForceHalfPunctuation") ? .on : .off
-        menu.addItem(punct)
-        let statsItem = NSMenuItem(title: "昨日输入总结", action: #selector(showYesterdayStats(_:)), keyEquivalent: "")
-        statsItem.target = self
-        menu.addItem(statsItem)
-        let clipItem = NSMenuItem(title: "剪切板历史", action: nil, keyEquivalent: "")
-        clipItem.submenu = clipboardSubmenu()
-        menu.addItem(clipItem)
-        let trad = NSMenuItem(title: "繁体输出", action: #selector(toggleTraditional(_:)), keyEquivalent: "")
-        trad.target = self
-        trad.state = engine.isTraditional ? .on : .off
-        menu.addItem(trad)
+
+        // 常用功能直接露在第一层；其余配置统一收进「松萝设置…」
+        let panelItem = NSMenuItem(title: "功能面板…", action: #selector(openQuickPanel(_:)), keyEquivalent: "`")
+        panelItem.keyEquivalentModifierMask = [.control]
+        panelItem.target = self
+        menu.addItem(panelItem)
+
+        let shot = NSMenuItem(title: "截图快速学习", action: #selector(startScreenshotLearn(_:)), keyEquivalent: "")
+        shot.target = self
+        menu.addItem(shot)
 
         let voiceItem = NSMenuItem(
-            title: voice.isListening ? "停止语音输入" : "语音输入（端上识别）",
+            title: voice.isListening ? "停止语音输入" : "语音输入",
             action: #selector(toggleVoice(_:)),
             keyEquivalent: ""
         )
@@ -195,15 +187,21 @@ final class LianaInputController: IMKInputController {
         let interp = NSMenuItem(title: "同声传译", action: nil, keyEquivalent: "")
         interp.submenu = interpretSubmenu()
         menu.addItem(interp)
-        let backup = NSMenuItem(title: "备份与恢复", action: nil, keyEquivalent: "")
-        backup.submenu = backupSubmenu()
-        menu.addItem(backup)
-        let ai = NSMenuItem(title: "AI 增强…", action: #selector(openAISettings(_:)), keyEquivalent: "")
-        ai.target = self
-        menu.addItem(ai)
-        let prefs = NSMenuItem(title: "打开词典目录…", action: #selector(openDictionaryFolder(_:)), keyEquivalent: "")
-        prefs.target = self
-        menu.addItem(prefs)
+
+        menu.addItem(.separator())
+        let pet = NSMenuItem(title: "桌宠", action: #selector(togglePetMode(_:)), keyEquivalent: "")
+        pet.target = self
+        pet.state = PetWindowController.isEnabled ? .on : .off
+        menu.addItem(pet)
+        let trad = NSMenuItem(title: "繁体输出", action: #selector(toggleTraditional(_:)), keyEquivalent: "")
+        trad.target = self
+        trad.state = engine.isTraditional ? .on : .off
+        menu.addItem(trad)
+
+        menu.addItem(.separator())
+        let settings = NSMenuItem(title: "松萝设置…", action: #selector(openSettingsCenter(_:)), keyEquivalent: ",")
+        settings.target = self
+        menu.addItem(settings)
         return menu
     }
 
@@ -279,6 +277,63 @@ final class LianaInputController: IMKInputController {
         alert.messageText = "已关闭剪切板记录"
         alert.informativeText = "已有历史保留在本地加密文件中，可在「剪切板历史…」中查看或清空。"
         alert.runModal()
+    }
+
+    @objc private func openQuickPanel(_ sender: Any) {
+        showQuickPanel()
+    }
+
+    @objc private func startScreenshotLearn(_ sender: Any) {
+        LianaActions.perform(.screenshotLearn)
+    }
+
+    @objc private func openSettingsCenter(_ sender: Any) {
+        SettingsCenter.shared.show()
+    }
+
+    /// 功能面板贴着光标弹出，带上本会话的语音 / 同传 / 模式状态。
+    private func showQuickPanel(toggle: Bool = false) {
+        let caret = activeClient().flatMap { caretRect($0) }
+        let listening = voice.isListening || voiceSettledSource != nil
+        if toggle {
+            QuickPanelController.shared.toggle(near: caret, mode: engine.mode, listening: listening, interpret: translateTarget)
+        } else {
+            QuickPanelController.shared.show(near: caret, mode: engine.mode, listening: listening, interpret: translateTarget)
+        }
+    }
+
+    /// 功能面板 / 设置中心发来的会话级动作（只有活跃会话执行）。
+    private func performControllerAction(_ action: String) {
+        switch action {
+        case "voice":
+            toggleVoice(NSMenuItem())
+        case "interpret-en", "interpret-ja", "interpret-off":
+            let item = NSMenuItem()
+            item.representedObject = String(action.dropFirst("interpret-".count))
+            selectInterpret(item)
+        default:
+            if action.hasPrefix("mode:") {
+                applyMode(String(action.dropFirst("mode:".count)), announce: true)
+            }
+        }
+    }
+
+    /// 切换输入模式（菜单 / 功能面板 / 设置中心共用）。
+    private func applyMode(_ id: String, announce: Bool, learn: Bool = true) {
+        guard let mode = LianaMode(rawValue: id) else { return }
+        modeBeforeEmoji = nil
+        engine.setMode(id)
+        if mode.isChinese { lastChineseMode = mode }
+        persist(mode: mode)
+        if learn {
+            recordModeSignal(strong: true)
+        }
+        if Self.activeController === self {
+            refreshPetModeLabel()
+        }
+        if announce {
+            GlassToast.shared.show("已切换到 \(mode.title)", symbol: "keyboard", duration: 1.6)
+        }
     }
 
     @objc private func openAISettings(_ sender: Any) {
@@ -983,11 +1038,8 @@ final class LianaInputController: IMKInputController {
             let id = sender.representedObject as? String,
             let mode = LianaMode(rawValue: id)
         else { return }
-        modeBeforeEmoji = nil
-        engine.setMode(id)
-        if mode.isChinese { lastChineseMode = mode }
-        persist(mode: mode)
-        recordModeSignal(strong: true)
+        _ = mode
+        applyMode(id, announce: false)
         for item in sender.menu?.items ?? [] {
             item.state = (item.representedObject as? String) == id ? .on : .off
         }
@@ -1100,7 +1152,30 @@ final class LianaInputController: IMKInputController {
         }
         lastEventAt = nowTick
 
-        let flags = event.modifierFlags
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+
+        // ⌃`：功能面板（与 Rime 的方案菜单同一个手感位）；再按一次关闭。
+        // keyCode 50 = ANSI 键盘的 `，10 = ISO 键盘上 ` 所在的键。
+        if event.keyCode == 50 || event.keyCode == 10,
+           flags.contains(.control), !flags.contains(.command), !flags.contains(.option) {
+            showQuickPanel(toggle: true)
+            return true
+        }
+
+        // 功能面板开着：数字直达、Esc 关闭，其余按键关掉面板后照常输入
+        if QuickPanelController.shared.isVisible {
+            if event.keyCode == 53 {
+                QuickPanelController.shared.hide()
+                return true
+            }
+            if flags.isDisjoint(with: [.command, .control, .option, .shift]),
+               let digit = Self.digitKeyCodes[event.keyCode],
+               !engine.hasComposition, QuickPanelController.shared.trigger(key: digit) {
+                return true
+            }
+            QuickPanelController.shared.hide()
+        }
+
         if flags.contains(.command) || flags.contains(.control) || flags.contains(.option) {
             return false
         }
@@ -1372,6 +1447,21 @@ final class LianaInputController: IMKInputController {
         restoreModeForApp()
         refreshPetModeLabel()
         maybeEveningDigest()
+        maybeHintQuickPanel()
+    }
+
+    /// 还没用过功能面板的人：每个进程生命周期提示一次快捷键（用过一次就不再提示）。
+    private static var quickPanelHinted = false
+    private func maybeHintQuickPanel() {
+        guard !Self.quickPanelHinted, !UserDefaults.standard.bool(forKey: "LianaQuickPanelSeen") else { return }
+        Self.quickPanelHinted = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            GlassToast.shared.show(
+                "松萝小提示：打字时按 ⌃`（Control + 反引号）打开功能面板——截图学习、语音、同传、桌宠都在里面",
+                symbol: "command",
+                duration: 7
+            )
+        }
     }
 
     /// 傍晚总结：18 点后当天第一次激活时弹一次今日小结气泡。
