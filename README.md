@@ -108,12 +108,18 @@ cargo run -p xtask -- plugin check plugins/skin-mine
 
 ## 平台与当前状态
 
+六端共用同一 Rust 内核（`liana.h` C ABI，内核零平台改动）：
+
 | 平台 | 集成 | 状态 |
 |---|---|---|
-| macOS | InputMethodKit + Liquid Glass 候选窗 | 🚧 M1(日常可用的主战场) |
-| Windows / Linux | TSF / Fcitx5 | ⏳ M3 |
-| Android / iOS | IMS+JNI / 键盘扩展(无需 Full Access) | ⏳ M4 |
-| HarmonyOS NEXT | IME Kit + NAPI | ⏳ M5 |
+| macOS | InputMethodKit + Liquid Glass 候选窗 | ✅ 日常可用（v0.1.0 起） |
+| Android | InputMethodService + JNI 垫片（Kotlin） | ✅ APK 构建成功，待真机验收 |
+| iOS | 键盘扩展 + 静态链接（Swift） | ✅ 模拟器构建/启动验证通过，待真机 |
+| Linux | IBus 引擎（Python/GI + ctypes） | ✅ 引擎完成，绑定层冒烟 11/11，待实机 |
+| HarmonyOS NEXT | InputMethodExtensionAbility + NAPI | 🟡 脚手架 + OHOS 静态库就绪，待 DevEco 联调 |
+| Windows | TSF COM DLL（C++ 壳 + Rust 静态内核） | 🟡 骨架 + 按键流接通，组合上屏待调试 |
+
+各端构建入口：`platforms/<平台>/build.sh`（Windows 为 `build.cmd`）。
 
 ## 定位说明
 
