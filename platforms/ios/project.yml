@@ -1,0 +1,53 @@
+name: Liana
+options:
+  bundleIdPrefix: dev.liana
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+
+targets:
+  LianaApp:
+    type: application
+    platform: iOS
+    sources:
+      - Host
+    dependencies:
+      - target: LianaKeyboard
+        embed: true
+    info:
+      path: Host/Info.plist
+      properties:
+        CFBundleDisplayName: 松萝输入法
+        UILaunchScreen: {}
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.liana.ime.ios
+        MARKETING_VERSION: 0.2.0
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGNING_ALLOWED: "NO"
+
+  LianaKeyboard:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Keyboard
+      - path: Resources/base.ifd
+        buildPhase: resources
+    info:
+      path: Keyboard/Info.plist
+      properties:
+        CFBundleDisplayName: 松萝键盘
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.keyboard-service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.liana.ime.ios.keyboard
+        MARKETING_VERSION: 0.2.0
+        SWIFT_OBJC_BRIDGING_HEADER: Keyboard/bridge.h
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/../../crates/ffi/include"
+        # 真机/模拟器两份静态库，按 SDK 自动选择
+        OTHER_LDFLAGS: "$(SRCROOT)/libs/libliana_ffi_device.a"
+        OTHER_LDFLAGS[sdk=iphonesimulator*]: "$(SRCROOT)/libs/libliana_ffi_sim.a"
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGNING_ALLOWED: "NO"
