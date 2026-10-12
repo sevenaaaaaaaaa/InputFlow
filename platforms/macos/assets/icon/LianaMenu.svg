@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- 菜单栏输入法图标（模板图：只用黑色 + 透明，系统按明暗自动着色） -->
+  <g fill="#000">
+    <rect x="29" y="16" width="6" height="36" rx="3"/>
+    <rect x="21" y="49" width="22" height="6" rx="3"/>
+    <path d="M30 31 C 22 31, 15 26, 13 17 C 22 17, 29 22, 30 31 Z"/>
+    <path d="M34 40 C 42 40, 49 35, 51 26 C 42 26, 35 31, 34 40 Z"/>
+  </g>
+  <path d="M32 18 C 32 10, 40 7, 45 10 C 50 13, 48 19, 43 19" stroke="#000" stroke-width="4" stroke-linecap="round" fill="none"/>
+</svg>

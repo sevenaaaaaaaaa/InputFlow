@@ -107,6 +107,7 @@ fi
 cp "$HERE/Info.plist" "$CONTENTS/Info.plist"
 printf 'APPL????' > "$CONTENTS/PkgInfo"
 cp "$HERE/assets/Liana.icns" "$CONTENTS/Resources/Liana.icns"
+cp "$HERE/assets/LianaMenu.png" "$CONTENTS/Resources/LianaMenu.png"
 
 # 形象目录（内置可下载条目）
 cp "$HERE/assets/PetCatalog.json" "$CONTENTS/Resources/PetCatalog.json"

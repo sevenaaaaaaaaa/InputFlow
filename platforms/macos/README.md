@@ -23,9 +23,8 @@ InputMethodKit 外壳 + Rust 内核静态库；候选窗在 macOS 26+ 使用系�
 
 ## 图标
 
-- 源文件：`tools/make-icons.swift`（程序化绘制，配色取自 `docs/design-tokens.json` 的 accent）
-- 生成：`swift tools/make-icons.swift` → `assets/Liana.icns`（光标 + 文字线）
-  与 `assets/LianaInstaller.icns`（下载箭头变体）
+- 源文件：`assets/icon/*.svg`（「光标抽芽」：文本光标是茎，长出卷须与两片叶——输入即生长）
+- 生成：`python3 tools/make_icons.py` → `assets/Liana.icns`、`assets/LianaInstaller.icns`、菜单栏模板图 `assets/LianaMenu.png`、`docs/assets/logo.png`
 - 已提交 icns，`build.sh` 直接复制进两个 bundle 的 `Contents/Resources`
 
 ## 签名与系统收录（重要）
