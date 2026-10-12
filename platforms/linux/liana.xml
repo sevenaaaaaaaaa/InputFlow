@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- IBus 组件声明：拷到 /usr/share/ibus/component/ 后 ibus-daemon 自动发现 -->
+<component>
+    <name>dev.liana.ime.Linux</name>
+    <description>松萝拼音输入法（本地 Rust 内核）</description>
+    <exec>/usr/local/lib/liana/ibus-liana</exec>
+    <version>0.2.0</version>
+    <author>Liana contributors</author>
+    <license>AGPL-3.0-only</license>
+    <homepage>https://github.com/sevenaaaaaaaaa/InputFlow</homepage>
+    <textdomain>liana</textdomain>
+    <engines>
+        <engine>
+            <name>liana</name>
+            <symbol>萝</symbol>
+            <language>zh_CN</language>
+            <longname>松萝</longname>
+            <description>隐私优先拼音输入法：本地引擎，无服务器</description>
+            <rank>99</rank>
+            <layout>default</layout>
+        </engine>
+    </engines>
+</component>

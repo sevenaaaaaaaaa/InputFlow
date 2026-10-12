@@ -1,0 +1,210 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""松萝 IBus 引擎（Linux）。
+
+与 macOS/Android 同构：引擎逻辑全在 Rust 内核，本文件只做
+按键 → 引擎 → preedit/LookupTable 的协议翻译。
+
+安装后由 ibus-daemon 通过 component XML 启动本进程：
+  /usr/share/ibus/component/liana.xml → exec 指向本文件
+"""
+import json
+import os
+import sys
+
+import gi
+
+gi.require_version("IBus", "1.0")
+from gi.repository import IBus, GLib, GObject  # noqa: E402
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import libliana  # noqa: E402
+
+# 数据目录：~/.local/share/liana（用户词/备份），与 build.sh 安装约定一致
+DATA_DIR = os.path.expanduser("~/.local/share/liana")
+
+MODES = ["pinyin", "en"]  # 阶段 2 MVP：拼音/英文，双拼后续接
+
+
+class LianaEngine(IBus.EngineBase):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._session = None
+        self._mode_idx = 0
+        self._candidates = []
+        self._lookup = IBus.LookupTable.new(page_size=9, cursor_pos=0, cursor_visible=True, round=True)
+        os.makedirs(DATA_DIR, exist_ok=True)
+        dict_path = os.path.join(DATA_DIR, "base.ifd")
+        if not os.path.exists(dict_path) and os.path.exists("/usr/local/lib/liana/base.ifd"):
+            try:
+                import shutil
+                shutil.copy("/usr/local/lib/liana/base.ifd", dict_path)
+            except OSError:
+                pass
+        try:
+            if os.path.exists(dict_path):
+                self._session = libliana.Session("pinyin", dict_path)
+            else:
+                self._session = libliana.Session("pinyin")
+        except Exception:
+            self._session = None
+        self._load_user_words()
+
+    # ---- 用户词持久化 ----
+
+    def _user_tsv_path(self):
+        return os.path.join(DATA_DIR, "user_dict.tsv")
+
+    def _load_user_words(self):
+        if not self._session:
+            return
+        try:
+            p = self._user_tsv_path()
+            if os.path.exists(p):
+                with open(p, encoding="utf-8") as f:
+                    self._session.user_import(f.read())
+        except Exception:
+            pass
+
+    def _save_user_words(self):
+        if not self._session:
+            return
+        try:
+            tsv = self._session.user_export()
+            if tsv is not None:
+                with open(self._user_tsv_path(), "w", encoding="utf-8") as f:
+                    f.write(tsv)
+        except Exception:
+            pass
+
+    def do_destroy(self):
+        self._save_user_words()
+        super().do_destroy()
+
+    # ---- 组合态 → IBus 界面 ----
+
+    def _refresh(self):
+        self._candidates = []
+        self._lookup.clear()
+        comp = self._session.composition() if self._session else {}
+        raw = comp.get("raw", "")
+        preedit = comp.get("preedit", "")
+        for cand in comp.get("candidates", []):
+            self._candidates.append(cand["text"])
+            self._lookup.append_candidate(IBus.Text.new_from_string(cand["text"]))
+
+        if raw:
+            shown = f"{raw}  {preedit}" if preedit else raw
+            self.update_preedit_text_with_mode(
+                IBus.Text.new_from_string(shown), len(shown), True,
+                IBus.PreeditFocusMode.COMMIT)
+            self.update_lookup_table(self._lookup, True)
+        else:
+            self.update_preedit_text_with_mode(
+                IBus.Text.new_from_string(""), 0, False,
+                IBus.PreeditFocusMode.COMMIT)
+            self.update_lookup_table(self._lookup, False)
+
+    def _commit(self, text):
+        self.update_preedit_text_with_mode(
+            IBus.Text.new_from_string(""), 0, False, IBus.PreeditFocusMode.COMMIT)
+        self.update_lookup_table(self._lookup, False)
+        self.commit_text(IBus.Text.new_from_string(text))
+
+    # ---- 按键处理（与 macOS 端约定一致：空格首选、数字选词、Esc 取消、回车原样） ----
+
+    def do_process_key_event(self, keyval, keycode, state):
+        if state & (IBus.ModifierType.RELEASE_MASK | IBus.ModifierType.CONTROL_MASK
+                    | IBus.ModifierType.MOD1_MASK | IBus.ModifierType.SUPER_MASK):
+            return False
+        if self._session is None:
+            return False
+
+        ch = IBus.keyval_to_unicode(keyval)
+        if ch is None or ch == "":
+            return False
+        ch = ch[0]
+
+        if keyval == IBus.KEY_Escape:
+            self._session.clear()
+            self._refresh()
+            return True
+        if keyval == IBus.KEY_BackSpace:
+            if not self._session.backspace():
+                pass
+            self._refresh()
+            return True
+        if keyval in (IBus.KEY_Return, IBus.KEY_KP_Enter):
+            if self._session.commit_raw() is not None:
+                self._refresh()
+                return True
+            return False
+        if keyval == IBus.KEY_space:
+            if self._candidates:
+                self._commit(self._candidates[0])
+                self._session.record_commit(self._candidates[0])
+                self._refresh()
+                return True
+            if self._session.mode == "pinyin":
+                return False  # 中文模式空格透传
+            self._commit(" ")
+            return True
+        if "1" <= ch <= "9":
+            idx = ord(ch) - ord("1")
+            if idx < len(self._candidates):
+                text = self._session.select(idx)
+                if text:
+                    self._commit(text)
+                    self._session.record_commit(text)
+                    self._refresh()
+                    return True
+            return False
+        if keyval in (IBus.KEY_Page_Up, IBus.KEY_less):
+            if self._lookup.cursor_pos > 0 or self._lookup.page > 0:
+                self._lookup.cursor_visible = True
+                self._lookup.page_up()
+                self.update_lookup_table(self._lookup, True)
+                return True
+            return False
+        if keyval in (IBus.KEY_Page_Down, IBus.KEY_greater):
+            self._lookup.page_down()
+            self.update_lookup_table(self._lookup, True)
+            return True
+        if keyval == IBus.KEY_Shift_L:
+            # 单按左 Shift 切中英（与 macOS 端一致）；此处按下即切
+            self._mode_idx = (self._mode_idx + 1) % len(MODES)
+            self._session.set_mode(MODES[self._mode_idx])
+            self._session.clear()
+            self._refresh()
+            return True
+
+        # 普通字符
+        if 0x21 <= ord(ch) <= 0x7E:  # 可打印 ASCII
+            if self._session.mode == "en" or (self._session.mode != "pinyin" and ch.isalpha()):
+                if self._session.feed(ch):
+                    self._refresh()
+                    return True
+                self._commit(ch)
+                return True
+            if self._session.feed(ch):
+                self._refresh()
+                return True
+            return False
+        return False
+
+
+def main():
+    IBus.init()
+    if not IBus.is_running():
+        print("ibus-daemon 未运行", file=sys.stderr)
+        sys.exit(1)
+    object_path = "/dev/liana/ime/engine/liana"
+    engine_name = "liana"
+    IBus.Bus().request_name(engine_name)
+    engine = LianaEngine(
+        engine_name=engine_name, object_path=object_path, connection=IBus.Bus())
+    GLib.MainLoop().run()
+
+
+if __name__ == "__main__":
+    main()
