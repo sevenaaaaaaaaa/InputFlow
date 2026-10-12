@@ -1,11 +1,29 @@
 import UIKit
-import os
+
+/// 全平台统一设计 Token（docs/design/UNIFIED-DESIGN.md 为单一事实源）。
+enum LianaTheme {
+    static let bg = UIColor(red: 0x1C/255, green: 0x1C/255, blue: 0x22/255, alpha: 1)
+    static let key = UIColor(red: 0x2A/255, green: 0x2A/255, blue: 0x33/255, alpha: 1)
+    static let keyPressed = UIColor(red: 0x33/255, green: 0x33/255, blue: 0x3E/255, alpha: 1)
+    static let text = UIColor(red: 0xE8/255, green: 0xE8/255, blue: 0xEC/255, alpha: 1)
+    static let secondary = UIColor(red: 0x9A/255, green: 0x9A/255, blue: 0xA5/255, alpha: 1)
+    static let accent = UIColor(red: 0x33/255, green: 0x7B/255, blue: 0xFF/255, alpha: 1)
+    static let fontCandidate: CGFloat = 17
+    static let fontKey: CGFloat = 16
+    static let padSplitMinWidth: CGFloat = 600
+}
 
 /// 松萝 iOS 键盘扩展。
 ///
 /// 与 macOS 端同构：Swift 只做 UI 与协议翻译，引擎逻辑全部来自
 /// 静态链接的 Rust 内核（libliana_ffi.a，经 bridge.h 直调 liana.h）。
 /// 内存红线：扩展进程上限约 60MB，词典按需加载、候选即时释放。
+///
+/// 触控创新（统一设计语言 §3）：
+/// - 全键触觉反馈（§3.1）
+/// - 候选上滑直上屏（§3.2）
+/// - 退格长按连删（§3.3）
+/// - Pad 宽度 ≥ 600pt 自动分体键盘（§3.4）
 final class KeyboardViewController: UIInputViewController {
 
     private var session: OpaquePointer?
@@ -16,6 +34,10 @@ final class KeyboardViewController: UIInputViewController {
     private var candidateStrip: UIStackView!
     private var modeButton: UIButton!
     private var tradButton: UIButton!
+    private var backspaceButton: UIButton!
+    private var repeatTimer: Timer?
+    private let hapticLight = UIImpactFeedbackGenerator(style: .light)
+    private let hapticStrong = UIImpactFeedbackGenerator(style: .medium)
 
     private static let modes = ["pinyin", "en"]
 
@@ -29,6 +51,7 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         saveUserWords()
+        stopRepeat()
         super.viewWillDisappear(animated)
     }
 
@@ -66,7 +89,7 @@ final class KeyboardViewController: UIInputViewController {
     // ---- UI（程序化构建，无 storyboard） ----
 
     private func buildUI() {
-        view.backgroundColor = UIColor(white: 0.11, alpha: 1)
+        view.backgroundColor = LianaTheme.bg
 
         let root = UIStackView()
         root.axis = .vertical
@@ -99,24 +122,9 @@ final class KeyboardViewController: UIInputViewController {
         ])
         root.addArrangedSubview(scroll)
 
-        // QWERTY 三行
-        let rows = ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
-        for (i, keys) in rows.enumerated() {
-            let row = UIStackView()
-            row.axis = .horizontal
-            row.distribution = .fillEqually
-            row.spacing = 5
-            for ch in keys {
-                row.addArrangedSubview(keyButton(String(ch)) { self.onLetter(ch) })
-            }
-            if i == 2 {
-                row.addArrangedSubview(keyButton("⌫") { self.onBackspace() })
-            }
-            row.heightAnchor.constraint(equalToConstant: 44).isActive = true
-            root.addArrangedSubview(row)
-        }
+        buildLetterRows(into: root)
 
-        // 功能行
+        // 功能行（Pad 上保持通栏，双手公共区）
         let fn = UIStackView()
         fn.axis = .horizontal
         fn.spacing = 5
@@ -136,15 +144,117 @@ final class KeyboardViewController: UIInputViewController {
         refreshCandidates()
     }
 
+    /** 字母区：手机通栏；Pad（宽度 ≥ 600pt）自动左右分体，向拇指收拢。 */
+    private func buildLetterRows(into root: UIStackView) {
+        let rows = ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
+        guard isPadWidth() else {
+            for (i, keys) in rows.enumerated() {
+                let row = UIStackView()
+                row.axis = .horizontal
+                row.distribution = .fillEqually
+                row.spacing = 5
+                for ch in keys {
+                    row.addArrangedSubview(keyButton(String(ch)) { self.onLetter(ch) })
+                }
+                if i == 2 {
+                    backspaceButton = keyButton("⌫") { self.onBackspace() }
+                    attachBackspaceGestures()
+                    row.addArrangedSubview(backspaceButton)
+                }
+                row.heightAnchor.constraint(equalToConstant: 44).isActive = true
+                root.addArrangedSubview(row)
+            }
+            return
+        }
+
+        // Pad 分体：每行从中间拆开，两半各自贴边，中缝留空
+        let halves = UIStackView()
+        halves.axis = .horizontal
+        halves.distribution = .fillEqually
+        halves.spacing = 24
+        let left = UIStackView(); left.axis = .vertical; left.spacing = 5
+        let right = UIStackView(); right.axis = .vertical; right.spacing = 5
+        for (i, keys) in rows.enumerated() {
+            let mid = (keys.count + 1) / 2
+            let rowL = UIStackView(); rowL.axis = .horizontal; rowL.distribution = .fillEqually; rowL.spacing = 5
+            let rowR = UIStackView(); rowR.axis = .horizontal; rowR.distribution = .fillEqually; rowR.spacing = 5
+            for ch in keys.prefix(mid) {
+                rowL.addArrangedSubview(keyButton(String(ch)) { self.onLetter(ch) })
+            }
+            for ch in keys.dropFirst(mid) {
+                rowR.addArrangedSubview(keyButton(String(ch)) { self.onLetter(ch) })
+            }
+            if i == 2 {
+                backspaceButton = keyButton("⌫") { self.onBackspace() }
+                attachBackspaceGestures()
+                rowR.addArrangedSubview(backspaceButton)
+            }
+            rowL.heightAnchor.constraint(equalToConstant: 44).isActive = true
+            rowR.heightAnchor.constraint(equalToConstant: 44).isActive = true
+            left.addArrangedSubview(rowL)
+            right.addArrangedSubview(rowR)
+        }
+        halves.addArrangedSubview(left)
+        halves.addArrangedSubview(right)
+        root.addArrangedSubview(halves)
+    }
+
+    private func isPadWidth() -> Bool {
+        view.bounds.width >= LianaTheme.padSplitMinWidth
+    }
+
+    // ---- 视图工厂 ----
+
     private func keyButton(_ title: String, action: @escaping () -> Void) -> UIButton {
         let b = UIButton(type: .system)
         b.setTitle(title, for: .normal)
-        b.setTitleColor(.white, for: .normal)
-        b.titleLabel?.font = .systemFont(ofSize: 16, weight: .semibold)
-        b.backgroundColor = UIColor(white: 0.18, alpha: 1)
+        b.setTitleColor(LianaTheme.text, for: .normal)
+        b.titleLabel?.font = .systemFont(ofSize: LianaTheme.fontKey, weight: .semibold)
+        b.backgroundColor = LianaTheme.key
         b.layer.cornerRadius = 8
-        b.addAction(UIAction { _ in action() }, for: .touchUpInside)
+        b.addAction(UIAction { _ in
+            self.hapticLight.impactOccurred()
+            action()
+        }, for: .touchUpInside)
         return b
+    }
+
+    // ---- 退格长按连删（§3.3） ----
+
+    private func attachBackspaceGestures() {
+        guard let backspaceButton else { return }
+        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(onBackspaceLongPress(_:)))
+        longPress.minimumPressDuration = 0.3
+        backspaceButton.addGestureRecognizer(longPress)
+    }
+
+    @objc private func onBackspaceLongPress(_ g: UILongPressGestureRecognizer) {
+        switch g.state {
+        case .began:
+            hapticStrong.impactOccurred()
+            startRepeat()
+        case .ended, .cancelled:
+            stopRepeat()
+        default: break
+        }
+    }
+
+    private func startRepeat() {
+        guard repeatTimer == nil else { return }
+        repeatTimer = Timer.scheduledTimer(withTimeInterval: 0.065, repeats: true) { [weak self] _ in
+            guard let self, let session = self.session else { return }
+            if !self.rawInput.isEmpty {
+                liana_backspace(session)
+                self.refreshCandidates()
+            } else {
+                self.textDocumentProxy.deleteBackward()
+            }
+        }
+    }
+
+    private func stopRepeat() {
+        repeatTimer?.invalidate()
+        repeatTimer = nil
     }
 
     // ---- 按键行为（与 macOS/Android 端约定一致） ----
@@ -215,6 +325,8 @@ final class KeyboardViewController: UIInputViewController {
         let text = String(cString: p)
         liana_free_string(p)
         insertText(text)
+        // 上屏加强触觉：形成"上屏了"的身体确认（§3.1）
+        hapticStrong.impactOccurred()
     }
 
     private func commitRaw() {
@@ -222,6 +334,7 @@ final class KeyboardViewController: UIInputViewController {
         let text = String(cString: p)
         liana_free_string(p)
         insertText(text)
+        hapticStrong.impactOccurred()
     }
 
     private func insertText(_ text: String) {
@@ -249,17 +362,38 @@ final class KeyboardViewController: UIInputViewController {
         let composing = UILabel()
         composing.text = preedit.isEmpty ? raw : "\(raw) › \(preedit)"
         composing.font = .systemFont(ofSize: 13)
-        composing.textColor = UIColor(white: 0.62, alpha: 1)
+        composing.textColor = LianaTheme.secondary
         candidateStrip.addArrangedSubview(composing)
 
         let arr = obj["candidates"] as? [[String: Any]] ?? []
         candidates = arr.prefix(9).compactMap { $0["text"] as? String }
         for (i, text) in candidates.enumerated() {
-            let b = keyButton(text) { self.selectCandidate(i) }
-            b.backgroundColor = UIColor(white: 0.24, alpha: 1)
-            b.contentEdgeInsets = UIEdgeInsets(top: 4, left: 10, bottom: 4, right: 10)
-            b.titleLabel?.font = .systemFont(ofSize: 17, weight: .bold)
-            candidateStrip.addArrangedSubview(b)
+            candidateStrip.addArrangedSubview(candidateButton(text, index: i))
         }
+    }
+
+    /** 候选条目：点击选中；上滑 ≥ 24pt 直接着该候选上屏（§3.2）。 */
+    private func candidateButton(_ text: String, index: Int) -> UIButton {
+        let b = UIButton(type: .system)
+        b.setTitle(text, for: .normal)
+        b.setTitleColor(LianaTheme.text, for: .normal)
+        b.titleLabel?.font = .systemFont(ofSize: LianaTheme.fontCandidate, weight: .bold)
+        b.backgroundColor = LianaTheme.keyPressed
+        b.layer.cornerRadius = 6
+        b.contentEdgeInsets = UIEdgeInsets(top: 4, left: 10, bottom: 4, right: 10)
+        b.addAction(UIAction { _ in self.selectCandidate(index) }, for: .touchUpInside)
+        let swipeUp = UISwipeGestureRecognizer(target: self, action: #selector(onCandidateSwipeUp(_:)))
+        swipeUp.direction = .up
+        b.addGestureRecognizer(swipeUp)
+        return b
+    }
+
+    @objc private func onCandidateSwipeUp(_ g: UISwipeGestureRecognizer) {
+        guard let b = g.view as? UIButton,
+              let idx = candidateStrip.arrangedSubviews.firstIndex(of: b),
+              idx > 0, idx - 1 < candidates.count else { return }
+        // arrangedSubviews[0] 是组合提示，候选从 1 开始
+        hapticStrong.impactOccurred()
+        selectCandidate(idx - 1)
     }
 }
