@@ -1,0 +1,25 @@
+{
+  "module": {
+    "name": "entry",
+    "type": "entry",
+    "description": "松萝输入法（鸿蒙）",
+    "mainElement": "LianaIME",
+    "deviceTypes": ["phone", "tablet"],
+    "abilities": [],
+    "extensionAbilities": [
+      {
+        "name": "LianaIME",
+        "srcEntry": "./ets/inputmethod/LianaIME.ets",
+        "type": "inputMethod",
+        "exported": true,
+        "metadata": [
+          {
+            "name": "ohos.extension.input_method",
+            "resource": "$profile:input_method_config"
+          }
+        ]
+      }
+    ],
+    "requestPermissions": []
+  }
+}

@@ -1,0 +1,6 @@
+# XcodeGen 风格之外的平台产物不入库
+cpp/libs/
+**/rawfile/base.ifd
+build/
+oh_modules/
+.hvigor/
