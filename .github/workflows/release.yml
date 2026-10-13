@@ -31,7 +31,9 @@ permissions:
 jobs:
   # ────────────────────────── macOS ──────────────────────────
   macos:
-    runs-on: macos-14
+    # macOS 26 SDK：源码用了 Liquid Glass API（NSGlassEffectView / Glass），
+    # macos-15 及以下的 Xcode 编不过
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
 
@@ -76,6 +78,7 @@ jobs:
 
       - name: 生成词典 base.ifd（资产未入库，构建前现生成）
         run: |
+          mkdir -p platforms/android/app/src/main/assets
           cargo run --quiet -p xtask -- \
             dict build crates/dict/data/base-large.tsv \
             -o platforms/android/app/src/main/assets/base.ifd
