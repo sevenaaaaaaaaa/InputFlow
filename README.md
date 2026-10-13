@@ -87,6 +87,8 @@
 > 若「松萝」不在列表里，**注销并重新登录一次**即可（macOS 对全新输入法需重新扫描）。
 > 首次打开若被 Gatekeeper 拦下：右键安装器 → **打开**（免此步骤需 Developer ID 公证版本）。
 
+不想自己构建？[GitHub Releases](https://github.com/sevenaaaaaaaaa/InputFlow/releases) 有现成安装包（tag 推送自动构建）：**macOS** DMG（含安装器；ad-hoc 签名未公证，首次打开右键 → 打开）、**Android** 签名 APK、**Linux** ibus 引擎 tarball（`sudo ./install.sh`）。iOS / Windows / 鸿蒙尚在骨架阶段，暂不出包。
+
 ### 从源码构建（开发者）
 
 ```bash

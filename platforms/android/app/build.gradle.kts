@@ -3,6 +3,13 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// 发布签名从环境变量注入（CI 用）；变量齐全才挂 signingConfig，
+// 缺省时 assembleRelease 产出未签名 APK，行为与从前一致。
+val releaseStoreFile = System.getenv("LIANA_RELEASE_STORE_FILE")
+val releaseStorePassword = System.getenv("LIANA_RELEASE_STORE_PASSWORD")
+val releaseKeyAlias = System.getenv("LIANA_RELEASE_KEY_ALIAS")
+val releaseKeyPassword = System.getenv("LIANA_RELEASE_KEY_PASSWORD")
+
 android {
     namespace = "dev.liana.ime"
     compileSdk = 36
@@ -22,9 +29,23 @@ android {
         }
     }
 
+    signingConfigs {
+        if (releaseStoreFile != null) {
+            create("release") {
+                storeFile = file(releaseStoreFile)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (releaseStoreFile != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
