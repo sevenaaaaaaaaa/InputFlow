@@ -95,6 +95,10 @@ jobs:
         run: |
           if [[ -n "$LIANA_KEYSTORE_BASE64" ]]; then
             echo "$LIANA_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/liana.keystore"
+            [[ -s "$RUNNER_TEMP/liana.keystore" ]] || {
+              echo "✗ LIANA_KEYSTORE_BASE64 解码为空——检查 secret 内容（macOS 编码请用 openssl base64）" >&2
+              exit 1
+            }
             echo "==> 使用 secrets 提供的固定 keystore（可覆盖安装升级）"
           else
             keytool -genkeypair -v -keystore "$RUNNER_TEMP/liana.keystore" \
