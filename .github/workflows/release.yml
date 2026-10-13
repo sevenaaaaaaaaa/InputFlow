@@ -112,9 +112,10 @@ jobs:
         working-directory: platforms/android
         env:
           LIANA_RELEASE_STORE_FILE: ${{ runner.temp }}/liana.keystore
-          LIANA_RELEASE_STORE_PASSWORD: liana-release
-          LIANA_RELEASE_KEY_ALIAS: liana
-          LIANA_RELEASE_KEY_PASSWORD: liana-release
+          # 有 secrets 用真密码；无 secrets 回退临时 keystore 的密码（见上一步生成参数）
+          LIANA_RELEASE_STORE_PASSWORD: ${{ secrets.LIANA_RELEASE_STORE_PASSWORD || 'liana-release' }}
+          LIANA_RELEASE_KEY_ALIAS: ${{ secrets.LIANA_RELEASE_KEY_ALIAS || 'liana' }}
+          LIANA_RELEASE_KEY_PASSWORD: ${{ secrets.LIANA_RELEASE_KEY_PASSWORD || 'liana-release' }}
         run: gradle assembleRelease --no-daemon
 
       - name: 归档命名 + 校验和
