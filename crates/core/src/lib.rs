@@ -6,5 +6,5 @@ pub mod types;
 pub mod user;
 
 pub use backup::{Backup, BackupError};
-pub use types::{Candidate, CandidateKind, Composition, Decoder, Mode, Scheme};
+pub use types::{Candidate, CandidateKind, CommentRole, Composition, Decoder, Mode, Scheme};
 pub use user::UserModel;

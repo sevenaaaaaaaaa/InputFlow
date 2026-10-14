@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use liana_core::syllables::{is_syllable, is_syllable_prefix};
-use liana_core::{Candidate, CandidateKind, Scheme};
+use liana_core::{Candidate, CandidateKind, CommentRole, Scheme};
 use liana_dict::{Dictionary, Entry};
 
 use crate::scheme::{Codes, MAX_SYLLABLE_LEN};
@@ -263,7 +263,7 @@ impl PinyinDecoder {
                 - path_fuzzy * FUZZY_PENALTY;
             let mut c = Candidate::new(hyp.text, consumed, kind, score);
             if !hyp.pinyin.is_empty() {
-                c = c.with_comment(hyp.pinyin.join(" "));
+                c = c.with_reading(hyp.pinyin.join(" "));
             }
             out.push(c);
         }
@@ -287,7 +287,58 @@ impl PinyinDecoder {
         self.push_abbreviation_candidates(chars, orig, full_cover, &mut out);
         dedupe_and_sort(&mut out);
         out.truncate(30);
+        self.mark_exact_readings(input, &mut out);
         out
+    }
+
+    /// 读音与用户所打完全一致的候选（`nihao` → 你好 [ni hao]）降级为
+    /// [`CommentRole::ExactReading`]，前端据此在「仅纠错时显示」模式下隐藏拼音；
+    /// 模糊音、纠错、简拼、混拼、补全的读音保持 `CorrectedReading`。
+    fn mark_exact_readings(&self, input: &str, out: &mut [Candidate]) {
+        for c in out.iter_mut() {
+            if c.comment_role != CommentRole::CorrectedReading {
+                continue;
+            }
+            let Some(reading) = c.comment.as_deref() else {
+                continue;
+            };
+            let typed: String = input
+                .chars()
+                .take(c.consumed)
+                .filter(char::is_ascii_alphabetic)
+                .map(|ch| ch.to_ascii_lowercase())
+                .collect();
+            if self.reading_matches(&typed, reading) {
+                c.comment_role = CommentRole::ExactReading;
+            }
+        }
+    }
+
+    /// `typed`（纯小写字母）是否就是 `reading`（空格/撇号分隔的拼音）的原样拼写。
+    /// ü/v、lue/lve、nue/nve 视为同一拼法；双拼按两键一码逐音节核对。
+    fn reading_matches(&self, typed: &str, reading: &str) -> bool {
+        let syls: Vec<String> = reading
+            .split([' ', '\''])
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_lowercase().replace('ü', "v"))
+            .collect();
+        if syls.is_empty() || typed.is_empty() {
+            return false;
+        }
+        let joined: String = syls.concat();
+        if canon_query(typed) == canon_query(&joined) {
+            return true;
+        }
+        if self.layout.is_shuangpin() && typed.len() == syls.len() * 2 {
+            return syls.iter().enumerate().all(|(i, syl)| {
+                let want = canon_syl(syl);
+                self.codes
+                    .syllables(&typed[i * 2..i * 2 + 2])
+                    .iter()
+                    .any(|s| canon_syl(s) == want)
+            });
+        }
+        false
     }
 
     /// 简拼 / 混拼候选：全拼模式只打几个字母也能整词命中。
@@ -319,7 +370,7 @@ impl PinyinDecoder {
                     word_kind(hit.entry),
                     score,
                 )
-                .with_comment(hit.key.replace('\'', " ")),
+                .with_reading(hit.key.replace('\'', " ")),
             );
         }
 
@@ -334,7 +385,7 @@ impl PinyinDecoder {
                         word_kind(hit.entry),
                         score,
                     )
-                    .with_comment(hit.key.replace('\'', " ")),
+                    .with_reading(hit.key.replace('\'', " ")),
                 );
             }
         }
@@ -385,7 +436,7 @@ impl PinyinDecoder {
             };
             out.push(
                 Candidate::new(hit.entry.word.clone(), consumed, kind, score)
-                    .with_comment(hit.key.replace('\'', " ")),
+                    .with_reading(hit.key.replace('\'', " ")),
             );
         }
     }
@@ -486,7 +537,7 @@ impl PinyinDecoder {
                 }
                 out.push(
                     Candidate::new(e.word.clone(), consumed, kind, score)
-                        .with_comment(display.clone()),
+                        .with_reading(display.clone()),
                 );
             }
         }
@@ -1056,6 +1107,82 @@ mod tests {
         let nhao = d.candidates("nhao");
         assert_eq!(nhao[0].text, "你好", "nhao 首选应是「你好」: {nhao:?}");
         assert_eq!(nhao[0].consumed, 4);
+    }
+
+    fn role_of(cands: &[Candidate], text: &str) -> CommentRole {
+        cands
+            .iter()
+            .find(|c| c.text == text)
+            .unwrap_or_else(|| panic!("应包含「{text}」: {cands:?}"))
+            .comment_role
+    }
+
+    #[test]
+    fn exact_reading_is_marked_redundant() {
+        let d = PinyinDecoder::new(dict(), Layout::Full);
+        let c = d.candidates("nihao");
+        assert_eq!(c[0].text, "你好");
+        assert_eq!(c[0].comment.as_deref(), Some("ni hao"));
+        assert_eq!(c[0].comment_role, CommentRole::ExactReading);
+        // 分隔符 / 大写不影响判定
+        let c = d.candidates("Ni'hao");
+        assert_eq!(role_of(&c, "你好"), CommentRole::ExactReading);
+        // 部分消费：nihaoma 里的「你」只吃了 ni
+        let c = d.candidates("nihaoma");
+        assert_eq!(role_of(&c, "你"), CommentRole::ExactReading);
+    }
+
+    #[test]
+    fn corrected_reading_is_kept() {
+        // 编辑距离纠错：zhuan → zhun
+        let d = PinyinDecoder::new(fuzzy_dict(), Layout::Full);
+        let c = d.candidates("zhuanquedu");
+        assert_eq!(c[0].text, "准确度");
+        assert_eq!(c[0].comment_role, CommentRole::CorrectedReading);
+        // 模糊音：zhong 打成 zong
+        let mut fz = Dictionary::new();
+        fz.insert("zhong'guo", "中国", 500_000);
+        let d = PinyinDecoder::new(Arc::new(fz), Layout::Full);
+        let c = d.candidates("zongguo");
+        assert_eq!(role_of(&c, "中国"), CommentRole::CorrectedReading, "{c:?}");
+        let c = d.candidates("zhongguo");
+        assert_eq!(role_of(&c, "中国"), CommentRole::ExactReading);
+    }
+
+    #[test]
+    fn abbreviation_reading_is_kept() {
+        let d = PinyinDecoder::new(dict(), Layout::Full);
+        let c = d.candidates("nh");
+        assert_eq!(c[0].text, "你好");
+        assert_eq!(c[0].comment_role, CommentRole::CorrectedReading);
+        let c = d.candidates("nhao");
+        assert_eq!(role_of(&c, "你好"), CommentRole::CorrectedReading);
+        let c = d.candidates("wdmz");
+        assert!(
+            c.iter()
+                .filter(|c| c.kind != CandidateKind::Literal)
+                .all(|c| c.comment_role != CommentRole::ExactReading),
+            "简拼不应被当作精确读音: {c:?}"
+        );
+    }
+
+    #[test]
+    fn shuangpin_exact_reading() {
+        // 小鹤：ni → ni，hc → hao
+        let d = PinyinDecoder::new(dict(), Layout::Shuangpin(Scheme::Flypy));
+        let c = d.candidates("nihc");
+        assert_eq!(role_of(&c, "你好"), CommentRole::ExactReading, "{c:?}");
+    }
+
+    #[test]
+    fn literal_has_no_reading() {
+        let d = PinyinDecoder::new(dict(), Layout::Full);
+        let c = d.candidates("nihao");
+        let lit = c
+            .iter()
+            .find(|c| c.kind == CandidateKind::Literal)
+            .expect("原文候选");
+        assert_eq!(lit.comment_role, CommentRole::Label);
     }
 
     #[test]

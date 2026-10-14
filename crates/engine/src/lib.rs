@@ -1303,6 +1303,11 @@ mod tests {
             .expect("前缀应补全出短语");
         assert_eq!(hit.kind, liana_core::CandidateKind::Phrase);
         assert_eq!(hit.comment.as_deref(), Some("短语"));
+        assert_eq!(
+            hit.comment_role,
+            liana_core::CommentRole::Label,
+            "标签注释不受「仅纠错时显示拼音」影响"
+        );
         assert_eq!(hit.consumed, 5, "短语候选吃掉当前全部按键");
     }
 

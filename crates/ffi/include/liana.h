@@ -46,7 +46,10 @@ int32_t liana_traditional(LianaSession *session);
 
 /* 组合态 JSON：
  * {"raw":"nihao","preedit":"ni hao","candidates":[
- *    {"text":"你好","consumed":5,"kind":"sentence","comment":"ni hao"}]}
+ *    {"text":"你好","consumed":5,"kind":"sentence","comment":"ni hao","reading":"exact"}]}
+ * "reading" 仅在 comment 是拼音读音时出现："exact" = 与输入拼写一致（可隐藏），
+ * "corrected" = 模糊音 / 纠错 / 简拼 / 补全得到的读音（建议显示）。
+ * 无 "reading" 的 comment 是标签（短语、表情名等），应始终显示。
  */
 char *liana_composition_json(LianaSession *session);
 

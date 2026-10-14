@@ -129,6 +129,29 @@ impl CandidateKind {
     }
 }
 
+/// 候选注释的性质：决定前端「只在纠错时显示拼音」能不能把它藏起来。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CommentRole {
+    /// 标签（「短语」「营养词」「カタカナ」、表情/符号名）：永远照常显示。
+    #[default]
+    Label,
+    /// 拼音读音，与用户所打完全一致（`nihao` → 你好 [ni hao]）：属冗余信息。
+    ExactReading,
+    /// 拼音读音，与所打不同（模糊音 / 纠错 / 简拼 / 混拼 / 补全）：值得提示。
+    CorrectedReading,
+}
+
+impl CommentRole {
+    /// FFI / 前端用的稳定 id；标签返回 `None`（JSON 里不输出该字段）。
+    pub fn reading_id(self) -> Option<&'static str> {
+        match self {
+            CommentRole::Label => None,
+            CommentRole::ExactReading => Some("exact"),
+            CommentRole::CorrectedReading => Some("corrected"),
+        }
+    }
+}
+
 /// 候选词。`consumed` 表示选中后应从前端预编辑串中消费的**字符数**（非字节）。
 #[derive(Clone, Debug)]
 pub struct Candidate {
@@ -136,6 +159,8 @@ pub struct Candidate {
     pub consumed: usize,
     pub kind: CandidateKind,
     pub comment: Option<String>,
+    /// `comment` 是标签还是读音（读音再分是否与输入一致）。
+    pub comment_role: CommentRole,
     pub score: f64,
 }
 
@@ -146,12 +171,22 @@ impl Candidate {
             consumed,
             kind,
             comment: None,
+            comment_role: CommentRole::Label,
             score,
         }
     }
 
     pub fn with_comment(mut self, comment: impl Into<String>) -> Self {
         self.comment = Some(comment.into());
+        self.comment_role = CommentRole::Label;
+        self
+    }
+
+    /// 以拼音读音作注释（空格分隔音节）。默认视为「与输入不同」，
+    /// 由解码器比对输入后再降级为 [`CommentRole::ExactReading`]。
+    pub fn with_reading(mut self, reading: impl Into<String>) -> Self {
+        self.comment = Some(reading.into());
+        self.comment_role = CommentRole::CorrectedReading;
         self
     }
 

@@ -446,6 +446,11 @@ fn composition_json(session: &Session) -> String {
             out.push_str(&json_escape(comment));
             out.push('"');
         }
+        if let Some(reading) = c.comment_role.reading_id() {
+            out.push_str(",\"reading\":\"");
+            out.push_str(reading);
+            out.push('"');
+        }
         out.push('}');
     }
     out.push_str("]}");
@@ -1080,6 +1085,10 @@ mod tests {
             let json = call_str(|| liana_composition_json(session)).unwrap();
             assert!(json.contains("\"preedit\":\"ni hao\""), "{json}");
             assert!(json.contains("你好"), "{json}");
+            assert!(
+                json.contains("\"comment\":\"ni hao\",\"reading\":\"exact\""),
+                "精确读音应标记 exact: {json}"
+            );
             let text = call_str(|| liana_select(session, 0)).unwrap();
             assert_eq!(text, "你好");
             let json = call_str(|| liana_composition_json(session)).unwrap();
