@@ -23,7 +23,7 @@ edition = "2024"
 rust-version = "1.85"
 license = "AGPL-3.0-only"
 authors = ["Liana contributors"]
-repository = "https://github.com/sevenaaaaaaaaa/InputFlow"
+repository = "https://github.com/sevenaaaaaaaaa/liana"
 description = "Privacy-first cross-platform input method: local engine, no server, LAN-only E2EE sync"
 
 [workspace.dependencies]

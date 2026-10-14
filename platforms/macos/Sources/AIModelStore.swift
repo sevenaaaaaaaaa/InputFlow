@@ -205,7 +205,7 @@ final class AIModelStore: NSObject {
         } else {
             UserDefaults.standard.removeObject(forKey: "LianaAIModel.\(kind)")
         }
-        NotificationCenter.default.post(name: .inputFlowAIChanged, object: nil)
+        NotificationCenter.default.post(name: .lianaAIChanged, object: nil)
     }
 
     static func enabledModel(for kind: String) -> AIModelInfo? {
@@ -215,7 +215,7 @@ final class AIModelStore: NSObject {
 }
 
 extension Notification.Name {
-    static let inputFlowAIChanged = Notification.Name("LianaAIChanged")
+    static let lianaAIChanged = Notification.Name("LianaAIChanged")
 }
 
 extension AIModelStore: URLSessionDownloadDelegate {

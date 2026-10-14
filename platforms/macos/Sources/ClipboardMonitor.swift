@@ -31,7 +31,7 @@ final class ClipboardMonitor {
         } else {
             stop()
         }
-        NotificationCenter.default.post(name: .inputFlowClipboardChanged, object: nil)
+        NotificationCenter.default.post(name: .lianaClipboardChanged, object: nil)
     }
 
     /// 启动时按用户设置恢复。
@@ -73,7 +73,7 @@ final class ClipboardMonitor {
         guard text != lastSeenText else { return }
         lastSeenText = text
         if EncryptedStore.shared.recordClipboard(text) {
-            NotificationCenter.default.post(name: .inputFlowClipboardChanged, object: nil)
+            NotificationCenter.default.post(name: .lianaClipboardChanged, object: nil)
         }
     }
 
@@ -84,5 +84,5 @@ final class ClipboardMonitor {
 }
 
 extension Notification.Name {
-    static let inputFlowClipboardChanged = Notification.Name("LianaClipboardChanged")
+    static let lianaClipboardChanged = Notification.Name("LianaClipboardChanged")
 }

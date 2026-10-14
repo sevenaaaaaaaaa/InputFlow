@@ -102,7 +102,7 @@ final class ClipboardWindowController: NSWindowController {
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(reload),
-            name: .inputFlowClipboardChanged,
+            name: .lianaClipboardChanged,
             object: nil
         )
     }

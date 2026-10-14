@@ -4,7 +4,7 @@ REM
 REM 前置：
 REM   1. Rust: rustup target add x86_64-pc-windows-msvc
 REM   2. VS Build Tools（cl.exe 在 x64 Native Tools Command Prompt 里）
-REM   3. liana 源码仓库（本脚本假定位于 %USERPROFILE%\InputFlow）
+REM   3. liana 源码仓库（本脚本假定位于 %USERPROFILE%\liana）
 REM
 REM 产物：build\liana_tsf.dll → regsvr32 注册后可在语言栏添加「松萝」
 
