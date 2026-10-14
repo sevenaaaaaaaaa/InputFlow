@@ -180,8 +180,21 @@ jobs:
       - name: 创建 Release 并挂载产物
         env:
           GH_TOKEN: ${{ github.token }}
+        # scripts/daily-release.sh 可能已在本机建好 Release 并挂上本地 DMG：
+        # 此时只补传缺失的产物（Android / Linux），同名资产不覆盖
         run: |
-          TITLE="$(git log -1 --format='%s')"
-          gh release create "$GITHUB_REF_NAME" \
-            --verify-tag --title "$TITLE" --notes-file notes.md \
-            release/*
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            existing="$(gh release view "$GITHUB_REF_NAME" --json assets -q '.assets[].name')"
+            for f in release/*; do
+              if grep -qxF "$(basename "$f")" <<<"$existing"; then
+                echo "skip (already on release): $(basename "$f")"
+              else
+                gh release upload "$GITHUB_REF_NAME" "$f"
+              fi
+            done
+          else
+            TITLE="$(git log -1 --format='%s')"
+            gh release create "$GITHUB_REF_NAME" \
+              --verify-tag --title "$TITLE" --notes-file notes.md \
+              release/*
+          fi

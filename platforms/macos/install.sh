@@ -9,7 +9,7 @@ DEST_DIR="$HOME/Library/Input Methods"
 DATA_DIR="$HOME/Library/Application Support/Liana"
 
 if [[ ! -d "$SRC" ]]; then
-    echo "未找到 $SRC，请先运行 ./build.sh" >&2
+    echo "未找到 ${SRC}，请先运行 ./build.sh" >&2
     exit 1
 fi
 

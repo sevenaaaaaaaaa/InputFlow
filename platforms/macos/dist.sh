@@ -14,6 +14,11 @@
 #   ./dist.sh                        # 完整流程（含构建）
 #   ./dist.sh --skip-build           # 复用 build/ 里现成的产物（调签名/公证时反复试错用）
 #   NOTARY_PROFILE=xx ./dist.sh      # 自定义 notarytool 凭据档案名
+#   LIANA_VERSION=0.4.1 ./dist.sh    # 覆盖构建产物里的版本号（不改源文件；daily-release / 彩排用）
+#
+# DMG 内附 Gatekeeper 放行助手（模板在 packaging/macos/）：
+#   打不开？双击我.command  去 quarantine →（签名坏才 ad-hoc 重签）→ 打开安装器
+#   安装说明.txt            拖拽安装 + 放行步骤 + 等价终端命令
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -57,8 +62,19 @@ if [[ "$SKIP_BUILD" != 1 ]]; then
 else
     log "跳过构建（复用 $BUILD 现有产物）"
 fi
-[[ -d "$APP" ]] || die "缺少 $APP（先跑 build.sh 或去掉 --skip-build）"
+[[ -d "$APP" ]] || die "缺少 ${APP}（先跑 build.sh 或去掉 --skip-build）"
 [[ -d "$INSTALLER" ]] || warn "缺少图形安装器，DMG 将只含输入法 App"
+
+# 版本号覆盖：只改构建产物（含安装器内嵌的输入法），随后统一重签
+if [[ -n "${LIANA_VERSION:-}" ]]; then
+    LIANA_VERSION="${LIANA_VERSION#v}"
+    log "版本号覆盖为 ${LIANA_VERSION}（仅构建产物）"
+    for plist in "$APP/Contents/Info.plist" \
+                 "$INSTALLER/Contents/Info.plist" \
+                 "$INSTALLER/Contents/Resources/Liana.app/Contents/Info.plist"; do
+        [[ -f "$plist" ]] && /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $LIANA_VERSION" "$plist"
+    done
+fi
 
 # ──────────────────── 3/6 Hardened Runtime 重签 ────────────────────
 
@@ -87,13 +103,18 @@ notarize() {
     name="$(basename "$path")"
     log "公证提交：$name"
     xcrun notarytool submit "$path" --keychain-profile "$NOTARY_PROFILE" --wait \
-        || die "公证失败：$name（检查 notarytool 凭据：xcrun notarytool store-credentials $NOTARY_PROFILE …）"
+        || die "公证失败：${name}（检查 notarytool 凭据：xcrun notarytool store-credentials $NOTARY_PROFILE …）"
     log "staple：$name"
     xcrun stapler staple "$path" || die "staple 失败：$name"
     xcrun stapler validate "$path" || die "staple 校验失败：$name"
 }
 
 NOTARIZED=0
+# Developer ID present but no notarytool profile: skip notarization instead of failing midway.
+if [[ "$TIER" == "devid" ]] && ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
+    warn "未找到可用的 notarytool 凭据档案「${NOTARY_PROFILE}」，跳过公证（配置方法见脚本头注释）"
+    TIER="devid-unnotarized"
+fi
 if [[ "$TIER" == "devid" ]]; then
     notarize "$APP"
     [[ -d "$INSTALLER" ]] && notarize "$INSTALLER"
@@ -125,6 +146,13 @@ cp -R "$APP" "$STAGING/"
 ln -s /Applications "$STAGING/Applications"
 # 附上许可证与说明，分发页面省事
 cp "$ROOT/LICENSE" "$STAGING/" 2>/dev/null || true
+# Gatekeeper 放行助手：未公证的包下载后会被隔离，用户双击即可放行
+HELPER_DIR="$ROOT/packaging/macos"
+HELPER_CMD="打不开？双击我.command"
+HELPER_TXT="安装说明.txt"
+[[ -f "$HELPER_DIR/$HELPER_CMD" && -f "$HELPER_DIR/$HELPER_TXT" ]] || die "缺少放行助手模板：$HELPER_DIR"
+cp "$HELPER_DIR/$HELPER_CMD" "$HELPER_DIR/$HELPER_TXT" "$STAGING/"
+chmod 755 "$STAGING/$HELPER_CMD"
 hdiutil create -volname "Liana $VERSION" -srcfolder "$STAGING" -ov -format UDZO "$DMG" \
     >/dev/null || die "DMG 打包失败"
 
