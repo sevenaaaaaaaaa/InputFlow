@@ -130,6 +130,14 @@ set_version() {
     # Text substitution (not PlistBuddy) keeps the hand-written plist formatting intact.
     V="$v" perl -0pi -e 's{(<key>CFBundleShortVersionString</key>\s*<string>)[^<]*}{$1$ENV{V}}' \
         platforms/macos/Info.plist platforms/macos/installer/Info.plist
+    # Build number: one monotonically increasing counter shared by the IME and the installer.
+    local build=0 b f
+    for f in platforms/macos/Info.plist platforms/macos/installer/Info.plist; do
+        b="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$f" 2>/dev/null || echo 0)"
+        [[ "$b" =~ ^[0-9]+$ ]] && (( b > build )) && build=$b
+    done
+    B="$((build + 1))" perl -0pi -e 's{(<key>CFBundleVersion</key>\s*<string>)[^<]*}{$1$ENV{B}}' \
+        platforms/macos/Info.plist platforms/macos/installer/Info.plist
     local code
     code="$(sed -n -E 's/^ *versionCode = ([0-9]+).*/\1/p' platforms/android/app/build.gradle.kts)"
     sed -i '' -E "s/^( *)versionCode = [0-9]+/\1versionCode = $((code + 1))/; s/^( *)versionName = \"[^\"]*\"/\1versionName = \"$v\"/" \
