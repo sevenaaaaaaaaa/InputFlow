@@ -549,6 +549,9 @@ impl Session {
             t.push_str(text);
             if k.chars().count() <= MAX_PHRASE_KEYS && t.chars().count() <= MAX_PHRASE_CHARS {
                 self.user.record_phrase(&k, &t);
+                if let Some(init) = liana_core::syllables::pinyin_initials(&k) {
+                    self.user.record_phrase(&init, &t);
+                }
             }
         }
         self.recent.push((keys, text.to_string()));
@@ -1272,6 +1275,11 @@ mod tests {
             s.select(idx);
         }
         assert_eq!(s.user_model().phrase_count("nihaobeijing", "你好北京"), 1);
+        assert_eq!(
+            s.user_model().phrase_count("nhbj", "你好北京"),
+            1,
+            "全拼短语应同时记下简拼，方便下次少打几个字母"
+        );
         assert_eq!(
             s.user_model()
                 .phrase_count("nihaobeijingshijie", "你好北京世界"),

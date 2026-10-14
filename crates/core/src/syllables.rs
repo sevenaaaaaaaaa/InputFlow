@@ -60,6 +60,36 @@ pub fn split_initial(s: &str) -> (&str, &str) {
     ("", s)
 }
 
+/// 把全拼按键串压成声母简拼（`wodemingzi` → `wdmz`），供短语反向检索。
+pub fn pinyin_initials(key: &str) -> Option<String> {
+    let key = key.trim().to_ascii_lowercase();
+    if key.len() < 2 || !key.chars().all(|c| c.is_ascii_lowercase()) {
+        return None;
+    }
+    let bytes = key.as_bytes();
+    let mut i = 0;
+    let mut out = String::new();
+    while i < bytes.len() {
+        let mut taken = 1;
+        for len in (1..=8).rev() {
+            if i + len > bytes.len() {
+                continue;
+            }
+            if is_syllable(&key[i..i + len]) {
+                taken = len;
+                break;
+            }
+        }
+        out.push(key[i..].chars().next()?);
+        i += taken;
+    }
+    if out.len() >= 2 && out != key {
+        Some(out)
+    } else {
+        None
+    }
+}
+
 /// 是否为合法的「音节前缀」（用于把尾部未输完的串识别为 partial，不上屏）。
 pub fn is_syllable_prefix(s: &str) -> bool {
     if s.is_empty() {
@@ -116,5 +146,14 @@ mod tests {
         assert!(!is_syllable_prefix("er"));
         assert!(!is_syllable_prefix(""));
         assert!(!is_syllable_prefix("ss"));
+    }
+
+    #[test]
+    fn initials_from_full_pinyin() {
+        assert_eq!(pinyin_initials("nihao"), Some("nh".into()));
+        assert_eq!(pinyin_initials("zaoshanghao"), Some("zsh".into()));
+        assert_eq!(pinyin_initials("nihaobeijing"), Some("nhbj".into()));
+        assert_eq!(pinyin_initials("nh"), None, "已经是简拼就不再压一层");
+        assert_eq!(pinyin_initials("a"), None);
     }
 }
