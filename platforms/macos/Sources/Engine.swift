@@ -5,6 +5,9 @@ struct Candidate: Codable {
     let consumed: Int
     let kind: String
     let comment: String?
+    /// comment 为拼音读音时的匹配情况："exact"（与输入拼写一致）/ "corrected"（纠错、模糊音、简拼、补全）；
+    /// nil 表示 comment 是标签（短语、表情名等），始终显示。
+    var reading: String? = nil
 }
 
 struct Composition: Codable {

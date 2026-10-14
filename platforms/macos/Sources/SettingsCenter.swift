@@ -467,6 +467,16 @@ struct InputPage: View {
                     })
                 )
             }
+            Section("候选") {
+                Picker("拼音提示", selection: model.binding({ ReadingDisplay.current }, { ReadingDisplay.current = $0 })) {
+                    ForEach(ReadingDisplay.allCases, id: \.self) { option in
+                        Text(option.title).tag(option)
+                    }
+                }
+                Text("「仅纠错时显示」：模糊音、纠错、简拼（如 wdmz → wo de ming zi）时才在候选下标出拼音，打得和读音一致就不显示")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
             Section("标点") {
                 ToggleRow(
                     title: "所有应用强制半角标点",

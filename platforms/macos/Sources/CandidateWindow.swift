@@ -241,6 +241,40 @@ final class CandidateWindowController {
     }
 }
 
+/// 候选下方拼音读音的显示策略（设置 › 输入 › 候选 › 拼音提示）。标签类注释不受影响。
+enum ReadingDisplay: String, CaseIterable {
+    /// 仅当读音与所打不同（模糊音 / 纠错 / 简拼 / 补全）时显示
+    case correctedOnly
+    case always
+    case never
+
+    static let defaultsKey = "LianaReadingDisplay"
+
+    static var current: ReadingDisplay {
+        get {
+            UserDefaults.standard.string(forKey: defaultsKey).flatMap(ReadingDisplay.init(rawValue:)) ?? .correctedOnly
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: defaultsKey) }
+    }
+
+    var title: String {
+        switch self {
+        case .correctedOnly: return "仅纠错时显示"
+        case .always: return "始终显示"
+        case .never: return "始终隐藏"
+        }
+    }
+
+    func shows(_ candidate: Candidate) -> Bool {
+        guard let reading = candidate.reading else { return true }
+        switch self {
+        case .always: return true
+        case .never: return false
+        case .correctedOnly: return reading != "exact"
+        }
+    }
+}
+
 /// 单个候选格：序号 + 文本 +（可选）拼音注释。颜色/字号来自主题侧。
 private final class CandidateCell: NSView {
     static let maxTextWidth: CGFloat = 320
@@ -346,7 +380,8 @@ private final class CandidateCell: NSView {
             textLabel.preferredMaxLayoutWidth = 0
             wrapConstraint?.isActive = false
         }
-        if let comment = candidate.comment, !comment.isEmpty, candidate.kind != "emoji" {
+        if let comment = candidate.comment, !comment.isEmpty, candidate.kind != "emoji",
+           ReadingDisplay.current.shows(candidate) {
             commentLabel.stringValue = comment
             commentLabel.isHidden = false
         } else {
