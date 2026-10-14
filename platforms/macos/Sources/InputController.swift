@@ -336,10 +336,6 @@ final class LianaInputController: IMKInputController {
         }
     }
 
-    @objc private func openAISettings(_ sender: Any) {
-        AISettingsWindowController.shared.show()
-    }
-
     @objc private func toggleTraditional(_ sender: NSMenuItem) {
         let on = !engine.isTraditional
         engine.setTraditional(on)
@@ -569,7 +565,7 @@ final class LianaInputController: IMKInputController {
             PetWindowController.shared.showToast(
                 "缺翻译模型：正在打开「AI 增强」，下载 Gemma 3 270M（约 278MB）", duration: 8
             )
-            openAISettings(sender)
+            SettingsCenter.shared.show(section: .ai)
             return
         }
         cancelVoiceUtterance()

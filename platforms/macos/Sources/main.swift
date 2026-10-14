@@ -371,8 +371,9 @@ if installArgs.count > 1 {
         print("clipboardItems=\(EncryptedStore.shared.clipboard.count)")
         exit(0)
 
-    case "--ai-settings":
-        AISettingsWindowController.shared.show()
+    case "--ai-settings", "--settings":
+        let section: SettingsSection = installArgs[1] == "--ai-settings" ? .ai : .overview
+        SettingsCenter.shared.show(section: section)
         NSApplication.shared.run()
         exit(0)
 

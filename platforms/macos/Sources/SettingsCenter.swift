@@ -547,7 +547,7 @@ struct VoicePage: View {
                         }
                         .lianaGlassButton()
                     }
-                    Button("管理本地模型…") { AISettingsWindowController.shared.show() }
+                    Button("管理本地模型…") { SettingsCenter.shared.show(section: .ai) }
                         .lianaProminentButton()
                 }
             }
@@ -847,7 +847,8 @@ struct ClipboardPage: View {
     @ObservedObject var model: SettingsModel
 
     var body: some View {
-        SettingsPage(section: .clipboard, subtitle: "复制过的文字加密存在本机；密码管理器等敏感应用自动跳过。") {
+        let recent = Array(EncryptedStore.shared.clipboard.prefix(5))
+        return SettingsPage(section: .clipboard, subtitle: "复制过的文字加密存在本机；密码管理器等敏感应用自动跳过。") {
             Section {
                 ToggleRow(
                     title: "记录剪切板历史",
@@ -855,12 +856,31 @@ struct ClipboardPage: View {
                     isOn: model.binding({ ClipboardMonitor.shared.isEnabled }, { ClipboardMonitor.shared.setEnabled($0) })
                 )
                 LabeledContent("已保存") {
-                    Text("\(model.clipboardCount) 条").foregroundStyle(.secondary)
+                    Text("\(model.clipboardCount) 条 · 上限 \(EncryptedStore.maxClipboardItems)")
+                        .foregroundStyle(.secondary)
                 }
+            }
+            if !recent.isEmpty {
+                Section("最近") {
+                    ForEach(Array(recent.enumerated()), id: \.offset) { _, item in
+                        let line = item.text.split(separator: "\n").first.map(String.init) ?? item.text
+                        Text(line)
+                            .lineLimit(1)
+                            .font(.system(size: 13))
+                    }
+                }
+            }
+            Section {
                 HStack {
-                    Spacer()
                     Button("打开剪切板历史…") { LianaActions.perform(.clipboard) }
-                        .lianaGlassButton()
+                        .lianaProminentButton()
+                    Spacer()
+                    Button("清空历史", role: .destructive) {
+                        EncryptedStore.shared.clearClipboard()
+                        model.touch()
+                    }
+                    .lianaGlassButton()
+                    .disabled(model.clipboardCount == 0)
                 }
             }
         }
@@ -869,31 +889,155 @@ struct ClipboardPage: View {
 
 // MARK: - 本地 AI
 
+/// 把 `AIModelStore` 的回调转成 SwiftUI 刷新。设置中心是唯一订阅方。
+final class AISettingsBridge: ObservableObject {
+    @Published var tick = 0
+
+    init() {
+        let store = AIModelStore.shared
+        store.onStateChange = { [weak self] in
+            DispatchQueue.main.async { self?.tick += 1 }
+        }
+        store.onProgress = { [weak self] _, _ in
+            DispatchQueue.main.async { self?.tick += 1 }
+        }
+        store.onFinish = { [weak self] id, error in
+            DispatchQueue.main.async {
+                self?.tick += 1
+                if let error {
+                    let alert = NSAlert()
+                    alert.messageText = "下载失败"
+                    alert.informativeText = "\(id)：\(error)"
+                    alert.runModal()
+                }
+            }
+        }
+    }
+
+    var store: AIModelStore { AIModelStore.shared }
+}
+
 struct AIPage: View {
     @ObservedObject var model: SettingsModel
+    @StateObject private var ai = AISettingsBridge()
 
     var body: some View {
-        SettingsPage(section: .ai, subtitle: "没有云 API。可选的小模型只在你点击后下载，并做 sha256 校验。") {
+        let store = ai.store
+        let used = ByteCountFormatter.string(fromByteCount: store.diskUsage(), countStyle: .file)
+        return SettingsPage(section: .ai, subtitle: "没有云 API。可选的小模型只在你点击后下载，并做 sha256 校验。") {
             Section("内置") {
-                StatusRow(title: "统计语言模型", detail: "用户词 + 上下词预测，内存 < 1 MB，随输入自动学习",
+                StatusRow(title: "统计语言模型", detail: "用户词 + 上下词 + 自动短语，内存 < 1 MB，随输入学习",
                           ok: true, okText: "运行中", badText: "")
             }
-            Section("可选模型") {
-                LabeledContent("已安装") {
-                    Text("\(model.installedModels) / \(AIModelStore.shared.catalog.count)")
-                        .foregroundStyle(.secondary)
+            Section("本机") {
+                LabeledContent("内存") {
+                    Text(store.totalRamText).foregroundStyle(.secondary)
                 }
-                StatusRow(title: "llama.cpp 运行时", detail: model.translateRuntime ?? "brew install llama.cpp",
+                LabeledContent("已下载模型占用") {
+                    Text(used).foregroundStyle(.secondary)
+                }
+                StatusRow(title: "llama.cpp 运行时", detail: model.translateRuntime ?? "终端执行 brew install llama.cpp（不自动下载可执行文件）",
                           ok: model.translateRuntime != nil, okText: "已安装", badText: "未安装")
-                HStack {
-                    Text("同声传译、AI 增强提炼依赖这里的模型")
-                        .font(.system(size: 12))
+                if model.translateRuntime == nil {
+                    HStack {
+                        Spacer()
+                        Button("复制安装命令") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString("brew install llama.cpp", forType: .string)
+                            GlassToast.shared.show("已复制：brew install llama.cpp", symbol: "doc.on.doc.fill", duration: 3)
+                        }
+                        .lianaGlassButton()
+                    }
+                }
+            }
+            Section("可下载模型") {
+                ForEach(store.catalog) { item in
+                    AIModelRow(model: item, store: store)
+                }
+            }
+        }
+        .id(ai.tick)
+    }
+}
+
+struct AIModelRow: View {
+    let model: AIModelInfo
+    let store: AIModelStore
+
+    var body: some View {
+        let kind = model.kinds.first ?? "assist"
+        let level = store.recommendation.level(for: kind)
+        let enabled = AIModelStore.selectedModelId(for: kind) == model.id
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(model.name)  ·  \(model.quantText)")
+                    Text("\(model.sizeText) 磁盘 · 约 \(model.ramMb) MB 内存 · \(model.license)")
+                        .font(.system(size: 11))
                         .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("管理模型…") { AISettingsWindowController.shared.show() }
+                    Text(model.note)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(2)
+                }
+                Spacer()
+                Text(store.recommendation.levelLabel(for: kind))
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(levelColor(level))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(levelColor(level).opacity(0.14)))
+            }
+            HStack {
+                Text(model.kinds.map(kindLabel).joined(separator: " / "))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if store.isDownloading(model) {
+                    ProgressView(value: store.downloadProgress(for: model))
+                        .frame(width: 90)
+                    Button("取消") { store.cancel(model) }
+                        .lianaGlassButton()
+                } else if store.isInstalled(model) {
+                    Button(enabled ? "已启用" : "启用") {
+                        if enabled {
+                            AIModelStore.setSelectedModelId(nil, for: kind)
+                        } else {
+                            AIModelStore.setSelectedModelId(model.id, for: kind)
+                        }
+                        store.onStateChange?()
+                    }
+                    .lianaProminentButton()
+                    Button("删除", role: .destructive) {
+                        for itemKind in model.kinds where AIModelStore.selectedModelId(for: itemKind) == model.id {
+                            AIModelStore.setSelectedModelId(nil, for: itemKind)
+                        }
+                        store.delete(model)
+                    }
+                    .lianaGlassButton()
+                } else {
+                    Button("下载") { store.download(model) }
                         .lianaProminentButton()
                 }
             }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func kindLabel(_ id: String) -> String {
+        switch id {
+        case "assist": return "候选优化"
+        case "speech": return "语音输入"
+        case "translate": return "同声传译"
+        default: return id
+        }
+    }
+
+    private func levelColor(_ level: String) -> Color {
+        switch level {
+        case "suggested": return .green
+        case "moderate": return .orange
+        default: return .secondary
         }
     }
 }
@@ -924,7 +1068,7 @@ struct PrivacyPage: View {
                 }
             }
             Section("备份与恢复") {
-                Text("只含用户词与短语，不含剪切板。加密备份用你设定的密码（PBKDF2 + ChaCha20-Poly1305）。")
+                Text("只含用户词与短语，不含剪切板。加密备份用你设定的密码（PBKDF2 + ChaCha20-Poly1305）。换设备请走备份，不要拷 userdata.enc（密钥在本机钥匙串）。")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                 HStack {
@@ -936,6 +1080,17 @@ struct PrivacyPage: View {
                     Button("导出明文…") { LianaActions.exportPlainBackup() }
                         .buttonStyle(.link)
                 }
+            }
+            Section("钥匙串") {
+                StatusRow(
+                    title: "用户数据密钥",
+                    detail: EncryptedStore.shared.keyAvailable
+                        ? "密钥在系统钥匙串，用户词与剪切板加密落盘"
+                        : "钥匙串不可用，本次运行不落盘（仅内存）",
+                    ok: EncryptedStore.shared.keyAvailable,
+                    okText: "可用",
+                    badText: "不可用"
+                )
             }
         }
     }
